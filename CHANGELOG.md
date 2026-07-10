@@ -1,12 +1,27 @@
-All notable changes to Noat are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
+All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-07-11
+
+### Added
+
+- Optional bring-your-own-key AI features for Anthropic and OpenAI.
+- Selection actions for summarizing, improving, and extracting key points from highlighted note content.
+- Ask-note popup for questions about the current note.
+- Optional AI cleanup for live dictation.
+
+### Changed
+
+- Renamed the app from Noat to Noteato.
+- Builds now target Apple Silicon (arm64) only — Intel (x64) builds have been dropped.
+- Updated the macOS app icon from the Noteato app icon set.
 
 ## [0.3.0] - 2026-07-10
 
 ### Added
 
-- Window size and position now persist across restarts — Noat reopens at the size and place you left it, including maximized state.
+- Window size and position now persist across restarts — Noteato reopens at the size and place you left it, including maximized state.
 - Double-click anywhere on the empty header to maximize/restore the window.
 - Minimum window width lowered to 350px, so the window is resizable down to a much narrower layout.
 
@@ -48,7 +63,8 @@ All notable changes to Noat are documented here. This project follows [Keep a Ch
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noat/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noat/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/shashankbhat2/noat/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shashankbhat2/noat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shashankbhat2/noat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shashankbhat2/noat/releases/tag/v0.1.0

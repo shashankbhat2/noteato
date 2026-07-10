@@ -2,12 +2,13 @@ import { basename, join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } from 'electron'
-import type { SaveOptions } from '../shared/types'
+import type { AiCompleteRequest, SaveOptions } from '../shared/types'
 import { NoteStore } from './storage'
 import { createSettingsStore } from './settings'
 import { StickyManager } from './sticky'
 import { buildAppMenu } from './menu'
 import { createWindowStateStore, trackWindowState } from './windowState'
+import { completeAi } from './ai'
 
 const settingsStore = createSettingsStore()
 const noteStore = new NoteStore(settingsStore.read().notesDir ?? undefined)
@@ -110,6 +111,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle('sticky:update', (_e, id: string, patch) => stickyManager.update(id, patch))
   ipcMain.handle('sticky:close', (_e, id: string) => stickyManager.close(id))
 
+  ipcMain.handle('ai:complete', (_e, req: AiCompleteRequest) => completeAi(settingsStore.read(), req))
+
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.handle('app:toggleMaximize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -120,7 +123,7 @@ function registerIpcHandlers(): void {
 }
 
 app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.noat.app')
+  electronApp.setAppUserModelId('com.noteato.app')
   nativeTheme.themeSource = settingsStore.read().theme
 
   app.on('browser-window-created', (_, window) => {

@@ -6,9 +6,11 @@ import '@blocknote/mantine/style.css'
 import { FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
-import { getNoatTheme } from '../blocknoteTheme'
+import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import DictationPanel from './DictationPanel'
+import SelectionAiToolbar from './SelectionAiToolbar'
+import AskNotePanel from './AskNotePanel'
 
 interface Props {
   filename: string
@@ -18,12 +20,19 @@ interface Props {
 const SAVE_DEBOUNCE_MS = 600
 
 export default function NoteEditor({ filename, onSaved }: Props) {
-  const { theme, fontFamily } = useTheme()
+  const { theme, fontFamily, zenMode, aiSelectionActions, aiAskNote } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [title, setTitle] = useState('')
   const [fullWidth, setFullWidth] = useState(false)
   const [initialBlocks, setInitialBlocks] = useState<Block[] | 'loading'>('loading')
+  const [aiError, setAiError] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    if (!aiError) return
+    const timer = setTimeout(() => setAiError(null), 4500)
+    return () => clearTimeout(timer)
+  }, [aiError])
 
   useEffect(() => {
     let cancelled = false
@@ -103,6 +112,7 @@ export default function NoteEditor({ filename, onSaved }: Props) {
             }
           }}
         />
+        {aiAskNote && !zenMode && <AskNotePanel editor={editor} noteTitle={title} />}
         <button
           className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
           onClick={toggleFullWidth}
@@ -114,9 +124,13 @@ export default function NoteEditor({ filename, onSaved }: Props) {
       <BlockNoteView
         editor={editor}
         onChange={() => scheduleSave()}
-        theme={getNoatTheme(theme, FONT_STACKS[fontFamily])}
-      />
+        theme={getNoteatoTheme(theme, FONT_STACKS[fontFamily])}
+        formattingToolbar={!aiSelectionActions}
+      >
+        {aiSelectionActions && <SelectionAiToolbar editor={editor} onError={setAiError} />}
+      </BlockNoteView>
       <DictationPanel editor={editor} />
+      {aiError && <div className="ai-error-toast">{aiError}</div>}
     </div>
   )
 }

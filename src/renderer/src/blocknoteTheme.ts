@@ -36,6 +36,6 @@ function buildDarkTheme(fontFamily: string): Theme {
   }
 }
 
-export function getNoatTheme(mode: ThemeMode, fontFamily: string): Theme {
+export function getNoteatoTheme(mode: ThemeMode, fontFamily: string): Theme {
   return mode === 'dark' ? buildDarkTheme(fontFamily) : buildLightTheme(fontFamily)
 }

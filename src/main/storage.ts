@@ -28,7 +28,7 @@ export class NoteStore {
   private notesDir: string
 
   constructor(notesDir?: string) {
-    this.notesDir = notesDir ?? join(app.getPath('documents'), 'Noat')
+    this.notesDir = notesDir ?? join(app.getPath('documents'), 'Noteato')
     if (!existsSync(this.notesDir)) mkdirSync(this.notesDir, { recursive: true })
   }
 

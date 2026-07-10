@@ -28,6 +28,7 @@ export interface StickyNoteData {
 
 export type ThemeMode = 'light' | 'dark'
 export type FontChoice = 'system' | 'serif' | 'mono' | 'rounded'
+export type AiProvider = 'none' | 'anthropic' | 'openai'
 
 export interface Settings {
   deepgramApiKey: string
@@ -35,6 +36,13 @@ export interface Settings {
   theme: ThemeMode
   fontFamily: FontChoice
   zenMode: boolean
+  aiProvider: AiProvider
+  aiModel: string
+  anthropicApiKey: string
+  openaiApiKey: string
+  aiDictationPolish: boolean
+  aiSelectionActions: boolean
+  aiAskNote: boolean
 }
 
 export interface SaveOptions {
@@ -42,4 +50,10 @@ export interface SaveOptions {
   body: string
   tags?: string[]
   fullWidth?: boolean
+}
+
+export interface AiCompleteRequest {
+  system: string
+  prompt: string
+  maxTokens?: number
 }

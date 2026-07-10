@@ -1,7 +1,14 @@
 import type { ElectronAPI } from '@electron-toolkit/preload'
-import type { Note, NoteSummary, SaveOptions, Settings, StickyNoteData } from '../shared/types'
+import type {
+  AiCompleteRequest,
+  Note,
+  NoteSummary,
+  SaveOptions,
+  Settings,
+  StickyNoteData
+} from '../shared/types'
 
-interface NoatApi {
+interface NoteatoApi {
   notes: {
     list: () => Promise<NoteSummary[]>
     read: (filename: string) => Promise<Note>
@@ -22,6 +29,9 @@ interface NoatApi {
     update: (id: string, patch: Partial<StickyNoteData>) => Promise<void>
     close: (id: string) => Promise<void>
   }
+  ai: {
+    complete: (req: AiCompleteRequest) => Promise<string>
+  }
   app: {
     closeWindow: () => Promise<void>
     toggleMaximize: () => Promise<void>
@@ -34,6 +44,6 @@ interface NoatApi {
 declare global {
   interface Window {
     electron: ElectronAPI
-    api: NoatApi
+    api: NoteatoApi
   }
 }

@@ -1,5 +1,5 @@
-appId: com.noat.app
-productName: Noat
+appId: com.noteato.app
+productName: Noteato
 directories:
   buildResources: build
   output: dist
@@ -15,11 +15,12 @@ artifactName: '${productName}-${version}-${arch}.${ext}'
 mac:
   icon: build/icon.icns
   category: public.app-category.productivity
+  # Apple Silicon (arm64) only — no Intel builds.
   target:
     - target: dmg
-      arch: [arm64, x64]
+      arch: [arm64]
     - target: zip
-      arch: [arm64, x64]
+      arch: [arm64]
   # No Apple Developer account: the app is unsigned/not notarized.
   # electron-builder still ad-hoc signs automatically so it can launch on
   # Apple Silicon, but Gatekeeper will show an "unidentified developer"
@@ -27,7 +28,7 @@ mac:
   hardenedRuntime: false
   gatekeeperAssess: false
   extendInfo:
-    NSMicrophoneUsageDescription: Noat uses your microphone for dictation.
+    NSMicrophoneUsageDescription: Noteato uses your microphone for dictation.
 npmRebuild: false
 publish:
   provider: github

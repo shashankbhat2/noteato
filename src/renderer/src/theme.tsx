@@ -9,6 +9,12 @@ interface ThemeContextValue {
   setFontFamily: (font: FontChoice) => void
   zenMode: boolean
   setZenMode: (zen: boolean) => void
+  aiDictationPolish: boolean
+  setAiDictationPolish: (value: boolean) => void
+  aiSelectionActions: boolean
+  setAiSelectionActions: (value: boolean) => void
+  aiAskNote: boolean
+  setAiAskNote: (value: boolean) => void
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -17,19 +23,31 @@ const ThemeContext = createContext<ThemeContextValue>({
   fontFamily: 'system',
   setFontFamily: () => {},
   zenMode: false,
-  setZenMode: () => {}
+  setZenMode: () => {},
+  aiDictationPolish: true,
+  setAiDictationPolish: () => {},
+  aiSelectionActions: true,
+  setAiSelectionActions: () => {},
+  aiAskNote: true,
+  setAiAskNote: () => {}
 })
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>('light')
   const [fontFamily, setFontFamilyState] = useState<FontChoice>('system')
   const [zenMode, setZenModeState] = useState(false)
+  const [aiDictationPolish, setAiDictationPolishState] = useState(true)
+  const [aiSelectionActions, setAiSelectionActionsState] = useState(true)
+  const [aiAskNote, setAiAskNoteState] = useState(true)
 
   useEffect(() => {
     window.api.settings.get().then((settings) => {
       setThemeState(settings.theme)
       setFontFamilyState(settings.fontFamily)
       setZenModeState(settings.zenMode)
+      setAiDictationPolishState(settings.aiDictationPolish)
+      setAiSelectionActionsState(settings.aiSelectionActions)
+      setAiAskNoteState(settings.aiAskNote)
       document.documentElement.dataset.theme = settings.theme
       document.documentElement.style.setProperty('--font-family', FONT_STACKS[settings.fontFamily])
     })
@@ -52,9 +70,37 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     window.api.settings.set({ zenMode: next })
   }
 
+  const setAiDictationPolish = (next: boolean): void => {
+    setAiDictationPolishState(next)
+    window.api.settings.set({ aiDictationPolish: next })
+  }
+
+  const setAiSelectionActions = (next: boolean): void => {
+    setAiSelectionActionsState(next)
+    window.api.settings.set({ aiSelectionActions: next })
+  }
+
+  const setAiAskNote = (next: boolean): void => {
+    setAiAskNoteState(next)
+    window.api.settings.set({ aiAskNote: next })
+  }
+
   return (
     <ThemeContext.Provider
-      value={{ theme, setTheme, fontFamily, setFontFamily, zenMode, setZenMode }}
+      value={{
+        theme,
+        setTheme,
+        fontFamily,
+        setFontFamily,
+        zenMode,
+        setZenMode,
+        aiDictationPolish,
+        setAiDictationPolish,
+        aiSelectionActions,
+        setAiSelectionActions,
+        aiAskNote,
+        setAiAskNote
+      }}
     >
       {children}
     </ThemeContext.Provider>

@@ -1,6 +1,6 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Note, SaveOptions, Settings, StickyNoteData } from '../shared/types'
+import type { AiCompleteRequest, Note, SaveOptions, Settings, StickyNoteData } from '../shared/types'
 
 const api = {
   notes: {
@@ -24,6 +24,9 @@ const api = {
       ipcRenderer.invoke('sticky:update', id, patch),
     close: (id: string) => ipcRenderer.invoke('sticky:close', id)
   },
+  ai: {
+    complete: (req: AiCompleteRequest): Promise<string> => ipcRenderer.invoke('ai:complete', req)
+  },
   app: {
     closeWindow: () => ipcRenderer.invoke('app:closeWindow'),
     toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize')
@@ -40,4 +43,4 @@ const api = {
 contextBridge.exposeInMainWorld('electron', electronAPI)
 contextBridge.exposeInMainWorld('api', api)
 
-export type NoatApi = typeof api
+export type NoteatoApi = typeof api

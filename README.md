@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="build/icon.png" width="96" alt="Noat icon" />
+  <img src="build/icon.png" width="96" alt="Noteato icon" />
 </p>
 
-<h1 align="center">Noat</h1>
+<h1 align="center">Noteato</h1>
 
-<p align="center">A minimal, block-based note taking app for Mac. Markdown, dictation, sticky notes — nothing else.</p>
+<p align="center">A minimal, block-based note taking app for Apple Silicon Macs. Markdown, dictation, sticky notes — nothing else.</p>
 
 <p align="center">
   <a href="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml"><img src="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
@@ -14,13 +14,13 @@
 
 ## Why
 
-Notion is a great tool that happens to also be a browser tab pretending to be an app: a web renderer, a sync engine, a database, a workspace/permissions model, and a note editor, all bundled together, for people who just want to write something down. Noat is the opposite bet — it does one thing. Blocks and markdown for writing, dictation for when typing is slower than talking, sticky notes for the stuff that doesn't deserve a whole document. Everything lives on your disk as plain `.md` files, not behind an account.
+Notion is a great tool that happens to also be a browser tab pretending to be an app: a web renderer, a sync engine, a database, a workspace/permissions model, and a note editor, all bundled together, for people who just want to write something down. Noteato is the opposite bet — it does one thing. Blocks and markdown for writing, dictation for when typing is slower than talking, sticky notes for the stuff that doesn't deserve a whole document. Everything lives on your disk as plain `.md` files, not behind an account.
 
 ## Features
 
 - **Blocks, not a textarea** — slash menu, headings, to-dos, nesting, etc. ([BlockNote](https://www.blocknotejs.org/))
 - **Markdown on disk** — every note is a plain `.md` file with a small frontmatter header. No database, no export step, no lock-in. Sync it with iCloud/Dropbox/git if you want.
-- **Dictation** — press the mic button and talk; streamed live to text via [Deepgram Nova-3](https://deepgram.com/). Bring your own API key — no Noat backend sits in between.
+- **Dictation** — press the mic button and talk; streamed live to text via [Deepgram Nova-3](https://deepgram.com/). Bring your own API key — no Noteato backend sits in between.
 - **Sticky notes** — always-on-top, borderless, one click away, visible across every Space.
 - **Chrome-style tabs** with a real native titlebar (traffic lights included) instead of a fake toolbar.
 - **Light/dark mode**, matched to the actual window chrome, not just the page background.
@@ -30,17 +30,17 @@ No telemetry, no accounts, no auto-updater phoning home. It's an Electron app, s
 
 ## Install
 
-Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noat/releases/latest), open it, and drag **Noat.app** into **Applications**.
+Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noat/releases/latest), open it, and drag **Noteato.app** into **Applications**. Apple Silicon (M-series) only — there is no Intel build.
 
 ### About the Gatekeeper warning
 
 This app isn't signed with an Apple Developer ID (that costs $99/year, and this is a free side project) or notarized by Apple. On first launch, macOS Gatekeeper will block it — and depending on your macOS version you'll see one of two dialogs:
 
-- **"Noat can't be opened because it is from an unidentified developer."** — right-click (Control-click) **Noat.app** in Applications, choose **Open**, then click **Open** again in the dialog. macOS remembers this choice from then on.
-- **"Noat is damaged and should be moved to the Trash."** — this is Gatekeeper being stricter (common on Apple Silicon), and it does **not** offer an "Open anyway" option, so right-click → Open won't help here. Instead, strip the quarantine flag it added on download:
+- **"Noteato can't be opened because it is from an unidentified developer."** — right-click (Control-click) **Noteato.app** in Applications, choose **Open**, then click **Open** again in the dialog. macOS remembers this choice from then on.
+- **"Noteato is damaged and should be moved to the Trash."** — this is Gatekeeper being stricter (common on Apple Silicon), and it does **not** offer an "Open anyway" option, so right-click → Open won't help here. Instead, strip the quarantine flag it added on download:
 
   ```bash
-  xattr -cr /Applications/Noat.app
+  xattr -cr /Applications/Noteato.app
   ```
 
   The app isn't actually damaged — this message is just what unsigned + quarantined apps get on newer macOS. Run the command above, then open it normally.
@@ -49,7 +49,7 @@ This is the standard tradeoff for unsigned open-source Mac apps — you're trust
 
 ### Dictation setup
 
-Dictation needs a [Deepgram](https://deepgram.com/) API key (their free tier covers casual use; Nova-3 streaming is about $0.0056/min beyond that). Open **Settings** (`⌘,`) inside Noat and paste your key in — it's stored locally in the app's settings file, never sent anywhere but Deepgram.
+Dictation needs a [Deepgram](https://deepgram.com/) API key (their free tier covers casual use; Nova-3 streaming is about $0.0056/min beyond that). Open **Settings** (`⌘,`) inside Noteato and paste your key in — it's stored locally in the app's settings file, never sent anywhere but Deepgram.
 
 ## Build from source
 

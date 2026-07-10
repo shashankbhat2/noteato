@@ -9,6 +9,13 @@ export function createSettingsStore(): JsonStore<Settings> {
     notesDir: null,
     theme: 'light',
     fontFamily: 'system',
-    zenMode: false
+    zenMode: false,
+    aiProvider: 'none',
+    aiModel: '',
+    anthropicApiKey: '',
+    openaiApiKey: '',
+    aiDictationPolish: true,
+    aiSelectionActions: true,
+    aiAskNote: true
   })
 }

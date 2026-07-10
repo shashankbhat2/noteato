@@ -9,7 +9,7 @@ import NoteEditor from './NoteEditor'
 import SettingsModal from './SettingsModal'
 import ShortcutsHelp from './ShortcutsHelp'
 
-const SIDEBAR_COLLAPSED_KEY = 'noat:sidebarCollapsed'
+const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
 
 export default function MainLayout() {
   const { zenMode, setZenMode } = useTheme()

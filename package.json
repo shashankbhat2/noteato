@@ -1,7 +1,7 @@
 {
-  "name": "noat",
-  "version": "0.3.0",
-  "description": "A minimal, bloat-free, block-based note taking app for Mac — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
+  "name": "noteato",
+  "version": "0.4.0",
+  "description": "A minimal, bloat-free, block-based note taking app for Mac (Apple Silicon) — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",
   "license": "MIT",
@@ -15,18 +15,21 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "release": "electron-vite build && electron-builder --mac --publish always",
+    "clean": "rm -rf dist out",
+    "build:mac": "npm run clean && electron-vite build && electron-builder --mac",
+    "release": "npm run clean && electron-vite build && electron-builder --mac --publish always",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@blocknote/core": "^0.51.4",
     "@blocknote/mantine": "^0.51.4",
     "@blocknote/react": "^0.51.4",
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
     "lucide-react": "^1.24.0",
+    "openai": "^6.46.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
