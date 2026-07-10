@@ -2,17 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import type { Note, NoteSummary } from '../../../shared/types'
 import type { Tab } from '../tabs'
+import { useTheme } from '../theme'
 import Sidebar from './Sidebar'
 import TabBar from './TabBar'
 import NoteEditor from './NoteEditor'
-import SettingsTab from './SettingsTab'
+import SettingsModal from './SettingsModal'
+import ShortcutsHelp from './ShortcutsHelp'
 
 const SIDEBAR_COLLAPSED_KEY = 'noat:sidebarCollapsed'
 
 export default function MainLayout() {
+  const { zenMode, setZenMode } = useTheme()
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
   )
@@ -25,28 +29,32 @@ export default function MainLayout() {
     })
   }
 
+  useEffect(() => {
+    const hidden = zenMode || sidebarCollapsed
+    document.documentElement.style.setProperty('--sidebar-w', hidden ? '0px' : '240px')
+  }, [zenMode, sidebarCollapsed])
+
   const refreshNotes = async (): Promise<void> => {
     const list = await window.api.notes.list()
     setNotes(list)
   }
 
   useEffect(() => {
-    refreshNotes()
+    window.api.notes.list().then((list) => {
+      setNotes(list)
+      // Most recently updated note first (see NoteStore.list) — open it
+      // instead of landing on the empty "New note" state when notes exist.
+      if (list.length > 0) openNoteTab(list[0])
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const openNoteTab = (note: NoteSummary): void => {
     setTabs((prev) => {
       if (prev.some((t) => t.id === note.id)) return prev
-      return [...prev, { kind: 'note', id: note.id, filename: note.filename, title: note.title }]
+      return [...prev, { id: note.id, filename: note.filename, title: note.title }]
     })
     setActiveTabId(note.id)
-  }
-
-  const openSettingsTab = (): void => {
-    setTabs((prev) =>
-      prev.some((t) => t.id === 'settings') ? prev : [...prev, { kind: 'settings', id: 'settings' }]
-    )
-    setActiveTabId('settings')
   }
 
   const closeTab = (id: string): void => {
@@ -103,27 +111,29 @@ export default function MainLayout() {
     // only uses it once to load initial content, and tracks the current (possibly
     // renamed) filename itself. Updating it here would re-trigger that load effect
     // mid-edit and reset the editor.
-    setTabs((prev) =>
-      prev.map((t) => (t.kind === 'note' && t.id === saved.id ? { ...t, title: saved.title } : t))
-    )
+    setTabs((prev) => prev.map((t) => (t.id === saved.id ? { ...t, title: saved.title } : t)))
   }
 
   const latest = useRef({
     handleCreate,
     handleCreateSticky,
     handleImport,
-    openSettingsTab,
     closeTab,
     toggleSidebar,
+    setSettingsOpen,
+    zenMode,
+    setZenMode,
     activeTabId
   })
   latest.current = {
     handleCreate,
     handleCreateSticky,
     handleImport,
-    openSettingsTab,
     closeTab,
     toggleSidebar,
+    setSettingsOpen,
+    zenMode,
+    setZenMode,
     activeTabId
   }
 
@@ -141,10 +151,13 @@ export default function MainLayout() {
           h.handleImport()
           break
         case 'open-settings':
-          h.openSettingsTab()
+          h.setSettingsOpen(true)
           break
         case 'toggle-sidebar':
           h.toggleSidebar()
+          break
+        case 'toggle-zen':
+          h.setZenMode(!h.zenMode)
           break
         case 'close-tab':
           if (h.activeTabId) h.closeTab(h.activeTabId)
@@ -157,30 +170,34 @@ export default function MainLayout() {
 
   return (
     <div className="app-shell">
-      <TabBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebar={toggleSidebar}
-        onSelect={setActiveTabId}
-        onClose={closeTab}
-        onNewNote={handleCreate}
-        onOpenSettings={openSettingsTab}
-      />
-      <div className="app-body">
-        <Sidebar
-          notes={notes}
-          activeNoteId={tabs.find((t) => t.id === activeTabId && t.kind === 'note')?.id ?? null}
-          collapsed={sidebarCollapsed}
-          onSelect={(filename) => {
-            const note = notes.find((n) => n.filename === filename)
-            if (note) openNoteTab(note)
-          }}
-          onCreate={handleCreate}
-          onDelete={handleDelete}
-          onCreateSticky={handleCreateSticky}
-          onImport={handleImport}
+      {!zenMode && (
+        <TabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={toggleSidebar}
+          onSelect={setActiveTabId}
+          onClose={closeTab}
+          onNewNote={handleCreate}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
+      )}
+      <div className="app-body">
+        {!zenMode && (
+          <Sidebar
+            notes={notes}
+            activeNoteId={tabs.find((t) => t.id === activeTabId)?.id ?? null}
+            collapsed={sidebarCollapsed}
+            onSelect={(filename) => {
+              const note = notes.find((n) => n.filename === filename)
+              if (note) openNoteTab(note)
+            }}
+            onCreate={handleCreate}
+            onDelete={handleDelete}
+            onCreateSticky={handleCreateSticky}
+            onImport={handleImport}
+          />
+        )}
         <main className="editor-pane">
           {tabs.length === 0 && (
             <div className="empty-state">
@@ -196,15 +213,15 @@ export default function MainLayout() {
               key={tab.id}
               style={{ display: tab.id === activeTabId ? 'block' : 'none', height: '100%' }}
             >
-              {tab.kind === 'settings' ? (
-                <SettingsTab onNotesDirChanged={refreshNotes} />
-              ) : (
-                <NoteEditor filename={tab.filename} onSaved={handleNoteSaved} />
-              )}
+              <NoteEditor filename={tab.filename} onSaved={handleNoteSaved} />
             </div>
           ))}
         </main>
       </div>
+      {settingsOpen && (
+        <SettingsModal onClose={() => setSettingsOpen(false)} onNotesDirChanged={refreshNotes} />
+      )}
+      <ShortcutsHelp />
     </div>
   )
 }

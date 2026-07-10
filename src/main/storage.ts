@@ -114,7 +114,14 @@ export class NoteStore {
       counter += 1
     }
 
-    const meta: NoteMeta = { id, title, createdAt: now, updatedAt: now, tags: [], fullWidth: false }
+    const meta: NoteMeta = {
+      id,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      tags: [],
+      fullWidth: false
+    }
     writeFileSync(this.pathFor(filename), serializeNoteFile(meta, ''), 'utf-8')
 
     return { ...meta, filename, excerpt: '', body: '' }

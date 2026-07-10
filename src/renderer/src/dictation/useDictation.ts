@@ -11,6 +11,7 @@ interface DeepgramMessage {
 export function useDictation(editor: BlockNoteEditor): {
   isRecording: boolean
   error: string | null
+  analyser: AnalyserNode | null
   toggle: () => void
 } {
   const [isRecording, setIsRecording] = useState(false)
@@ -18,6 +19,8 @@ export function useDictation(editor: BlockNoteEditor): {
   const wsRef = useRef<WebSocket | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
 
   const stop = (): void => {
     recorderRef.current?.stop()
@@ -26,6 +29,9 @@ export function useDictation(editor: BlockNoteEditor): {
     streamRef.current = null
     wsRef.current?.close()
     wsRef.current = null
+    audioCtxRef.current?.close()
+    audioCtxRef.current = null
+    analyserRef.current = null
     setIsRecording(false)
   }
 
@@ -45,6 +51,15 @@ export function useDictation(editor: BlockNoteEditor): {
       return
     }
     streamRef.current = stream
+
+    const audioCtx = new AudioContext()
+    const source = audioCtx.createMediaStreamSource(stream)
+    const analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 128
+    analyser.smoothingTimeConstant = 0.75
+    source.connect(analyser)
+    audioCtxRef.current = audioCtx
+    analyserRef.current = analyser
 
     const params = new URLSearchParams({
       model: 'nova-3',
@@ -90,5 +105,5 @@ export function useDictation(editor: BlockNoteEditor): {
     else start()
   }
 
-  return { isRecording, error, toggle }
+  return { isRecording, error, analyser: analyserRef.current, toggle }
 }

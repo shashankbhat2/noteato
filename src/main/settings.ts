@@ -8,6 +8,7 @@ export function createSettingsStore(): JsonStore<Settings> {
     deepgramApiKey: '',
     notesDir: null,
     theme: 'light',
-    fontFamily: 'system'
+    fontFamily: 'system',
+    zenMode: false
   })
 }

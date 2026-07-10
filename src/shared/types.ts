@@ -34,6 +34,7 @@ export interface Settings {
   notesDir: string | null
   theme: ThemeMode
   fontFamily: FontChoice
+  zenMode: boolean
 }
 
 export interface SaveOptions {

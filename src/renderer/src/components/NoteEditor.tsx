@@ -3,12 +3,12 @@ import { BlockNoteEditor, type Block } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
-import { StretchHorizontal } from 'lucide-react'
+import { FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoatTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
-import DictationButton from './DictationButton'
+import DictationPanel from './DictationPanel'
 
 interface Props {
   filename: string
@@ -34,6 +34,7 @@ export default function NoteEditor({ filename, onSaved }: Props) {
       setNote(loaded)
       setTitle(loaded.title)
       setFullWidth(loaded.fullWidth)
+
       const scratch = BlockNoteEditor.create()
       const blocks = loaded.body.trim()
         ? await scratch.tryParseMarkdownToBlocks(loaded.body)
@@ -95,21 +96,27 @@ export default function NoteEditor({ filename, onSaved }: Props) {
             setTitle(e.target.value)
             scheduleSave(e.target.value)
           }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              editor.focus()
+            }
+          }}
         />
         <button
           className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
           onClick={toggleFullWidth}
           title={fullWidth ? 'Use narrow width' : 'Use full width'}
         >
-          <StretchHorizontal size={15} />
+          {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
         </button>
-        <DictationButton editor={editor} />
       </div>
       <BlockNoteView
         editor={editor}
         onChange={() => scheduleSave()}
         theme={getNoatTheme(theme, FONT_STACKS[fontFamily])}
       />
+      <DictationPanel editor={editor} />
     </div>
   )
 }

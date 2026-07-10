@@ -80,6 +80,11 @@ export function buildAppMenu(): Menu {
           accelerator: 'CmdOrCtrl+\\',
           click: () => sendShortcut('toggle-sidebar')
         },
+        {
+          label: 'Toggle Zen Mode',
+          accelerator: 'CmdOrCtrl+.',
+          click: () => sendShortcut('toggle-zen')
+        },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },

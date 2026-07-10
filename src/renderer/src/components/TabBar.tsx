@@ -40,9 +40,7 @@ export default function TabBar({
             className={tab.id === activeTabId ? 'tab active' : 'tab'}
             onClick={() => onSelect(tab.id)}
           >
-            <span className="tab-title">
-              {tab.kind === 'settings' ? 'Settings' : tab.title || 'Untitled'}
-            </span>
+            <span className="tab-title">{tab.title || 'Untitled'}</span>
             <button
               className="tab-close"
               onClick={(e) => {

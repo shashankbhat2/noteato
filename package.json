@@ -1,6 +1,6 @@
 {
   "name": "noat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A minimal, bloat-free, block-based note taking app for Mac — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",

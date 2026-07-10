@@ -7,23 +7,29 @@ interface ThemeContextValue {
   setTheme: (theme: ThemeMode) => void
   fontFamily: FontChoice
   setFontFamily: (font: FontChoice) => void
+  zenMode: boolean
+  setZenMode: (zen: boolean) => void
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: 'light',
   setTheme: () => {},
   fontFamily: 'system',
-  setFontFamily: () => {}
+  setFontFamily: () => {},
+  zenMode: false,
+  setZenMode: () => {}
 })
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>('light')
   const [fontFamily, setFontFamilyState] = useState<FontChoice>('system')
+  const [zenMode, setZenModeState] = useState(false)
 
   useEffect(() => {
     window.api.settings.get().then((settings) => {
       setThemeState(settings.theme)
       setFontFamilyState(settings.fontFamily)
+      setZenModeState(settings.zenMode)
       document.documentElement.dataset.theme = settings.theme
       document.documentElement.style.setProperty('--font-family', FONT_STACKS[settings.fontFamily])
     })
@@ -41,8 +47,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     window.api.settings.set({ fontFamily: next })
   }
 
+  const setZenMode = (next: boolean): void => {
+    setZenModeState(next)
+    window.api.settings.set({ zenMode: next })
+  }
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, fontFamily, setFontFamily }}>
+    <ThemeContext.Provider
+      value={{ theme, setTheme, fontFamily, setFontFamily, zenMode, setZenMode }}
+    >
       {children}
     </ThemeContext.Provider>
   )
