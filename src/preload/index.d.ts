@@ -24,6 +24,7 @@ interface NoatApi {
   }
   app: {
     closeWindow: () => Promise<void>
+    toggleMaximize: () => Promise<void>
   }
   shortcuts: {
     subscribe: (callback: (action: string) => void) => () => void

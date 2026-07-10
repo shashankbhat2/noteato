@@ -108,7 +108,9 @@ button {
   flex: 1;
   overflow-x: auto;
   height: 100%;
-  -webkit-app-region: no-drag;
+  /* Left as a drag region (inherited from .tab-bar) so the empty space
+     after the last tab is still draggable/double-click-to-maximize —
+     only the tabs and the "+" button below opt back out of it. */
 }
 
 .tab {
@@ -126,6 +128,7 @@ button {
     color 0.12s ease,
     border-bottom-color 0.15s ease;
   animation: fade-in-up 0.15s ease;
+  -webkit-app-region: no-drag;
 }
 
 .tab:hover {
@@ -177,6 +180,7 @@ button {
   cursor: pointer;
   color: var(--text-muted);
   flex-shrink: 0;
+  -webkit-app-region: no-drag;
 }
 
 .tab-new:hover {
@@ -187,7 +191,6 @@ button {
   display: flex;
   align-items: center;
   padding: 0 14px;
-  -webkit-app-region: no-drag;
 }
 
 .tab-bar-icon-btn {
@@ -200,6 +203,7 @@ button {
   justify-content: center;
   cursor: pointer;
   color: var(--text-muted);
+  -webkit-app-region: no-drag;
 }
 
 .tab-bar-icon-btn:hover {

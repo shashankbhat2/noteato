@@ -25,7 +25,8 @@ const api = {
     close: (id: string) => ipcRenderer.invoke('sticky:close', id)
   },
   app: {
-    closeWindow: () => ipcRenderer.invoke('app:closeWindow')
+    closeWindow: () => ipcRenderer.invoke('app:closeWindow'),
+    toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize')
   },
   shortcuts: {
     subscribe: (callback: (action: string) => void) => {

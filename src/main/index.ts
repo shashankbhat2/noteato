@@ -7,21 +7,28 @@ import { NoteStore } from './storage'
 import { createSettingsStore } from './settings'
 import { StickyManager } from './sticky'
 import { buildAppMenu } from './menu'
+import { createWindowStateStore, trackWindowState } from './windowState'
 
 const settingsStore = createSettingsStore()
 const noteStore = new NoteStore(settingsStore.read().notesDir ?? undefined)
 const stickyManager = new StickyManager()
+const windowStateStore = createWindowStateStore()
 
 const DARK_BG = '#171614'
 const LIGHT_BG = '#faf8f5'
+const MIN_WIDTH = 350
+const MIN_HEIGHT = 250
 
 function createMainWindow(): void {
   const isDark = settingsStore.read().theme === 'dark'
+  const state = windowStateStore.read()
   const win = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    minWidth: 640,
-    minHeight: 480,
+    width: Math.max(state.width, MIN_WIDTH),
+    height: Math.max(state.height, MIN_HEIGHT),
+    x: state.x,
+    y: state.y,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     show: false,
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 13, y: 13 },
@@ -32,7 +39,12 @@ function createMainWindow(): void {
     }
   })
 
-  win.on('ready-to-show', () => win.show())
+  trackWindowState(win, windowStateStore)
+
+  win.on('ready-to-show', () => {
+    if (state.isMaximized) win.maximize()
+    win.show()
+  })
   win.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -99,6 +111,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle('sticky:close', (_e, id: string) => stickyManager.close(id))
 
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  ipcMain.handle('app:toggleMaximize', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+  })
 }
 
 app.whenReady().then(() => {

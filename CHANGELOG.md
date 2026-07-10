@@ -2,6 +2,14 @@ All notable changes to Noat are documented here. This project follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-10
+
+### Added
+
+- Window size and position now persist across restarts — Noat reopens at the size and place you left it, including maximized state.
+- Double-click anywhere on the empty header to maximize/restore the window.
+- Minimum window width lowered to 350px, so the window is resizable down to a much narrower layout.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added
@@ -40,6 +48,7 @@ All notable changes to Noat are documented here. This project follows [Keep a Ch
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noat/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/shashankbhat2/noat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/shashankbhat2/noat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shashankbhat2/noat/releases/tag/v0.1.0
