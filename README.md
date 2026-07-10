@@ -32,18 +32,18 @@ No telemetry, no accounts, no auto-updater phoning home. It's an Electron app, s
 
 Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noat/releases/latest), open it, and drag **Noat.app** into **Applications**.
 
-### About the "unidentified developer" warning
+### About the Gatekeeper warning
 
-This app isn't signed with an Apple Developer ID (that costs $99/year, and this is a free side project) or notarized by Apple. That means on first launch, macOS Gatekeeper will refuse to open it with something like *"Noat can't be opened because it is from an unidentified developer."* This is expected — here's how to get past it, once:
+This app isn't signed with an Apple Developer ID (that costs $99/year, and this is a free side project) or notarized by Apple. On first launch, macOS Gatekeeper will block it — and depending on your macOS version you'll see one of two dialogs:
 
-1. In **Applications**, right-click (or Control-click) **Noat.app** and choose **Open**.
-2. In the dialog that appears, click **Open** again. macOS remembers this choice and won't ask again for future launches.
+- **"Noat can't be opened because it is from an unidentified developer."** — right-click (Control-click) **Noat.app** in Applications, choose **Open**, then click **Open** again in the dialog. macOS remembers this choice from then on.
+- **"Noat is damaged and should be moved to the Trash."** — this is Gatekeeper being stricter (common on Apple Silicon), and it does **not** offer an "Open anyway" option, so right-click → Open won't help here. Instead, strip the quarantine flag it added on download:
 
-If that still doesn't work, strip the quarantine flag manually in Terminal:
+  ```bash
+  xattr -cr /Applications/Noat.app
+  ```
 
-```bash
-xattr -cr /Applications/Noat.app
-```
+  The app isn't actually damaged — this message is just what unsigned + quarantined apps get on newer macOS. Run the command above, then open it normally.
 
 This is the standard tradeoff for unsigned open-source Mac apps — you're trusting the build, not Apple's notarization service. Check the [Releases](https://github.com/shashankbhat2/noat/releases) page for the commit each build was made from if you want to verify it yourself, or build from source below.
 
