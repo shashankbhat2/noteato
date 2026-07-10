@@ -1,0 +1,64 @@
+name: Release
+
+# Cutting a release:
+#   1. Bump "version" in package.json to X.Y.Z
+#   2. Move the CHANGELOG.md [Unreleased] entries under a new [X.Y.Z] - YYYY-MM-DD heading
+#   3. Commit, then: git tag vX.Y.Z && git push origin vX.Y.Z
+# This workflow builds the unsigned macOS DMG/ZIP and attaches them to a
+# GitHub Release named after the tag, with notes pulled from CHANGELOG.md.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Extract changelog section for this tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            BEGIN { found = 0 }
+            /^## \[/ {
+              if (found) exit
+              if ($0 ~ "\\[" ver "\\]") { found = 1; next }
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release_notes.md
+          echo "--- release notes ---"
+          cat release_notes.md
+
+      - name: Build and publish DMG/ZIP
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Apple Developer account in CI: skip the signing-identity
+          # search entirely. electron-builder still ad-hoc signs the app
+          # so it can launch on Apple Silicon.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Attach changelog to release notes
+        run: gh release edit "${{ github.ref_name }}" --notes-file release_notes.md --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

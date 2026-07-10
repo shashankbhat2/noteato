@@ -1,0 +1,33 @@
+appId: com.noat.app
+productName: Noat
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/*.md'
+  - '!**/test/**'
+  - '!**/*.d.ts'
+asar: true
+artifactName: '${productName}-${version}-${arch}.${ext}'
+mac:
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # No Apple Developer account: the app is unsigned/not notarized.
+  # electron-builder still ad-hoc signs automatically so it can launch on
+  # Apple Silicon, but Gatekeeper will show an "unidentified developer"
+  # warning on first open (see README for the one-time bypass).
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    NSMicrophoneUsageDescription: Noat uses your microphone for dictation.
+npmRebuild: false
+publish:
+  provider: github

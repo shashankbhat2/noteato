@@ -1,0 +1,43 @@
+{
+  "name": "noat",
+  "version": "0.1.0",
+  "description": "A minimal, bloat-free, block-based note taking app for Mac — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
+  "main": "./out/main/index.js",
+  "author": "Shashank Bhat",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shashankbhat2/noat.git"
+  },
+  "homepage": "https://github.com/shashankbhat2/noat",
+  "bugs": "https://github.com/shashankbhat2/noat/issues",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "release": "electron-vite build && electron-builder --mac --publish always",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "dependencies": {
+    "@blocknote/core": "^0.51.4",
+    "@blocknote/mantine": "^0.51.4",
+    "@blocknote/react": "^0.51.4",
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "lucide-react": "^1.24.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}
