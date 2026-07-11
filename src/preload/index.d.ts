@@ -30,6 +30,8 @@ interface NoteatoApi {
     moveFolder: (path: string, targetParent: string) => Promise<void>
     deleteFolder: (path: string) => Promise<DeletedEntry>
     search: (query: string) => Promise<SearchResult[]>
+    takeExternalOpens: () => Promise<Note[]>
+    subscribeExternalOpen: (callback: (note: Note) => void) => () => void
     getDir: () => Promise<string>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
@@ -46,7 +48,11 @@ interface NoteatoApi {
   }
   ai: {
     complete: (req: AiCompleteRequest) => Promise<string>
-    stream: (req: AiCompleteRequest, onDelta: (delta: string) => void) => Promise<string>
+    stream: (
+      req: AiCompleteRequest,
+      onDelta: (delta: string) => void,
+      registerCancel?: (cancel: () => void) => void
+    ) => Promise<string>
   }
   app: {
     closeWindow: () => Promise<void>

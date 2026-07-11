@@ -2,7 +2,7 @@ import { basename, join } from 'path'
 import { readFileSync } from 'fs'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } from 'electron'
-import type { AiCompleteRequest, SaveOptions } from '../shared/types'
+import type { AiCompleteRequest, Note, SaveOptions } from '../shared/types'
 import { NoteStore } from './storage'
 import { createSettingsStore } from './settings'
 import { StickyManager } from './sticky'
@@ -19,6 +19,42 @@ const DARK_BG = '#171614'
 const LIGHT_BG = '#faf8f5'
 const MIN_WIDTH = 350
 const MIN_HEIGHT = 250
+
+let mainWindow: BrowserWindow | null = null
+
+// --- Markdown files opened via the OS (Finder "Open With", double-click) ----
+// macOS delivers these through 'open-file' (possibly before the app is ready);
+// Windows/Linux pass them on argv. Each file is imported as a note, then
+// handed to the renderer — queued until it announces readiness.
+const pendingExternalNotes: Note[] = []
+let rendererReady = false
+
+function openExternalMarkdown(filePath: string): void {
+  if (!/\.(md|markdown)$/i.test(filePath)) return
+  let note: Note
+  try {
+    note = noteStore.importMarkdown(basename(filePath), readFileSync(filePath, 'utf-8'))
+  } catch {
+    return
+  }
+  if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('notes:external-open', note)
+    mainWindow.show()
+  } else {
+    pendingExternalNotes.push(note)
+  }
+}
+
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  if (app.isReady()) {
+    if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+    openExternalMarkdown(filePath)
+  } else {
+    // Imported once the store is safe to use, right after ready.
+    app.whenReady().then(() => openExternalMarkdown(filePath))
+  }
+})
 
 function createMainWindow(): void {
   // themeSource is set to the saved mode (incl. 'system') at startup, so
@@ -39,6 +75,14 @@ function createMainWindow(): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
+    }
+  })
+
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null
+      rendererReady = false
     }
   })
 
@@ -121,6 +165,11 @@ function registerIpcHandlers(): void {
     })
   })
 
+  ipcMain.handle('notes:takeExternalOpens', () => {
+    rendererReady = true
+    return pendingExternalNotes.splice(0)
+  })
+
   ipcMain.handle('settings:get', () => settingsStore.read())
   ipcMain.handle('settings:set', (_e, patch) => {
     const next = { ...settingsStore.read(), ...patch }
@@ -135,11 +184,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle('sticky:close', (_e, id: string) => stickyManager.close(id))
 
   ipcMain.handle('ai:complete', (_e, req: AiCompleteRequest) => completeAi(settingsStore.read(), req))
-  ipcMain.handle('ai:stream', (e, requestId: number, req: AiCompleteRequest) =>
-    streamAi(settingsStore.read(), req, (delta) => {
-      if (!e.sender.isDestroyed()) e.sender.send(`ai:stream:${requestId}`, delta)
-    })
-  )
+  const aiStreamAborts = new Map<number, AbortController>()
+  ipcMain.handle('ai:stream', (e, requestId: number, req: AiCompleteRequest) => {
+    const controller = new AbortController()
+    aiStreamAborts.set(requestId, controller)
+    return streamAi(
+      settingsStore.read(),
+      req,
+      (delta) => {
+        if (!e.sender.isDestroyed()) e.sender.send(`ai:stream:${requestId}`, delta)
+      },
+      controller.signal
+    ).finally(() => aiStreamAborts.delete(requestId))
+  })
+  ipcMain.handle('ai:stream:abort', (_e, requestId: number) => {
+    aiStreamAborts.get(requestId)?.abort()
+  })
 
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.handle('app:toggleMaximize', (e) => {
@@ -162,6 +222,9 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   createMainWindow()
   stickyManager.openAll()
+
+  // Windows/Linux deliver OS-opened files as launch arguments.
+  for (const arg of process.argv.slice(1)) openExternalMarkdown(arg)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()

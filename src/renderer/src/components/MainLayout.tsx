@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
-import type { BlockNoteEditor } from '@blocknote/core'
 import type { DeletedEntry, Note, NoteSummary } from '../../../shared/types'
 import type { Tab } from '../tabs'
 import { useTheme } from '../theme'
 import { linkifyBlocks } from '../linkify'
+import { OPEN_NOTE_LINK_EVENT, type NoteatoEditor } from '../noteLink'
 import Sidebar from './Sidebar'
 import TabBar from './TabBar'
 import AgentPanel from './AgentPanel'
@@ -52,9 +52,9 @@ export default function MainLayout() {
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Active BlockNote editors keyed by tab id, so menu Undo/Redo can reach the
   // focused note's own history.
-  const editorsRef = useRef(new Map<string, BlockNoteEditor>())
+  const editorsRef = useRef(new Map<string, NoteatoEditor>())
 
-  const registerEditor = (id: string, editor: BlockNoteEditor | null): void => {
+  const registerEditor = (id: string, editor: NoteatoEditor | null): void => {
     if (editor) editorsRef.current.set(id, editor)
     else editorsRef.current.delete(id)
   }
@@ -145,6 +145,55 @@ export default function MainLayout() {
     if (selectedFolder && !folders.includes(selectedFolder)) setSelectedFolder(null)
   }, [folders, selectedFolder])
 
+  // Resolve a note mention clicked inside the editor. Refresh once if the id
+  // isn't in the current list (the target may be new or just moved).
+  const handleOpenNoteLink = async (noteId: string): Promise<void> => {
+    const found =
+      notes.find((n) => n.id === noteId) ?? (await refresh()).find((n) => n.id === noteId)
+    if (found) openNoteTab(found)
+  }
+
+  useEffect(() => {
+    const onOpenLink = (event: Event): void => {
+      void handleOpenNoteLink((event as CustomEvent<string>).detail)
+    }
+    window.addEventListener(OPEN_NOTE_LINK_EVENT, onOpenLink)
+    return () => window.removeEventListener(OPEN_NOTE_LINK_EVENT, onOpenLink)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notes])
+
+  // Markdown files opened via the OS ("Open With" / double-click) are imported
+  // by the main process; collect any queued before this window was ready, then
+  // listen for opens while running.
+  useEffect(() => {
+    window.api.notes.takeExternalOpens().then(async (opened) => {
+      if (opened.length === 0) return
+      await refresh()
+      opened.forEach(openNoteTab)
+    })
+    return window.api.notes.subscribeExternalOpen(async (note) => {
+      await refresh()
+      openNoteTab(note)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Create a note at an agent-chosen relative path ("Folder/Title.md"). The
+  // filename becomes the title; missing folders are created by NoteStore.
+  const handleAgentCreateNote = async (relPath: string, markdown: string): Promise<Note | null> => {
+    const segments = relPath
+      .replace(/\\/g, '/')
+      .split('/')
+      .map((s) => s.trim())
+      .filter(Boolean)
+    if (segments.length === 0 || segments.some((s) => s === '..' || s === '.')) return null
+    const title = segments.pop()!.replace(/\.md$/i, '').trim() || 'Untitled'
+    const created = await window.api.notes.create(title, segments.join('/'))
+    const saved = await window.api.notes.save(created.path, { title, body: markdown })
+    await refresh()
+    return saved
+  }
+
   const openNoteTab = (note: OpenTarget): void => {
     setTabs((prev) => {
       if (prev.some((t) => t.id === note.id)) return prev
@@ -163,6 +212,36 @@ export default function MainLayout() {
       }
       return next
     })
+  }
+
+  // --- Tab context-menu actions (Chrome-style; pinned tabs survive bulk closes)
+
+  const toggleTabPin = (id: string): void => {
+    setTabs((prev) => {
+      const next = prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
+      return [...next.filter((t) => t.pinned), ...next.filter((t) => !t.pinned)]
+    })
+  }
+
+  const closeOtherTabs = (id: string): void => {
+    setTabs(tabs.filter((t) => t.id === id || t.pinned))
+    setActiveTabId(id)
+  }
+
+  const closeTabsToRight = (id: string): void => {
+    const idx = tabs.findIndex((t) => t.id === id)
+    if (idx === -1) return
+    const next = tabs.filter((t, i) => i <= idx || t.pinned)
+    setTabs(next)
+    if (activeTabId && !next.some((t) => t.id === activeTabId)) setActiveTabId(id)
+  }
+
+  const closeAllTabs = (): void => {
+    const next = tabs.filter((t) => t.pinned)
+    setTabs(next)
+    if (activeTabId && !next.some((t) => t.id === activeTabId)) {
+      setActiveTabId(next.length ? next[next.length - 1].id : null)
+    }
   }
 
   const handleCreate = async (folder = ''): Promise<void> => {
@@ -219,6 +298,22 @@ export default function MainLayout() {
       /* invalid target — ignore */
     }
     repointTabs(await refresh())
+  }
+
+  // Rename from the sidebar. Saving with a new title also slug-renames the
+  // file, so re-point the open tab (if any) to the new path.
+  const handleRenameNote = async (note: NoteSummary, title: string): Promise<void> => {
+    const full = await window.api.notes.read(note.path)
+    const saved = await window.api.notes.save(note.path, {
+      title,
+      body: full.body,
+      tags: full.tags,
+      fullWidth: full.fullWidth
+    })
+    await refresh()
+    setTabs((prev) =>
+      prev.map((t) => (t.id === saved.id ? { ...t, path: saved.path, title: saved.title } : t))
+    )
   }
 
   const handleTogglePin = async (note: NoteSummary): Promise<void> => {
@@ -392,6 +487,10 @@ export default function MainLayout() {
           onToggleSidebar={toggleSidebar}
           onSelect={setActiveTabId}
           onClose={closeTab}
+          onTogglePin={toggleTabPin}
+          onCloseOthers={closeOtherTabs}
+          onCloseRight={closeTabsToRight}
+          onCloseAll={closeAllTabs}
           onNewNote={() => void handleCreateInSelectedFolder()}
           agentAvailable={aiAgentEnabled}
           agentPanelOpen={agentPanelOpen}
@@ -417,6 +516,7 @@ export default function MainLayout() {
             onRenameFolder={handleRenameFolder}
             onDeleteFolder={requestDeleteFolder}
             onDeleteNote={requestDeleteNote}
+            onRenameNote={(note, title) => void handleRenameNote(note, title)}
             onTogglePin={handleTogglePin}
             onMoveNote={handleMoveNote}
             onMoveFolder={handleMoveFolder}
@@ -454,8 +554,11 @@ export default function MainLayout() {
         {!zenMode && aiAgentEnabled && agentPanelOpen && (
           <AgentPanel
             note={tabs.find((tab) => tab.id === activeTabId) ?? null}
+            notes={notes}
             getMarkdown={getAgentMarkdown}
             applyMarkdown={applyAgentMarkdown}
+            createNote={handleAgentCreateNote}
+            onOpenNote={openNoteTab}
           />
         )}
       </div>

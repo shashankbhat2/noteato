@@ -39,6 +39,12 @@ const api = {
     deleteFolder: (path: string): Promise<DeletedEntry> =>
       ipcRenderer.invoke('notes:deleteFolder', path),
     search: (query: string): Promise<SearchResult[]> => ipcRenderer.invoke('notes:search', query),
+    takeExternalOpens: (): Promise<Note[]> => ipcRenderer.invoke('notes:takeExternalOpens'),
+    subscribeExternalOpen: (callback: (note: Note) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, note: Note): void => callback(note)
+      ipcRenderer.on('notes:external-open', listener)
+      return () => ipcRenderer.removeListener('notes:external-open', listener)
+    },
     getDir: () => ipcRenderer.invoke('notes:getDir'),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import')
@@ -56,11 +62,17 @@ const api = {
   },
   ai: {
     complete: (req: AiCompleteRequest): Promise<string> => ipcRenderer.invoke('ai:complete', req),
-    stream: (req: AiCompleteRequest, onDelta: (delta: string) => void): Promise<string> => {
+    stream: (
+      req: AiCompleteRequest,
+      onDelta: (delta: string) => void,
+      registerCancel?: (cancel: () => void) => void
+    ): Promise<string> => {
       const requestId = ++nextAiStreamRequestId
       const channel = `ai:stream:${requestId}`
       const listener = (_e: Electron.IpcRendererEvent, delta: string): void => onDelta(delta)
       ipcRenderer.on(channel, listener)
+      // Cancelling resolves the stream promise with the partial output.
+      registerCancel?.(() => void ipcRenderer.invoke('ai:stream:abort', requestId))
       return ipcRenderer
         .invoke('ai:stream', requestId, req)
         .finally(() => ipcRenderer.removeListener(channel, listener))

@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Block, BlockNoteEditor } from '@blocknote/core'
-import { AlignLeft, ArrowUp, ListChecks, Loader2, PenLine } from 'lucide-react'
+import {
+  AlignLeft,
+  ArrowUp,
+  Check,
+  Copy,
+  ListChecks,
+  ListPlus,
+  Loader2,
+  PenLine,
+  SpellCheck,
+  Square,
+  X
+} from 'lucide-react'
 import { aiStream } from '../ai/client'
+import type { NoteatoBlock, NoteatoEditor } from '../noteLink'
 
-type SelectionAction = 'summarize' | 'improve' | 'extract'
+type SelectionAction = 'summarize' | 'improve' | 'extract' | 'proofread'
 
 const ACTION_PROMPTS: Record<SelectionAction, string> = {
   summarize:
@@ -11,13 +23,21 @@ const ACTION_PROMPTS: Record<SelectionAction, string> = {
   improve:
     'Improve the clarity, grammar, and flow of the following text without changing its meaning or removing information. Respond with markdown only — no preamble, no explanation.',
   extract:
-    'Extract the key points from the following text as a concise markdown bullet list. Respond with markdown only — no preamble, no explanation.'
+    'Extract the key points from the following text as a concise markdown bullet list. Respond with markdown only — no preamble, no explanation.',
+  proofread:
+    'Proofread the following text: fix spelling, grammar, and punctuation without changing the meaning, tone, or formatting. Respond with the corrected text as markdown only — no preamble, no explanation.'
 }
 
-const PRESETS: { action: SelectionAction; label: string; icon: ReactNode }[] = [
-  { action: 'improve', label: 'Improve writing', icon: <PenLine size={15} /> },
-  { action: 'summarize', label: 'Summarize', icon: <AlignLeft size={15} /> },
-  { action: 'extract', label: 'Extract key points', icon: <ListChecks size={15} /> }
+// replace rewrites the selection in place; append streams into a new block
+// below it; overlay shows the result in this popup without touching the note
+// until the user picks what to do with it.
+type ApplyMode = 'replace' | 'append' | 'overlay'
+
+const PRESETS: { action: SelectionAction; label: string; icon: ReactNode; mode: ApplyMode }[] = [
+  { action: 'improve', label: 'Improve writing', icon: <PenLine size={15} />, mode: 'replace' },
+  { action: 'proofread', label: 'Proofread', icon: <SpellCheck size={15} />, mode: 'overlay' },
+  { action: 'summarize', label: 'Summarize', icon: <AlignLeft size={15} />, mode: 'overlay' },
+  { action: 'extract', label: 'Extract key points', icon: <ListChecks size={15} />, mode: 'append' }
 ]
 
 const POPUP_WIDTH = 320
@@ -39,8 +59,8 @@ function setBlockState(blocks: BlockReference[], state: 'pending' | 'changed' | 
 }
 
 interface Props {
-  editor: BlockNoteEditor
-  blocks: Block[]
+  editor: NoteatoEditor
+  blocks: NoteatoBlock[]
   position: { x: number; y: number } | null
   onError: (message: string) => void
   onStreamingChange: (streaming: boolean) => void
@@ -57,8 +77,11 @@ export default function SelectionAiPopup({
 }: Props) {
   const [instruction, setInstruction] = useState('')
   const [pending, setPending] = useState(false)
+  const [overlay, setOverlay] = useState<{ text: string; done: boolean } | null>(null)
+  const [copied, setCopied] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const cancelStreamRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     textareaRef.current?.focus()
@@ -81,12 +104,73 @@ export default function SelectionAiPopup({
     }
   }, [onClose, pending])
 
-  const run = async (system: string): Promise<void> => {
+  // Overlay mode: stream the result into a bubble inside this popup, leaving
+  // the note untouched until the user copies/inserts/replaces.
+  const runOverlay = async (system: string): Promise<void> => {
+    if (pending) return
+    setPending(true)
+    setOverlay({ text: '', done: false })
+    try {
+      const settings = await window.api.settings.get()
+      const markdown = await editor.blocksToMarkdownLossy(blocks)
+      let streamed = ''
+      const result = await aiStream(
+        settings,
+        { system, prompt: markdown, maxTokens: 1536 },
+        (delta) => {
+          streamed += delta
+          setOverlay({ text: streamed, done: false })
+        },
+        (cancel) => {
+          cancelStreamRef.current = cancel
+        }
+      )
+      const text = (result || streamed).trim()
+      if (!text) throw new Error('Enhancement returned no content.')
+      setOverlay({ text, done: true })
+    } catch (err) {
+      setOverlay(null)
+      onError(err instanceof Error ? err.message : 'Enhancement failed.')
+    } finally {
+      cancelStreamRef.current = null
+      setPending(false)
+    }
+  }
+
+  const insertOverlayResult = async (how: 'replace' | 'below'): Promise<void> => {
+    if (!overlay?.text) return
+    try {
+      const parsed = await editor.tryParseMarkdownToBlocks(overlay.text)
+      if (parsed.length === 0) return
+      if (how === 'replace') {
+        editor.replaceBlocks(
+          blocks.map((block) => block.id),
+          parsed
+        )
+      } else {
+        editor.insertBlocks(parsed, blocks[blocks.length - 1].id, 'after')
+      }
+    } catch {
+      onError('Could not apply the result to the note.')
+      return
+    }
+    onClose()
+  }
+
+  const run = async (system: string, mode: ApplyMode = 'replace'): Promise<void> => {
+    if (mode === 'overlay') return runOverlay(system)
     if (pending) return
     setPending(true)
     onStreamingChange(true)
     setBlockState(blocks, 'pending')
-    let currentBlockIds = blocks.map((block) => block.id)
+    // In append mode the result streams into a fresh block inserted after the
+    // selection, leaving the selected content untouched.
+    let currentBlockIds =
+      mode === 'append'
+        ? editor
+            .insertBlocks([{ type: 'paragraph' }], blocks[blocks.length - 1].id, 'after')
+            .map((block) => block.id)
+        : blocks.map((block) => block.id)
     let streamedChange = false
     let renderedMarkdown = ''
     let renderTimer: number | undefined
@@ -139,13 +223,22 @@ export default function SelectionAiPopup({
         streamedChange = true
       }
 
+      if (mode === 'append') setBlockState(blocks, null)
       setBlockState(currentBlockIds, 'changed')
       const changedBlockIds = [...currentBlockIds]
       window.setTimeout(() => setBlockState(changedBlockIds, null), CHANGED_HIGHLIGHT_MS)
     } catch (err) {
       if (renderTimer !== undefined) window.clearTimeout(renderTimer)
       await renderChain
-      if (streamedChange) {
+      if (mode === 'append') {
+        // The selection was never touched — just drop the appended blocks.
+        try {
+          editor.removeBlocks(currentBlockIds)
+        } catch {
+          /* already gone */
+        }
+        setBlockState(blocks, null)
+      } else if (streamedChange) {
         const restored = editor.replaceBlocks(currentBlockIds, blocks)
         setBlockState(restored.insertedBlocks, null)
       } else {
@@ -170,6 +263,65 @@ export default function SelectionAiPopup({
     ? Math.min(Math.max(position.x, 12), window.innerWidth - POPUP_WIDTH - 12)
     : (window.innerWidth - POPUP_WIDTH) / 2
   const top = position ? Math.min(position.y + 8, window.innerHeight - 240) : 120
+
+  if (overlay) {
+    return (
+      <div
+        className={pending ? 'ai-popup pending' : 'ai-popup'}
+        ref={wrapperRef}
+        style={{ left, top, width: POPUP_WIDTH }}
+        aria-busy={pending}
+      >
+        <div className="ai-popup-result" aria-live="polite">
+          {overlay.text || 'Working…'}
+        </div>
+        <div className="ai-popup-footer">
+          {pending ? (
+            <>
+              <span className="ai-popup-hint">
+                <Loader2 size={13} className="spin" /> Generating…
+              </span>
+              <button
+                className="ai-popup-preset"
+                onClick={() => cancelStreamRef.current?.()}
+                title="Stop"
+              >
+                <Square size={11} fill="currentColor" />
+                <span>Stop</span>
+              </button>
+            </>
+          ) : (
+            <div className="ai-popup-result-actions">
+              <button
+                className="ai-popup-preset"
+                onClick={() => {
+                  navigator.clipboard.writeText(overlay.text)
+                  setCopied(true)
+                }}
+              >
+                {copied ? <Check size={13} /> : <Copy size={13} />}
+                <span>{copied ? 'Copied' : 'Copy'}</span>
+              </button>
+              <button className="ai-popup-preset" onClick={() => void insertOverlayResult('below')}>
+                <ListPlus size={13} />
+                <span>Insert below</span>
+              </button>
+              <button
+                className="ai-popup-preset"
+                onClick={() => void insertOverlayResult('replace')}
+              >
+                <PenLine size={13} />
+                <span>Replace</span>
+              </button>
+              <button className="ai-popup-preset" onClick={onClose} title="Close">
+                <X size={13} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -199,7 +351,7 @@ export default function SelectionAiPopup({
             key={preset.action}
             className="ai-popup-preset"
             disabled={pending}
-            onClick={() => run(ACTION_PROMPTS[preset.action])}
+            onClick={() => run(ACTION_PROMPTS[preset.action], preset.mode)}
           >
             {preset.icon}
             <span>{preset.label}</span>

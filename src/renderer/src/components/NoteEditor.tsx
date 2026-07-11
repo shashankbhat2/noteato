@@ -1,46 +1,79 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BlockNoteEditor, type Block } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
+import {
+  SideMenu,
+  SideMenuController,
+  SuggestionMenuController,
+  type DefaultReactSuggestionItem
+} from '@blocknote/react'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
-import { Code, FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
+import { Code, FileText, FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
+import { createNoteatoEditor, type NoteatoBlock, type NoteatoEditor } from '../noteLink'
 import DictationPanel from './DictationPanel'
 import SelectionAiToolbar from './SelectionAiToolbar'
 import SelectionAiPopup from './SelectionAiPopup'
+import BlockDragMenu from './BlockDragMenu'
 
 interface Props {
   path: string
   onSaved: (note: Note) => void
-  onEditorReady?: (editor: BlockNoteEditor | null) => void
+  onEditorReady?: (editor: NoteatoEditor | null) => void
 }
 
 interface AiPopupState {
-  blocks: Block[]
+  blocks: NoteatoBlock[]
   position: { x: number; y: number } | null
 }
 
 const SAVE_DEBOUNCE_MS = 600
 
-export default function NoteEditor({
-  path,
-  onSaved,
-  onEditorReady
-}: Props) {
+async function noteLinkItems(
+  editor: NoteatoEditor,
+  currentNoteId: string,
+  query: string
+): Promise<DefaultReactSuggestionItem[]> {
+  const all = await window.api.notes.list()
+  const q = query.trim().toLowerCase()
+  return all
+    .filter((n) => n.id !== currentNoteId)
+    .filter(
+      (n) =>
+        !q ||
+        (n.title || 'Untitled').toLowerCase().includes(q) ||
+        n.path.toLowerCase().includes(q)
+    )
+    .slice(0, 8)
+    .map((n) => ({
+      title: n.title || 'Untitled',
+      subtext: n.folder || undefined,
+      icon: <FileText size={14} />,
+      onItemClick: () => {
+        editor.insertInlineContent([
+          { type: 'noteLink', props: { noteId: n.id, title: n.title || 'Untitled' } },
+          ' '
+        ])
+      }
+    }))
+}
+
+export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [title, setTitle] = useState('')
   const [fullWidth, setFullWidth] = useState(false)
-  const [initialBlocks, setInitialBlocks] = useState<Block[] | 'loading'>('loading')
+  const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | 'loading'>('loading')
   const [markdownMode, setMarkdownMode] = useState(false)
   const [markdownText, setMarkdownText] = useState('')
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const titleRef = useRef<HTMLInputElement>(null)
   const aiStreamingRef = useRef(false)
   const onEditorReadyRef = useRef(onEditorReady)
   onEditorReadyRef.current = onEditorReady
@@ -62,7 +95,7 @@ export default function NoteEditor({
       setTitle(loaded.title)
       setFullWidth(loaded.fullWidth)
 
-      const scratch = BlockNoteEditor.create()
+      const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
         ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
         : scratch.document
@@ -76,7 +109,7 @@ export default function NoteEditor({
 
   const editor = useMemo(() => {
     if (initialBlocks === 'loading') return undefined
-    return BlockNoteEditor.create({ initialContent: initialBlocks })
+    return createNoteatoEditor(initialBlocks)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialBlocks])
 
@@ -154,6 +187,33 @@ export default function NoteEditor({
     }
   }, [])
 
+  // Arrow-up from the top line of the first block moves the caret into the
+  // title, mirroring how Enter in the title drops into the content.
+  const handleEditorKeyDown = (event: React.KeyboardEvent): void => {
+    if (event.key !== 'ArrowUp' || !editor) return
+    if (!(event.target as HTMLElement).closest?.('.bn-editor')) return
+    try {
+      const firstBlock = editor.document[0]
+      const cursorBlock = editor.getTextCursorPosition().block
+      if (
+        !firstBlock ||
+        cursorBlock.id !== firstBlock.id ||
+        !editor.prosemirrorView.endOfTextblock('up')
+      ) {
+        return
+      }
+    } catch {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const input = titleRef.current
+    if (input) {
+      input.focus()
+      input.setSelectionRange(input.value.length, input.value.length)
+    }
+  }
+
   if (!editor || !note) return <div className="empty-state">Loading…</div>
 
   const segments = note.path.split('/')
@@ -161,7 +221,10 @@ export default function NoteEditor({
   const folderSegments = segments.slice(0, -1)
 
   return (
-    <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
+    <div
+      className={fullWidth ? 'note-editor full-width' : 'note-editor'}
+      onKeyDownCapture={handleEditorKeyDown}
+    >
       <div className="note-editor-toolbar">
         <div className="note-breadcrumb" title={note.path}>
           {folderSegments.map((seg, i) => (
@@ -193,6 +256,7 @@ export default function NoteEditor({
 
       <div className="note-editor-header">
         <input
+          ref={titleRef}
           className="note-title-input"
           value={title}
           placeholder="Untitled"
@@ -226,8 +290,16 @@ export default function NoteEditor({
             }}
             theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
             formattingToolbar={!aiSelectionActions}
+            sideMenu={false}
           >
             {aiSelectionActions && <SelectionAiToolbar editor={editor} onOpen={setAiPopup} />}
+            <SuggestionMenuController
+              triggerCharacter="@"
+              getItems={(query) => noteLinkItems(editor, note.id, query)}
+            />
+            <SideMenuController
+              sideMenu={(props) => <SideMenu {...props} dragHandleMenu={BlockDragMenu} />}
+            />
           </BlockNoteView>
           {aiPopup && (
             <SelectionAiPopup

@@ -4,19 +4,31 @@ import {
   getFormattingToolbarItems,
   useComponentsContext
 } from '@blocknote/react'
-import type { Block, BlockNoteEditor } from '@blocknote/core'
 import { Sparkles } from 'lucide-react'
+import type { NoteatoBlock, NoteatoEditor } from '../noteLink'
 
 interface OpenPayload {
-  blocks: Block[]
+  blocks: NoteatoBlock[]
   position: { x: number; y: number } | null
 }
+
+// Enhance rewrites prose — only offer it when the whole selection is text.
+const TEXT_BLOCK_TYPES = new Set([
+  'paragraph',
+  'heading',
+  'quote',
+  'bulletListItem',
+  'numberedListItem',
+  'checkListItem',
+  'toggleListItem',
+  'codeBlock'
+])
 
 function EnhanceButton({
   editor,
   onOpen
 }: {
-  editor: BlockNoteEditor
+  editor: NoteatoEditor
   onOpen: (payload: OpenPayload) => void
 }) {
   const components = useComponentsContext()
@@ -48,19 +60,27 @@ function EnhanceButton({
 }
 
 interface Props {
-  editor: BlockNoteEditor
+  editor: NoteatoEditor
   onOpen: (payload: OpenPayload) => void
 }
 
 export default function SelectionAiToolbar({ editor, onOpen }: Props) {
   return (
     <FormattingToolbarController
-      formattingToolbar={() => (
-        <FormattingToolbar>
-          {getFormattingToolbarItems()}
-          <EnhanceButton editor={editor} onOpen={onOpen} />
-        </FormattingToolbar>
-      )}
+      formattingToolbar={() => {
+        // Selecting a divider (e.g. right after typing "---") has nothing to
+        // format or enhance — suppress the toolbar entirely.
+        const selected = editor.getSelection()?.blocks ?? []
+        const target = selected.length ? selected : [editor.getTextCursorPosition().block]
+        if (target.every((block) => block.type === 'divider')) return null
+        const allText = target.every((block) => TEXT_BLOCK_TYPES.has(block.type))
+        return (
+          <FormattingToolbar>
+            {getFormattingToolbarItems()}
+            {allText && <EnhanceButton editor={editor} onOpen={onOpen} />}
+          </FormattingToolbar>
+        )
+      }}
     />
   )
 }

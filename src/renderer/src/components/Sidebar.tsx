@@ -29,6 +29,7 @@ interface Props {
   onRenameFolder: (path: string, name: string) => void
   onDeleteFolder: (path: string) => void
   onDeleteNote: (note: NoteSummary) => void
+  onRenameNote: (note: NoteSummary, title: string) => void
   onTogglePin: (note: NoteSummary) => void
   onMoveNote: (path: string, targetFolder: string) => void
   onMoveFolder: (path: string, targetParent: string) => void
@@ -45,6 +46,7 @@ interface DragPayload {
 type Editing =
   | { mode: 'new-folder'; parent: string }
   | { mode: 'rename-folder'; path: string; initial: string }
+  | { mode: 'rename-note'; note: NoteSummary; initial: string }
   | null
 
 export default function Sidebar({
@@ -60,6 +62,7 @@ export default function Sidebar({
   onRenameFolder,
   onDeleteFolder,
   onDeleteNote,
+  onRenameNote,
   onTogglePin,
   onMoveNote,
   onMoveFolder,
@@ -132,11 +135,18 @@ export default function Sidebar({
     setEditing({ mode: 'rename-folder', path, initial: path.slice(path.lastIndexOf('/') + 1) })
   }
 
+  const startRenameNote = (note: NoteSummary): void => {
+    setEditValue(note.title || 'Untitled')
+    setEditing({ mode: 'rename-note', note, initial: note.title || 'Untitled' })
+  }
+
   const commitEdit = (): void => {
     const value = editValue.trim()
     if (editing && value) {
       if (editing.mode === 'new-folder') onCreateFolder(editing.parent, value)
-      else if (value !== editing.initial) onRenameFolder(editing.path, value)
+      else if (editing.mode === 'rename-folder') {
+        if (value !== editing.initial) onRenameFolder(editing.path, value)
+      } else if (value !== editing.initial) onRenameNote(editing.note, value)
     }
     setEditing(null)
   }
@@ -190,6 +200,7 @@ export default function Sidebar({
       y: e.clientY,
       items: [
         { label: note.pinned ? 'Unpin' : 'Pin', onClick: () => onTogglePin(note) },
+        { label: 'Rename', onClick: () => startRenameNote(note) },
         { label: 'Move to', submenu: moveNoteSubmenu(note) },
         { separator: true, label: '' },
         { label: 'Delete', danger: true, onClick: () => onDeleteNote(note) }
@@ -224,7 +235,27 @@ export default function Sidebar({
     })
   }
 
-  const renderNote = (note: NoteSummary, depth: number): React.ReactNode => (
+  const renderNote = (note: NoteSummary, depth: number): React.ReactNode => {
+    const isRenaming = editing?.mode === 'rename-note' && editing.note.id === note.id
+    if (isRenaming) {
+      return (
+        <li key={note.id} className="note-item" style={{ paddingLeft: 10 + depth * 14 }}>
+          <input
+            className="folder-rename-input"
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitEdit()
+              else if (e.key === 'Escape') setEditing(null)
+            }}
+          />
+        </li>
+      )
+    }
+    return (
     <li
       key={note.id}
       className={note.id === activeNoteId ? 'note-item active' : 'note-item'}
@@ -232,6 +263,10 @@ export default function Sidebar({
       draggable
       onDragStart={(e) => onDragStart(e, { type: 'note', path: note.path })}
       onClick={() => onSelect(note)}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        startRenameNote(note)
+      }}
       onContextMenu={(e) => openNoteMenu(e, note)}
     >
       <div className="note-item-main">
@@ -239,7 +274,6 @@ export default function Sidebar({
           {note.pinned && <Pin size={11} className="note-pin-icon" />}
           {note.title || 'Untitled'}
         </div>
-        <div className="note-excerpt">{note.excerpt}</div>
       </div>
       <div className="note-item-actions">
         <button
@@ -264,7 +298,8 @@ export default function Sidebar({
         </button>
       </div>
     </li>
-  )
+    )
+  }
 
   const renderFolder = (node: FolderNode, depth: number): React.ReactNode => {
     const isOpen = expanded.has(node.path)
@@ -293,6 +328,11 @@ export default function Sidebar({
             if (isEditingThis) return
             onSelectFolder(node.path)
             toggle(node.path)
+          }}
+          onDoubleClick={(e) => {
+            if (isEditingThis) return
+            e.stopPropagation()
+            startRename(node.path)
           }}
           onContextMenu={(e) => openFolderMenu(e, node.path)}
         >

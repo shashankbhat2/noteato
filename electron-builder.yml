@@ -12,6 +12,17 @@ files:
   - '!**/*.d.ts'
 asar: true
 artifactName: '${productName}-${version}-${arch}.${ext}'
+# Register with the OS as an editor for markdown files (enables Finder
+# "Open With" / double-click via Launch Services on macOS).
+fileAssociations:
+  - ext: md
+    name: Markdown
+    description: Markdown document
+    role: Editor
+  - ext: markdown
+    name: Markdown
+    description: Markdown document
+    role: Editor
 mac:
   icon: build/icon.icns
   category: public.app-category.productivity

@@ -1,7 +1,8 @@
-import { useRef } from 'react'
-import { PanelLeft, Plus, Settings, Sparkles, X } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, PanelLeft, Pin, Plus, Settings, Sparkles, X } from 'lucide-react'
 import type { Tab } from '../tabs'
 import ShortcutsHelp from './ShortcutsHelp'
+import ContextMenu, { type MenuItem } from './ContextMenu'
 
 const DOUBLE_CLICK_MS = 400
 
@@ -12,6 +13,10 @@ interface Props {
   onToggleSidebar: () => void
   onSelect: (id: string) => void
   onClose: (id: string) => void
+  onTogglePin: (id: string) => void
+  onCloseOthers: (id: string) => void
+  onCloseRight: (id: string) => void
+  onCloseAll: () => void
   onNewNote: () => void
   agentAvailable: boolean
   agentPanelOpen: boolean
@@ -26,12 +31,42 @@ export default function TabBar({
   onToggleSidebar,
   onSelect,
   onClose,
+  onTogglePin,
+  onCloseOthers,
+  onCloseRight,
+  onCloseAll,
   onNewNote,
   agentAvailable,
   agentPanelOpen,
   onToggleAgentPanel,
   onOpenSettings
 }: Props) {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const activeIdx = tabs.findIndex((t) => t.id === activeTabId)
+
+  const openTabMenu = (e: React.MouseEvent, tab: Tab): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const idx = tabs.findIndex((t) => t.id === tab.id)
+    const hasRight = tabs.slice(idx + 1).some((t) => !t.pinned)
+    const hasOthers = tabs.some((t) => t.id !== tab.id && !t.pinned)
+    setMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: tab.pinned ? 'Unpin tab' : 'Pin tab', onClick: () => onTogglePin(tab.id) },
+        { separator: true, label: '' },
+        { label: 'Close tab', onClick: () => onClose(tab.id) },
+        ...(hasOthers
+          ? [{ label: 'Close other tabs', onClick: () => onCloseOthers(tab.id) }]
+          : []),
+        ...(hasRight
+          ? [{ label: 'Close tabs to the right', onClick: () => onCloseRight(tab.id) }]
+          : []),
+        { label: 'Close all tabs', onClick: onCloseAll }
+      ]
+    })
+  }
   // Standard DOM dblclick doesn't fire reliably on -webkit-app-region: drag
   // areas — macOS intercepts mouse handling there for window dragging before
   // it reaches Chromium's normal event dispatch. mousedown still fires
@@ -62,23 +97,45 @@ export default function TabBar({
           <PanelLeft size={15} />
         </button>
       </div>
+      <div className="tab-nav">
+        <button
+          className="tab-bar-icon-btn"
+          disabled={activeIdx <= 0}
+          onClick={() => onSelect(tabs[activeIdx - 1].id)}
+          title="Previous tab"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <button
+          className="tab-bar-icon-btn"
+          disabled={activeIdx === -1 || activeIdx >= tabs.length - 1}
+          onClick={() => onSelect(tabs[activeIdx + 1].id)}
+          title="Next tab"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
       <div className="tab-strip">
         {tabs.map((tab) => (
           <div
             key={tab.id}
             className={tab.id === activeTabId ? 'tab active' : 'tab'}
             onClick={() => onSelect(tab.id)}
+            onContextMenu={(e) => openTabMenu(e, tab)}
           >
+            {tab.pinned && <Pin size={11} className="tab-pin-icon" />}
             <span className="tab-title">{tab.title || 'Untitled'}</span>
-            <button
-              className="tab-close"
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose(tab.id)
-              }}
-            >
-              <X size={13} />
-            </button>
+            {!tab.pinned && (
+              <button
+                className="tab-close"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onClose(tab.id)
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
           </div>
         ))}
         <button className="tab-new" onClick={onNewNote} title="New note">
@@ -100,6 +157,9 @@ export default function TabBar({
           <Settings size={16} />
         </button>
       </div>
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
+      )}
     </div>
   )
 }

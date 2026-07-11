@@ -41,10 +41,13 @@ export async function completeAi(settings: Settings, req: AiCompleteRequest): Pr
   throw new Error('Set up an AI provider in Settings to use this feature.')
 }
 
+// Aborting via the signal resolves with whatever streamed so far instead of
+// throwing, so a user-cancelled request still yields its partial output.
 export async function streamAi(
   settings: Settings,
   req: AiCompleteRequest,
-  onDelta: (delta: string) => void
+  onDelta: (delta: string) => void,
+  signal?: AbortSignal
 ): Promise<string> {
   const maxTokens = req.maxTokens ?? 2048
   const provider = req.provider ?? settings.aiProvider
@@ -54,18 +57,26 @@ export async function streamAi(
       throw new Error('Add an Anthropic API key in Settings to use AI features.')
     }
     const client = new Anthropic({ apiKey: settings.anthropicApiKey })
-    const stream = client.messages.stream({
-      model: req.model || settings.aiModel || DEFAULT_ANTHROPIC_MODEL,
-      max_tokens: maxTokens,
-      system: req.system,
-      messages: [{ role: 'user', content: req.prompt }]
-    })
+    const stream = client.messages.stream(
+      {
+        model: req.model || settings.aiModel || DEFAULT_ANTHROPIC_MODEL,
+        max_tokens: maxTokens,
+        system: req.system,
+        messages: [{ role: 'user', content: req.prompt }]
+      },
+      { signal }
+    )
     let result = ''
     stream.on('text', (delta) => {
       result += delta
       onDelta(delta)
     })
-    await stream.finalMessage()
+    try {
+      await stream.finalMessage()
+    } catch (err) {
+      if (signal?.aborted) return result
+      throw err
+    }
     return result
   }
 
@@ -74,17 +85,25 @@ export async function streamAi(
       throw new Error('Add an OpenAI API key in Settings to use AI features.')
     }
     const client = new OpenAI({ apiKey: settings.openaiApiKey })
-    const stream = client.responses.stream({
-      model: req.model || settings.aiModel || DEFAULT_OPENAI_MODEL,
-      instructions: req.system,
-      input: req.prompt,
-      max_output_tokens: maxTokens
-    })
+    const stream = client.responses.stream(
+      {
+        model: req.model || settings.aiModel || DEFAULT_OPENAI_MODEL,
+        instructions: req.system,
+        input: req.prompt,
+        max_output_tokens: maxTokens
+      },
+      { signal }
+    )
     let result = ''
-    for await (const event of stream) {
-      if (event.type !== 'response.output_text.delta') continue
-      result += event.delta
-      onDelta(event.delta)
+    try {
+      for await (const event of stream) {
+        if (event.type !== 'response.output_text.delta') continue
+        result += event.delta
+        onDelta(event.delta)
+      }
+    } catch (err) {
+      if (signal?.aborted) return result
+      throw err
     }
     return result
   }

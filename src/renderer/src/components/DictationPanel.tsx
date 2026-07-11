@@ -1,9 +1,9 @@
 import { Mic, Square } from 'lucide-react'
-import type { BlockNoteEditor } from '@blocknote/core'
+import type { NoteatoEditor } from '../noteLink'
 import { useDictation } from '../dictation/useDictation'
 import Waveform from './Waveform'
 
-export default function DictationPanel({ editor }: { editor: BlockNoteEditor }) {
+export default function DictationPanel({ editor }: { editor: NoteatoEditor }) {
   const { isRecording, error, analyser, toggle } = useDictation(editor)
 
   return (

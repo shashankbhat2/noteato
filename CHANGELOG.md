@@ -2,6 +2,31 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-11
+
+### Added
+
+- Note links: type "@" in the editor to insert a Notion-style mention chip that opens the linked note in a tab and keeps working after moves and renames.
+- Agent upgrades: @-mention other notes as read-only chat context, create new notes from chat (with clickable chips for the results), bigger model choices, and a stop button with real request cancellation.
+- Proofread and Summarize enhance actions that stream into an in-place overlay bubble with Copy, Insert below, and Replace; Extract key points now appends below the selection instead of overwriting it.
+- Notion-style vertical block menu on the drag handle: turn into, copy, duplicate, and delete.
+- Tab bar: right-click menu (pin, close others, close to the right, close all), pinned tabs that survive bulk closes, and previous/next tab navigation buttons.
+- Double-click inline renaming for notes and folders in the sidebar, plus a Rename context-menu action.
+- The OS now recognizes the app as a Markdown editor — files opened from Finder are imported and opened automatically.
+
+### Changed
+
+- The agent applies note edits before announcing them, showing an "Updating notes…" state while it works.
+- Sidebar note tiles show only the title, and folder rows are taller.
+- Dictation auto-scrolls to keep the text being written in view.
+- Arrow-up from the first line of a note moves the caret into the title.
+- More breathing room between block text and its side actions; nested list indent guides removed.
+
+### Fixed
+
+- Selecting a divider no longer shows the formatting toolbar or a blue node highlight.
+- Enhance is only offered for text selections, not tables, media, or dividers.
+
 ## [0.5.0] - 2026-07-11
 
 ### Added

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { BlockNoteEditor } from '@blocknote/core'
+import type { NoteatoEditor } from '../noteLink'
 
 interface DeepgramMessage {
   is_final?: boolean
@@ -8,7 +8,7 @@ interface DeepgramMessage {
   }
 }
 
-type BlockContent = ReturnType<BlockNoteEditor['getTextCursorPosition']>['block']['content']
+type BlockContent = ReturnType<NoteatoEditor['getTextCursorPosition']>['block']['content']
 
 interface Utterance {
   blockId: string
@@ -28,7 +28,7 @@ function isEditCommand(text: string): boolean {
   return EDIT_COMMAND_PATTERNS.some((re) => re.test(trimmed))
 }
 
-export function useDictation(editor: BlockNoteEditor): {
+export function useDictation(editor: NoteatoEditor): {
   isRecording: boolean
   error: string | null
   analyser: AnalyserNode | null
@@ -118,6 +118,11 @@ export function useDictation(editor: BlockNoteEditor): {
       utteranceLogRef.current.push({ blockId: cursor.block.id, contentBefore: cursor.block.content })
 
       editor.insertInlineContent([{ type: 'text', text: `${transcript} `, styles: {} }])
+
+      // Keep the block receiving dictation in view as the note grows.
+      document
+        .querySelector(`[data-node-type="blockOuter"][data-id="${CSS.escape(cursor.block.id)}"]`)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
 
     ws.onopen = () => {

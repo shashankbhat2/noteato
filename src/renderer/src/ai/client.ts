@@ -21,7 +21,8 @@ export async function aiComplete(settings: Settings, req: AiCompleteRequest): Pr
 export async function aiStream(
   settings: Settings,
   req: AiCompleteRequest,
-  onDelta: (delta: string) => void
+  onDelta: (delta: string) => void,
+  registerCancel?: (cancel: () => void) => void
 ): Promise<string> {
   if (!isAiConfigured(settings, req.provider)) {
     throw new AiNotConfiguredError('Set up an AI provider in Settings to use this feature.')
@@ -30,5 +31,5 @@ export async function aiStream(
     req.model ||
     settings.aiModel ||
     ((req.provider ?? settings.aiProvider) === 'openai' ? 'gpt-5.4-nano' : 'claude-haiku-4-5')
-  return window.api.ai.stream({ ...req, model }, onDelta)
+  return window.api.ai.stream({ ...req, model }, onDelta, registerCancel)
 }

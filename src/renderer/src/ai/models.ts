@@ -19,8 +19,12 @@ export const AI_MODELS: Record<Exclude<AiProvider, 'none'>, { id: string; label:
 
 export const AGENT_MODELS = [
   { id: 'auto', label: 'Auto', provider: null },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', provider: 'openai' },
+  { id: 'gpt-5.5', label: 'GPT-5.5', provider: 'openai' },
   { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', provider: 'openai' },
   { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', provider: 'openai' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic' },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'anthropic' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic' }
 ] as const
 

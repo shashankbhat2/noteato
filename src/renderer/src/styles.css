@@ -266,6 +266,11 @@ button {
   border-bottom-color: var(--accent);
 }
 
+.tab-pin-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
 .tab-title {
   overflow: hidden;
   white-space: nowrap;
@@ -343,6 +348,22 @@ button {
 .tab-bar-icon-btn.active {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.tab-bar-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: transparent;
+}
+
+.tab-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px 0 2px;
+  margin-right: 4px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  flex-shrink: 0;
 }
 
 /* Body layout */
@@ -448,7 +469,7 @@ button {
 .note-item {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   padding: 8px 12px 8px 10px;
   cursor: pointer;
@@ -495,16 +516,6 @@ button {
   font-weight: 600;
 }
 
-.note-excerpt {
-  font-size: 11.5px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.7;
-  margin-top: 2px;
-}
-
 .note-item-actions {
   display: none;
   align-items: center;
@@ -546,7 +557,7 @@ button {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px 6px 8px;
+  padding: 9px 12px 9px 8px;
   cursor: pointer;
   border-left: 2px solid transparent;
   color: var(--text);
@@ -666,6 +677,64 @@ button {
 
 .note-editor .bn-editor .tableWrapper::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* Breathing room between a block's text and its side actions (drag/plus). */
+.note-editor .bn-side-menu {
+  margin-left: -10px;
+}
+
+/* Hide BlockNote's indent guide line on nested list items. */
+.note-editor
+  .bn-block-group
+  .bn-block
+  .bn-block-group
+  .bn-block-outer:not([data-prev-depth-changed])::before {
+  border-left: none;
+}
+
+/* Drag-handle block menu (Notion-style vertical menu). */
+.bn-drag-handle-menu {
+  min-width: 190px;
+}
+
+.bn-drag-handle-menu .bn-menu-item-danger,
+.bn-drag-handle-menu .bn-menu-item-danger svg {
+  color: var(--danger);
+}
+
+/* A node-selected divider gets BlockNote's blue selection outline (e.g. right
+   after typing "---") — there's nothing to act on, so hide it. */
+.note-editor .bn-block-content[data-content-type='divider'].ProseMirror-selectednode > *,
+.note-editor .ProseMirror-selectednode > .bn-block-content[data-content-type='divider'] > * {
+  outline: none;
+}
+
+/* Notion-style page mention inserted with "@". */
+.note-link-mention {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 1px;
+  padding: 0 5px 1px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+  vertical-align: baseline;
+  cursor: pointer;
+  user-select: none;
+}
+
+.note-link-mention:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.note-link-mention svg {
+  flex-shrink: 0;
+  position: relative;
+  top: 1px;
 }
 
 .note-editor-toolbar {
@@ -1458,8 +1527,32 @@ button {
 }
 
 .ai-popup-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* Overlay result bubble (proofread / summarize). */
+.ai-popup-result {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-popup-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .ai-popup-submit {
@@ -1677,15 +1770,22 @@ button {
 }
 
 .agent-composer {
+  position: relative;
   padding: 10px 14px 14px;
   border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.agent-context-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 8px;
 }
 
 .agent-context-badge {
   width: fit-content;
   max-width: 100%;
   gap: 6px;
-  margin-bottom: 8px;
   padding: 4px 9px;
   border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   border-radius: 999px;
@@ -1703,6 +1803,123 @@ button {
 
 .agent-context-badge svg {
   color: var(--accent);
+}
+
+.agent-context-badge.mention svg {
+  color: var(--text-muted);
+}
+
+.agent-context-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -2px -4px -2px 0;
+  padding: 2px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.agent-context-remove:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.agent-context-remove svg {
+  color: inherit;
+}
+
+/* @-mention picker, floated above the composer. */
+.agent-mention-menu {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% - 4px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+}
+
+.agent-mention-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-mention-item.active {
+  background: var(--bg-tertiary);
+}
+
+.agent-mention-item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.agent-mention-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-mention-folder {
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 10.5px;
+}
+
+.agent-created-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 6px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.agent-created-chip:hover {
+  background: var(--bg-tertiary);
+}
+
+.agent-created-chip svg {
+  color: var(--accent);
+}
+
+.agent-created-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-input-wrap {
