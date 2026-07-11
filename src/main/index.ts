@@ -8,7 +8,7 @@ import { createSettingsStore } from './settings'
 import { StickyManager } from './sticky'
 import { buildAppMenu } from './menu'
 import { createWindowStateStore, trackWindowState } from './windowState'
-import { completeAi } from './ai'
+import { completeAi, streamAi } from './ai'
 
 const settingsStore = createSettingsStore()
 const noteStore = new NoteStore(settingsStore.read().notesDir ?? undefined)
@@ -21,7 +21,9 @@ const MIN_WIDTH = 350
 const MIN_HEIGHT = 250
 
 function createMainWindow(): void {
-  const isDark = settingsStore.read().theme === 'dark'
+  // themeSource is set to the saved mode (incl. 'system') at startup, so
+  // shouldUseDarkColors reflects the resolved appearance.
+  const isDark = nativeTheme.shouldUseDarkColors
   const state = windowStateStore.read()
   const win = new BrowserWindow({
     width: Math.max(state.width, MIN_WIDTH),
@@ -60,12 +62,33 @@ function createMainWindow(): void {
 
 function registerIpcHandlers(): void {
   ipcMain.handle('notes:list', () => noteStore.list())
-  ipcMain.handle('notes:read', (_e, filename: string) => noteStore.read(filename))
-  ipcMain.handle('notes:create', (_e, title?: string) => noteStore.create(title))
-  ipcMain.handle('notes:save', (_e, filename: string, options: SaveOptions) =>
-    noteStore.save(filename, options)
+  ipcMain.handle('notes:listFolders', () => noteStore.listFolders())
+  ipcMain.handle('notes:read', (_e, path: string) => noteStore.read(path))
+  ipcMain.handle('notes:create', (_e, title?: string, folder?: string) =>
+    noteStore.create(title, folder)
   )
-  ipcMain.handle('notes:delete', (_e, filename: string) => noteStore.delete(filename))
+  ipcMain.handle('notes:save', (_e, path: string, options: SaveOptions) =>
+    noteStore.save(path, options)
+  )
+  ipcMain.handle('notes:setPinned', (_e, path: string, pinned: boolean) =>
+    noteStore.setPinned(path, pinned)
+  )
+  ipcMain.handle('notes:delete', (_e, path: string) => noteStore.delete(path))
+  ipcMain.handle('notes:restore', (_e, trashName: string, originalPath: string, isFolder: boolean) =>
+    noteStore.restore(trashName, originalPath, isFolder)
+  )
+  ipcMain.handle('notes:createFolder', (_e, path: string) => noteStore.createFolder(path))
+  ipcMain.handle('notes:renameFolder', (_e, path: string, newName: string) =>
+    noteStore.renameFolder(path, newName)
+  )
+  ipcMain.handle('notes:moveNote', (_e, path: string, targetFolder: string) =>
+    noteStore.moveNote(path, targetFolder)
+  )
+  ipcMain.handle('notes:moveFolder', (_e, path: string, targetParent: string) =>
+    noteStore.moveFolder(path, targetParent)
+  )
+  ipcMain.handle('notes:deleteFolder', (_e, path: string) => noteStore.deleteFolder(path))
+  ipcMain.handle('notes:search', (_e, query: string) => noteStore.search(query))
   ipcMain.handle('notes:getDir', () => noteStore.getNotesDir())
 
   ipcMain.handle('notes:chooseFolder', async (e) => {
@@ -112,6 +135,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle('sticky:close', (_e, id: string) => stickyManager.close(id))
 
   ipcMain.handle('ai:complete', (_e, req: AiCompleteRequest) => completeAi(settingsStore.read(), req))
+  ipcMain.handle('ai:stream', (e, requestId: number, req: AiCompleteRequest) =>
+    streamAi(settingsStore.read(), req, (delta) => {
+      if (!e.sender.isDestroyed()) e.sender.send(`ai:stream:${requestId}`, delta)
+    })
+  )
 
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.handle('app:toggleMaximize', (e) => {

@@ -1,16 +1,16 @@
 {
   "name": "noteato",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A minimal, bloat-free, block-based note taking app for Mac (Apple Silicon) — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/shashankbhat2/noat.git"
+    "url": "https://github.com/shashankbhat2/noteato.git"
   },
-  "homepage": "https://github.com/shashankbhat2/noat",
-  "bugs": "https://github.com/shashankbhat2/noat/issues",
+  "homepage": "https://github.com/shashankbhat2/noteato",
+  "bugs": "https://github.com/shashankbhat2/noteato/issues",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",

@@ -1,14 +1,44 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AiCompleteRequest, Note, SaveOptions, Settings, StickyNoteData } from '../shared/types'
+import type {
+  AiCompleteRequest,
+  DeletedEntry,
+  Note,
+  NoteSummary,
+  SaveOptions,
+  SearchResult,
+  Settings,
+  StickyNoteData
+} from '../shared/types'
+
+let nextAiStreamRequestId = 0
 
 const api = {
   notes: {
     list: () => ipcRenderer.invoke('notes:list'),
-    read: (filename: string) => ipcRenderer.invoke('notes:read', filename),
-    create: (title?: string) => ipcRenderer.invoke('notes:create', title),
-    save: (filename: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', filename, options),
-    delete: (filename: string) => ipcRenderer.invoke('notes:delete', filename),
+    listFolders: (): Promise<string[]> => ipcRenderer.invoke('notes:listFolders'),
+    read: (path: string) => ipcRenderer.invoke('notes:read', path),
+    create: (title?: string, folder?: string) => ipcRenderer.invoke('notes:create', title, folder),
+    save: (path: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', path, options),
+    setPinned: (path: string, pinned: boolean): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:setPinned', path, pinned),
+    delete: (path: string): Promise<DeletedEntry> => ipcRenderer.invoke('notes:delete', path),
+    restore: (
+      trashName: string,
+      originalPath: string,
+      isFolder: boolean
+    ): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:restore', trashName, originalPath, isFolder),
+    createFolder: (path: string): Promise<void> => ipcRenderer.invoke('notes:createFolder', path),
+    renameFolder: (path: string, newName: string): Promise<void> =>
+      ipcRenderer.invoke('notes:renameFolder', path, newName),
+    moveNote: (path: string, targetFolder: string): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:moveNote', path, targetFolder),
+    moveFolder: (path: string, targetParent: string): Promise<void> =>
+      ipcRenderer.invoke('notes:moveFolder', path, targetParent),
+    deleteFolder: (path: string): Promise<DeletedEntry> =>
+      ipcRenderer.invoke('notes:deleteFolder', path),
+    search: (query: string): Promise<SearchResult[]> => ipcRenderer.invoke('notes:search', query),
     getDir: () => ipcRenderer.invoke('notes:getDir'),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import')
@@ -25,7 +55,16 @@ const api = {
     close: (id: string) => ipcRenderer.invoke('sticky:close', id)
   },
   ai: {
-    complete: (req: AiCompleteRequest): Promise<string> => ipcRenderer.invoke('ai:complete', req)
+    complete: (req: AiCompleteRequest): Promise<string> => ipcRenderer.invoke('ai:complete', req),
+    stream: (req: AiCompleteRequest, onDelta: (delta: string) => void): Promise<string> => {
+      const requestId = ++nextAiStreamRequestId
+      const channel = `ai:stream:${requestId}`
+      const listener = (_e: Electron.IpcRendererEvent, delta: string): void => onDelta(delta)
+      ipcRenderer.on(channel, listener)
+      return ipcRenderer
+        .invoke('ai:stream', requestId, req)
+        .finally(() => ipcRenderer.removeListener(channel, listener))
+    }
   },
   app: {
     closeWindow: () => ipcRenderer.invoke('app:closeWindow'),

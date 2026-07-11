@@ -25,6 +25,8 @@ export function parseNoteFile(raw: string): { meta: Partial<NoteMeta>; body: str
         .filter(Boolean)
     } else if (key === 'fullWidth') {
       meta.fullWidth = value === 'true'
+    } else if (key === 'pinned') {
+      meta.pinned = value === 'true'
     } else {
       ;(meta as Record<string, string>)[key] = value.replace(/^"|"$/g, '')
     }
@@ -42,6 +44,7 @@ export function serializeNoteFile(meta: NoteMeta, body: string): string {
     `updatedAt: ${meta.updatedAt}`,
     `tags: [${meta.tags.join(', ')}]`,
     `fullWidth: ${meta.fullWidth}`,
+    `pinned: ${meta.pinned}`,
     FM_DELIM
   ].join('\n')
 

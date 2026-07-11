@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
 import type { BlockNoteEditor } from '@blocknote/core'
-import { aiComplete, isAiConfigured } from '../ai/client'
 
 interface DeepgramMessage {
   is_final?: boolean
@@ -24,16 +23,6 @@ const EDIT_COMMAND_PATTERNS = [
   /^never\s*mind$/i
 ]
 
-const POLISH_DEBOUNCE_MS = 2500
-
-const POLISH_SYSTEM_PROMPT = `You are cleaning up live dictated speech-to-text as it is spoken. Given raw transcript text, rewrite it into clean, well-formatted markdown:
-- Remove filler words, false starts, and stutters/repeats (um, uh, like, you know).
-- Fix punctuation and capitalization.
-- If the speech implies a list, sequence ("first... second..."), or heading, format it as proper markdown.
-- If the speaker corrects themselves mid-thought (e.g. "actually, scratch that, I meant X"), keep only the corrected version.
-- Preserve the original meaning and all information — do not summarize, shorten, or add anything new.
-- Respond with markdown only. No preamble, no explanation, no code fences.`
-
 function isEditCommand(text: string): boolean {
   const trimmed = text.trim().replace(/[.!?,]+$/, '')
   return EDIT_COMMAND_PATTERNS.some((re) => re.test(trimmed))
@@ -53,48 +42,7 @@ export function useDictation(editor: BlockNoteEditor): {
   const audioCtxRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
 
-  const aiEnabledRef = useRef(false)
   const utteranceLogRef = useRef<Utterance[]>([])
-  const checkpointBlockIdsRef = useRef<string[]>([])
-  const polishTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const polishQueueRef = useRef<Promise<void>>(Promise.resolve())
-
-  const runPolish = async (): Promise<void> => {
-    const blockIds = Array.from(new Set(checkpointBlockIdsRef.current))
-    checkpointBlockIdsRef.current = []
-    if (blockIds.length === 0) return
-
-    const blocks = blockIds
-      .map((id) => editor.getBlock(id))
-      .filter((b): b is NonNullable<typeof b> => Boolean(b))
-    if (blocks.length === 0) return
-
-    try {
-      const settings = await window.api.settings.get()
-      const raw = await editor.blocksToMarkdownLossy(blocks)
-      if (!raw.trim()) return
-      const polished = await aiComplete(settings, {
-        system: POLISH_SYSTEM_PROMPT,
-        prompt: raw,
-        maxTokens: 1024
-      })
-      if (!polished.trim()) return
-      const newBlocks = await editor.tryParseMarkdownToBlocks(polished)
-      editor.replaceBlocks(blocks, newBlocks)
-      const processed = new Set(blockIds)
-      utteranceLogRef.current = utteranceLogRef.current.filter((u) => !processed.has(u.blockId))
-    } catch {
-      // Non-fatal — leave the raw dictated text as-is and keep listening.
-    }
-  }
-
-  const schedulePolish = (): void => {
-    if (!aiEnabledRef.current) return
-    if (polishTimerRef.current) clearTimeout(polishTimerRef.current)
-    polishTimerRef.current = setTimeout(() => {
-      polishQueueRef.current = polishQueueRef.current.then(runPolish)
-    }, POLISH_DEBOUNCE_MS)
-  }
 
   const stop = (): void => {
     recorderRef.current?.stop()
@@ -106,9 +54,7 @@ export function useDictation(editor: BlockNoteEditor): {
     audioCtxRef.current?.close()
     audioCtxRef.current = null
     analyserRef.current = null
-    if (polishTimerRef.current) clearTimeout(polishTimerRef.current)
     utteranceLogRef.current = []
-    checkpointBlockIdsRef.current = []
     setIsRecording(false)
   }
 
@@ -119,9 +65,7 @@ export function useDictation(editor: BlockNoteEditor): {
       setError('Add a Deepgram API key in Settings to use dictation.')
       return
     }
-    aiEnabledRef.current = settings.aiDictationPolish && isAiConfigured(settings)
     utteranceLogRef.current = []
-    checkpointBlockIdsRef.current = []
 
     let stream: MediaStream
     try {
@@ -164,7 +108,7 @@ export function useDictation(editor: BlockNoteEditor): {
           try {
             editor.updateBlock(last.blockId, { content: last.contentBefore })
           } catch {
-            // Block may no longer exist (e.g. already restructured by a polish pass).
+            // Block may no longer exist.
           }
         }
         return
@@ -172,10 +116,8 @@ export function useDictation(editor: BlockNoteEditor): {
 
       const cursor = editor.getTextCursorPosition()
       utteranceLogRef.current.push({ blockId: cursor.block.id, contentBefore: cursor.block.content })
-      checkpointBlockIdsRef.current.push(cursor.block.id)
 
       editor.insertInlineContent([{ type: 'text', text: `${transcript} `, styles: {} }])
-      schedulePolish()
     }
 
     ws.onopen = () => {

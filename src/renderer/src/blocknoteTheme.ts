@@ -10,7 +10,7 @@ function buildLightTheme(fontFamily: string): Theme {
       editor: { text: '#2b2a27', background: '#faf8f5' },
       menu: { text: '#2b2a27', background: '#fdfcfa' },
       hovered: { text: '#2b2a27', background: '#ece9e2' },
-      selected: { text: '#2b2a27', background: 'rgba(161, 82, 60, 0.12)' },
+      selected: { text: 'var(--text)', background: 'var(--accent-soft)' },
       border: '#e3e0d8',
       sideMenu: '#b7b3a8'
     },
@@ -27,7 +27,7 @@ function buildDarkTheme(fontFamily: string): Theme {
       editor: { text: '#e9e6df', background: '#171614' },
       menu: { text: '#e9e6df', background: '#1d1c19' },
       hovered: { text: '#e9e6df', background: '#26241f' },
-      selected: { text: '#e9e6df', background: 'rgba(217, 138, 112, 0.16)' },
+      selected: { text: 'var(--text)', background: 'var(--accent-soft)' },
       border: '#322f29',
       sideMenu: '#5a564c'
     },

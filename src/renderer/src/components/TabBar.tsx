@@ -1,6 +1,7 @@
 import { useRef } from 'react'
-import { PanelLeft, Plus, Settings, X } from 'lucide-react'
+import { PanelLeft, Plus, Settings, Sparkles, X } from 'lucide-react'
 import type { Tab } from '../tabs'
+import ShortcutsHelp from './ShortcutsHelp'
 
 const DOUBLE_CLICK_MS = 400
 
@@ -12,6 +13,9 @@ interface Props {
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onNewNote: () => void
+  agentAvailable: boolean
+  agentPanelOpen: boolean
+  onToggleAgentPanel: () => void
   onOpenSettings: () => void
 }
 
@@ -23,6 +27,9 @@ export default function TabBar({
   onSelect,
   onClose,
   onNewNote,
+  agentAvailable,
+  agentPanelOpen,
+  onToggleAgentPanel,
   onOpenSettings
 }: Props) {
   // Standard DOM dblclick doesn't fire reliably on -webkit-app-region: drag
@@ -45,7 +52,8 @@ export default function TabBar({
 
   return (
     <div className="tab-bar" onMouseDown={handleMouseDown}>
-      <div className="tab-bar-drag-spacer">
+      <div className={sidebarCollapsed ? 'titlebar-sidebar collapsed' : 'titlebar-sidebar'}>
+        <span className="app-title">{document.title}</span>
         <button
           className="sidebar-toggle-btn"
           onClick={onToggleSidebar}
@@ -78,6 +86,16 @@ export default function TabBar({
         </button>
       </div>
       <div className="tab-bar-actions">
+        {agentAvailable && (
+          <button
+            className={agentPanelOpen ? 'tab-bar-icon-btn active' : 'tab-bar-icon-btn'}
+            onClick={onToggleAgentPanel}
+            title={agentPanelOpen ? 'Hide agent panel' : 'Show agent panel'}
+          >
+            <Sparkles size={15} />
+          </button>
+        )}
+        <ShortcutsHelp />
         <button className="tab-bar-icon-btn" onClick={onOpenSettings} title="Settings">
           <Settings size={16} />
         </button>

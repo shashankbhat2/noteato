@@ -3,30 +3,47 @@ import { BlockNoteEditor, type Block } from '@blocknote/core'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
-import { FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
+import { Code, FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
+import { linkifyBlocks } from '../linkify'
 import DictationPanel from './DictationPanel'
 import SelectionAiToolbar from './SelectionAiToolbar'
-import AskNotePanel from './AskNotePanel'
+import SelectionAiPopup from './SelectionAiPopup'
 
 interface Props {
-  filename: string
+  path: string
   onSaved: (note: Note) => void
+  onEditorReady?: (editor: BlockNoteEditor | null) => void
+}
+
+interface AiPopupState {
+  blocks: Block[]
+  position: { x: number; y: number } | null
 }
 
 const SAVE_DEBOUNCE_MS = 600
 
-export default function NoteEditor({ filename, onSaved }: Props) {
-  const { theme, fontFamily, zenMode, aiSelectionActions, aiAskNote } = useTheme()
+export default function NoteEditor({
+  path,
+  onSaved,
+  onEditorReady
+}: Props) {
+  const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [title, setTitle] = useState('')
   const [fullWidth, setFullWidth] = useState(false)
   const [initialBlocks, setInitialBlocks] = useState<Block[] | 'loading'>('loading')
+  const [markdownMode, setMarkdownMode] = useState(false)
+  const [markdownText, setMarkdownText] = useState('')
   const [aiError, setAiError] = useState<string | null>(null)
+  const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const aiStreamingRef = useRef(false)
+  const onEditorReadyRef = useRef(onEditorReady)
+  onEditorReadyRef.current = onEditorReady
 
   useEffect(() => {
     if (!aiError) return
@@ -37,8 +54,9 @@ export default function NoteEditor({ filename, onSaved }: Props) {
   useEffect(() => {
     let cancelled = false
     setInitialBlocks('loading')
+    setMarkdownMode(false)
 
-    window.api.notes.read(filename).then(async (loaded) => {
+    window.api.notes.read(path).then(async (loaded) => {
       if (cancelled) return
       setNote(loaded)
       setTitle(loaded.title)
@@ -46,7 +64,7 @@ export default function NoteEditor({ filename, onSaved }: Props) {
 
       const scratch = BlockNoteEditor.create()
       const blocks = loaded.body.trim()
-        ? await scratch.tryParseMarkdownToBlocks(loaded.body)
+        ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
         : scratch.document
       if (!cancelled) setInitialBlocks(blocks)
     })
@@ -54,7 +72,7 @@ export default function NoteEditor({ filename, onSaved }: Props) {
     return () => {
       cancelled = true
     }
-  }, [filename])
+  }, [path])
 
   const editor = useMemo(() => {
     if (initialBlocks === 'loading') return undefined
@@ -62,10 +80,15 @@ export default function NoteEditor({ filename, onSaved }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialBlocks])
 
-  const persist = async (nextTitle: string, nextFullWidth: boolean): Promise<void> => {
-    if (!editor || !note) return
-    const markdown = await editor.blocksToMarkdownLossy(editor.document)
-    const saved = await window.api.notes.save(note.filename, {
+  // Expose the active editor so the app menu's Undo/Redo can drive its history.
+  useEffect(() => {
+    onEditorReadyRef.current?.(editor ?? null)
+    return () => onEditorReadyRef.current?.(null)
+  }, [editor])
+
+  const save = async (markdown: string, nextTitle: string, nextFullWidth: boolean): Promise<void> => {
+    if (!note) return
+    const saved = await window.api.notes.save(note.path, {
       title: nextTitle,
       body: markdown,
       tags: note.tags,
@@ -75,15 +98,54 @@ export default function NoteEditor({ filename, onSaved }: Props) {
     onSaved(saved)
   }
 
+  const currentMarkdown = async (): Promise<string> => {
+    if (markdownMode) return markdownText
+    return editor ? editor.blocksToMarkdownLossy(editor.document) : ''
+  }
+
+  const persist = async (nextTitle: string, nextFullWidth: boolean): Promise<void> => {
+    await save(await currentMarkdown(), nextTitle, nextFullWidth)
+  }
+
   const scheduleSave = (nextTitle = title): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => persist(nextTitle, fullWidth), SAVE_DEBOUNCE_MS)
+  }
+
+  const handleAiStreamingChange = (streaming: boolean): void => {
+    aiStreamingRef.current = streaming
+    if (streaming) {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+    } else {
+      scheduleSave()
+    }
+  }
+
+  const handleMarkdownChange = (value: string): void => {
+    setMarkdownText(value)
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => save(value, title, fullWidth), SAVE_DEBOUNCE_MS)
   }
 
   const toggleFullWidth = (): void => {
     const next = !fullWidth
     setFullWidth(next)
     persist(title, next)
+  }
+
+  const toggleMarkdownMode = async (): Promise<void> => {
+    if (!editor) return
+    if (!markdownMode) {
+      setMarkdownText(await editor.blocksToMarkdownLossy(editor.document))
+      setMarkdownMode(true)
+    } else {
+      // Re-parse the edited markdown back into blocks for the rich editor.
+      const parsed = await editor.tryParseMarkdownToBlocks(markdownText)
+      const blocks = parsed.length ? linkifyBlocks(parsed) : [{ type: 'paragraph' as const }]
+      editor.replaceBlocks(editor.document, blocks)
+      setMarkdownMode(false)
+      save(markdownText, title, fullWidth)
+    }
   }
 
   useEffect(() => {
@@ -94,8 +156,41 @@ export default function NoteEditor({ filename, onSaved }: Props) {
 
   if (!editor || !note) return <div className="empty-state">Loading…</div>
 
+  const segments = note.path.split('/')
+  const fileLabel = segments[segments.length - 1].replace(/\.md$/, '')
+  const folderSegments = segments.slice(0, -1)
+
   return (
     <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
+      <div className="note-editor-toolbar">
+        <div className="note-breadcrumb" title={note.path}>
+          {folderSegments.map((seg, i) => (
+            <span key={i} className="breadcrumb-seg">
+              {seg}
+              <span className="breadcrumb-sep">/</span>
+            </span>
+          ))}
+          <span className="breadcrumb-file">{fileLabel}</span>
+        </div>
+        <div className="toolbar-actions">
+          {!markdownMode && <DictationPanel editor={editor} />}
+          <button
+            className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
+            onClick={toggleFullWidth}
+            title={fullWidth ? 'Use narrow width' : 'Use full width'}
+          >
+            {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
+          </button>
+          <button
+            className={markdownMode ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
+            onClick={toggleMarkdownMode}
+            title={markdownMode ? 'Switch to rich editor' : 'Edit as plain markdown'}
+          >
+            <Code size={15} />
+          </button>
+        </div>
+      </div>
+
       <div className="note-editor-header">
         <input
           className="note-title-input"
@@ -108,28 +203,44 @@ export default function NoteEditor({ filename, onSaved }: Props) {
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()
-              editor.focus()
+              if (!markdownMode) editor.focus()
             }
           }}
         />
-        {aiAskNote && !zenMode && <AskNotePanel editor={editor} noteTitle={title} />}
-        <button
-          className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
-          onClick={toggleFullWidth}
-          title={fullWidth ? 'Use narrow width' : 'Use full width'}
-        >
-          {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
-        </button>
       </div>
-      <BlockNoteView
-        editor={editor}
-        onChange={() => scheduleSave()}
-        theme={getNoteatoTheme(theme, FONT_STACKS[fontFamily])}
-        formattingToolbar={!aiSelectionActions}
-      >
-        {aiSelectionActions && <SelectionAiToolbar editor={editor} onError={setAiError} />}
-      </BlockNoteView>
-      <DictationPanel editor={editor} />
+
+      {markdownMode ? (
+        <textarea
+          className="note-markdown-textarea"
+          value={markdownText}
+          spellCheck={false}
+          placeholder="# Write markdown…"
+          onChange={(e) => handleMarkdownChange(e.target.value)}
+        />
+      ) : (
+        <>
+          <BlockNoteView
+            editor={editor}
+            onChange={() => {
+              if (!aiStreamingRef.current) scheduleSave()
+            }}
+            theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
+            formattingToolbar={!aiSelectionActions}
+          >
+            {aiSelectionActions && <SelectionAiToolbar editor={editor} onOpen={setAiPopup} />}
+          </BlockNoteView>
+          {aiPopup && (
+            <SelectionAiPopup
+              editor={editor}
+              blocks={aiPopup.blocks}
+              position={aiPopup.position}
+              onError={setAiError}
+              onStreamingChange={handleAiStreamingChange}
+              onClose={() => setAiPopup(null)}
+            />
+          )}
+        </>
+      )}
       {aiError && <div className="ai-error-toast">{aiError}</div>}
     </div>
   )

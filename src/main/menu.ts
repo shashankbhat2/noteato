@@ -52,6 +52,11 @@ export function buildAppMenu(): Menu {
           accelerator: 'CmdOrCtrl+O',
           click: () => sendShortcut('import-markdown')
         },
+        {
+          label: 'Find in Notes…',
+          accelerator: 'CmdOrCtrl+K',
+          click: () => sendShortcut('search')
+        },
         { type: 'separator' },
         {
           label: 'Close Tab',
@@ -63,8 +68,18 @@ export function buildAppMenu(): Menu {
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
+        // Route to the editor's own history instead of role:'undo'/'redo', which
+        // fire Chromium's execCommand undo and corrupt the ProseMirror document.
+        {
+          label: 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          click: () => sendShortcut('undo')
+        },
+        {
+          label: 'Redo',
+          accelerator: 'CmdOrCtrl+Shift+Z',
+          click: () => sendShortcut('redo')
+        },
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },

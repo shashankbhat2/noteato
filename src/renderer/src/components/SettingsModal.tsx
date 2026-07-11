@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen, Moon, Sun, X } from 'lucide-react'
+import { Check, FolderOpen, Monitor, Moon, Sun, X } from 'lucide-react'
 import type { AiProvider, Settings } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
+import { ACCENT_OPTIONS } from '../accents'
 import { AI_MODELS } from '../ai/models'
 
 interface Props {
@@ -16,14 +17,14 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     setTheme,
     fontFamily,
     setFontFamily,
+    accent,
+    setAccent,
     zenMode,
     setZenMode,
-    aiDictationPolish,
-    setAiDictationPolish,
     aiSelectionActions,
     setAiSelectionActions,
-    aiAskNote,
-    setAiAskNote
+    aiAgentEnabled,
+    setAiAgentEnabled
   } = useTheme()
   const [settings, setSettings] = useState<Settings | null>(null)
   const [notesDir, setNotesDir] = useState('')
@@ -50,6 +51,10 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
       anthropicApiKey: settings.anthropicApiKey,
       openaiApiKey: settings.openaiApiKey
     })
+    if (!settings.anthropicApiKey.trim() && !settings.openaiApiKey.trim()) {
+      setAiAgentEnabled(false)
+    }
+    window.dispatchEvent(new Event('noteato:ai-settings-changed'))
     setAiSaved(true)
     setTimeout(() => setAiSaved(false), 1500)
   }
@@ -66,6 +71,8 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     onNotesDirChanged?.()
   }
 
+  const hasAnyAiKey = Boolean(settings?.anthropicApiKey.trim() || settings?.openaiApiKey.trim())
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
@@ -76,13 +83,21 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
           </button>
         </div>
 
+        <div className="settings-body">
         {!settings ? (
           <div className="empty-state">Loading…</div>
         ) : (
           <>
             <section className="settings-section">
-              <h2>Appearance</h2>
+              <h2>Theme</h2>
               <div className="theme-switch">
+                <button
+                  className={theme === 'system' ? 'theme-option active' : 'theme-option'}
+                  onClick={() => setTheme('system')}
+                >
+                  <Monitor size={15} />
+                  <span>System</span>
+                </button>
                 <button
                   className={theme === 'light' ? 'theme-option active' : 'theme-option'}
                   onClick={() => setTheme('light')}
@@ -97,6 +112,24 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
                   <Moon size={15} />
                   <span>Dark</span>
                 </button>
+              </div>
+            </section>
+
+            <section className="settings-section">
+              <h2>Accent</h2>
+              <div className="accent-swatches">
+                {ACCENT_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    className={accent === option.id ? 'accent-swatch active' : 'accent-swatch'}
+                    style={{ backgroundColor: option.swatch }}
+                    title={option.label}
+                    aria-label={option.label}
+                    onClick={() => setAccent(option.id)}
+                  >
+                    {accent === option.id && <Check size={13} strokeWidth={3} />}
+                  </button>
+                ))}
               </div>
             </section>
 
@@ -131,10 +164,10 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
               <p className="hint">Persists across restarts. Press ⌘. or ⌘, to get back here.</p>
             </section>
 
-            <section className="settings-section">
+            <section className="settings-section settings-ai-preferences">
               <h2>AI</h2>
               <p className="hint">Bring your own API key. Off by default — nothing is sent anywhere until you set a provider.</p>
-              <div className="theme-switch" style={{ marginTop: 12 }}>
+              <div className="theme-switch settings-ai-providers">
                 <button
                   className={settings.aiProvider === 'none' ? 'theme-option active' : 'theme-option'}
                   onClick={() => handleProviderChange('none')}
@@ -156,8 +189,8 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
               </div>
 
               {settings.aiProvider !== 'none' && (
-                <>
-                  <label className="settings-label" style={{ marginTop: 16 }}>
+                <div className="settings-ai-fields">
+                  <label className="settings-label">
                     Model
                     <input
                       type="text"
@@ -199,46 +232,39 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
                       {aiSaved ? 'Saved' : 'Save AI settings'}
                     </button>
                   </div>
-                </>
+                </div>
               )}
             </section>
 
-            <section className="settings-section">
+            <section className="settings-section settings-ai-features">
               <h2>AI features</h2>
-              <label className="settings-toggle-row">
-                <span>Live dictation polish — clean up and format as you speak</span>
-                <button
-                  className={aiDictationPolish ? 'settings-switch on' : 'settings-switch'}
-                  onClick={() => setAiDictationPolish(!aiDictationPolish)}
-                  role="switch"
-                  aria-checked={aiDictationPolish}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <label className="settings-toggle-row" style={{ marginTop: 12 }}>
-                <span>Selection actions — summarize, improve, extract in place</span>
-                <button
-                  className={aiSelectionActions ? 'settings-switch on' : 'settings-switch'}
-                  onClick={() => setAiSelectionActions(!aiSelectionActions)}
-                  role="switch"
-                  aria-checked={aiSelectionActions}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <label className="settings-toggle-row" style={{ marginTop: 12 }}>
-                <span>Ask a question about this note</span>
-                <button
-                  className={aiAskNote ? 'settings-switch on' : 'settings-switch'}
-                  onClick={() => setAiAskNote(!aiAskNote)}
-                  role="switch"
-                  aria-checked={aiAskNote}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <p className="hint">The note Q&A popup is also always hidden in Zen mode.</p>
+              <div className="settings-toggle-stack">
+                <label className="settings-toggle-row">
+                  <span>Selection actions — summarize, improve, extract in place</span>
+                  <button
+                    className={aiSelectionActions ? 'settings-switch on' : 'settings-switch'}
+                    onClick={() => setAiSelectionActions(!aiSelectionActions)}
+                    role="switch"
+                    aria-checked={aiSelectionActions}
+                  >
+                    <span className="settings-switch-knob" />
+                  </button>
+                </label>
+                <label className="settings-toggle-row">
+                  <span>Agent panel — chat with and edit the active note</span>
+                  <button
+                    className={aiAgentEnabled ? 'settings-switch on' : 'settings-switch'}
+                    onClick={() => setAiAgentEnabled(!aiAgentEnabled)}
+                    role="switch"
+                    aria-checked={aiAgentEnabled}
+                    disabled={!hasAnyAiKey}
+                    title={hasAnyAiKey ? undefined : 'Add an OpenAI or Anthropic API key first'}
+                  >
+                    <span className="settings-switch-knob" />
+                  </button>
+                </label>
+              </div>
+              {!hasAnyAiKey && <p className="hint">Add an API key to enable the agent panel.</p>}
             </section>
 
             <section className="settings-section">
@@ -271,6 +297,7 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
             </section>
           </>
         )}
+        </div>
       </div>
     </div>
   )

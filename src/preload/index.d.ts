@@ -1,9 +1,11 @@
 import type { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   AiCompleteRequest,
+  DeletedEntry,
   Note,
   NoteSummary,
   SaveOptions,
+  SearchResult,
   Settings,
   StickyNoteData
 } from '../shared/types'
@@ -11,10 +13,23 @@ import type {
 interface NoteatoApi {
   notes: {
     list: () => Promise<NoteSummary[]>
-    read: (filename: string) => Promise<Note>
-    create: (title?: string) => Promise<Note>
-    save: (filename: string, options: SaveOptions) => Promise<Note>
-    delete: (filename: string) => Promise<void>
+    listFolders: () => Promise<string[]>
+    read: (path: string) => Promise<Note>
+    create: (title?: string, folder?: string) => Promise<Note>
+    save: (path: string, options: SaveOptions) => Promise<Note>
+    setPinned: (path: string, pinned: boolean) => Promise<NoteSummary | null>
+    delete: (path: string) => Promise<DeletedEntry>
+    restore: (
+      trashName: string,
+      originalPath: string,
+      isFolder: boolean
+    ) => Promise<NoteSummary | null>
+    createFolder: (path: string) => Promise<void>
+    renameFolder: (path: string, newName: string) => Promise<void>
+    moveNote: (path: string, targetFolder: string) => Promise<NoteSummary | null>
+    moveFolder: (path: string, targetParent: string) => Promise<void>
+    deleteFolder: (path: string) => Promise<DeletedEntry>
+    search: (query: string) => Promise<SearchResult[]>
     getDir: () => Promise<string>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
@@ -31,6 +46,7 @@ interface NoteatoApi {
   }
   ai: {
     complete: (req: AiCompleteRequest) => Promise<string>
+    stream: (req: AiCompleteRequest, onDelta: (delta: string) => void) => Promise<string>
   }
   app: {
     closeWindow: () => Promise<void>

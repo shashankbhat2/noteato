@@ -3,6 +3,7 @@ import { Keyboard } from 'lucide-react'
 
 const SHORTCUTS: [string, string][] = [
   ['⌘T', 'New note'],
+  ['⌘K', 'Search notes'],
   ['⌘⇧N', 'New sticky note'],
   ['⌘O', 'Import markdown'],
   ['⌘W', 'Close tab'],

@@ -14,7 +14,7 @@ export default function DictationPanel({ editor }: { editor: BlockNoteEditor }) 
           onClick={toggle}
           title={isRecording ? 'Stop dictation' : 'Start dictation'}
         >
-          {isRecording ? <Square size={16} fill="currentColor" /> : <Mic size={19} />}
+          {isRecording ? <Square size={10} fill="currentColor" /> : <Mic size={14} />}
         </button>
         {isRecording && <Waveform analyser={analyser} active={isRecording} />}
       </div>

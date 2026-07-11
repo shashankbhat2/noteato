@@ -1,7 +1,7 @@
 export interface Tab {
-  /** The note's stable id (never changes, unlike filename which can be renamed). */
+  /** The note's stable id (never changes, unlike its path which can be renamed/moved). */
   id: string
-  /** Filename at the time the tab was opened — used only to bootstrap the editor's initial read. */
-  filename: string
+  /** Relative path used to (re)load the editor's content; updated if the note is moved. */
+  path: string
   title: string
 }
