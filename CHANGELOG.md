@@ -1,5 +1,12 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-07-12
+
+### Fixed
+
+- The menu bar (tray) icon rendered blank due to a corrupted embedded image; it now shows correctly and adapts to light and dark menu bars.
+- App icon is now built from the properly rendered per-size icon set, so it stays crisp at small sizes (Finder lists, Spotlight, Dock at small sizes).
+
 ## [0.7.0] - 2026-07-12
 
 ### Added
