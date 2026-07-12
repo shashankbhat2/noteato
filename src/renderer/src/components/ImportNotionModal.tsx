@@ -1,35 +1,40 @@
-import { useEffect } from 'react'
-import { IconBrandNotion as NotionLogo, IconX as X } from '@tabler/icons-react'
-
+import { useEffect } from "react";
+import { IconBrandNotion as NotionLogo, IconX as X } from "@tabler/icons-react";
+import notionGuide from "../components/assets/notion-export-guide.png";
 interface Props {
-  onClose: () => void
-  onImport: () => void
+  onClose: () => void;
+  onImport: () => void;
 }
 
 const STEPS = [
-  'In Notion, open the page or workspace you want to export.',
+  "In Notion, open the page or workspace you want to export.",
   'Click the "•••" menu in the top right, then choose Export.',
-  'Set the export format to Markdown & CSV, and pick a scope (just this page, or everything).',
-  'Click Export — Notion downloads a .zip (or emails you one, for large workspaces).',
-  'Unzip it — double-clicking in Finder does this automatically.',
-  'Click "Choose export folder…" below and select the unzipped folder.'
-]
+  "Set the export format to Markdown & CSV, and pick a scope (just this page, or everything).",
+  "Click Export — Notion downloads a .zip (or emails you one, for large workspaces).",
+  "Unzip it — double-clicking in Finder does this automatically.",
+  'Click "Choose export folder…" below and select the unzipped folder.',
+];
 
 export default function ImportNotionModal({ onClose, onImport }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal import-notion-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal import-notion-modal"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="import-notion-preview">
-          <NotionLogo size={40} />
-          <span>Preview coming soon</span>
+          <img
+            src={notionGuide}
+            alt="Notion's Export menu with Markdown & CSV selected"
+          />{" "}
         </div>
         <div className="import-notion-content">
           <div className="import-notion-header">
@@ -44,8 +49,9 @@ export default function ImportNotionModal({ onClose, onImport }: Props) {
             ))}
           </ol>
           <p className="hint">
-            Pages become notes and sub-pages become nested folders, with internal page links and
-            images carried over. Database exports come in as plain .csv files.
+            Pages become notes and sub-pages become nested folders, with
+            internal page links and images carried over. Database exports come
+            in as plain .csv files.
           </p>
           <div className="import-notion-actions">
             <button className="import-notion-cancel" onClick={onClose}>
@@ -58,5 +64,5 @@ export default function ImportNotionModal({ onClose, onImport }: Props) {
         </div>
       </div>
     </div>
-  )
+  );
 }

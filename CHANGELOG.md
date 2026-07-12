@@ -1,6 +1,13 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.3] - 2026-07-12
+
+### Changed
+
+- Added a visual export guide to the Notion import flow.
+- Removed the redundant Linked label above external folders in the sidebar.
+
+## [0.7.2] - 2026-07-12
 
 ### Changed
 

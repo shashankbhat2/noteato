@@ -536,7 +536,6 @@ export default function Sidebar({
 
         {linkedFolders.length > 0 && (
           <>
-            <div className="sidebar-section-label">Linked</div>
             <ul className="note-list">{linkedFolders.map(renderLinkedFolder)}</ul>
           </>
         )}

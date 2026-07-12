@@ -1,6 +1,6 @@
 {
   "name": "noteato",
-  "version": "0.7.1",
+  "version": "0.7.3",
   "description": "A minimal, bloat-free, block-based note taking app for Mac (Apple Silicon) — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",
