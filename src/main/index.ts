@@ -47,6 +47,18 @@ const MIN_HEIGHT = 250
 
 let mainWindow: BrowserWindow | null = null
 
+// While the app lives only in the menu bar (keepInMenuBar on, no visible
+// windows), drop the Dock icon and its running dot — the same behavior as
+// menu-bar apps like Docker Desktop. Any window becoming visible brings the
+// Dock icon back (see browser-window-created below).
+function hideDockIfBackgrounded(): void {
+  if (process.platform !== 'darwin') return
+  const anyVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible())
+  if (!anyVisible && settingsStore.read().keepInMenuBar && app.dock.isVisible()) {
+    app.dock.hide()
+  }
+}
+
 // --- Markdown files opened via the OS (Finder "Open With", double-click) ----
 // macOS delivers these through 'open-file' (possibly before the app is ready);
 // Windows/Linux pass them on argv. Each file is linked in place, then
@@ -259,7 +271,12 @@ function registerIpcHandlers(): void {
     const next = { ...settingsStore.read(), ...patch }
     settingsStore.write(next)
     if (patch.theme) nativeTheme.themeSource = patch.theme
-    if ('keepInMenuBar' in patch) trayManager.setEnabled(next.keepInMenuBar)
+    if ('keepInMenuBar' in patch) {
+      trayManager.setEnabled(next.keepInMenuBar)
+      // Turning the tray off must never leave the app unreachable with a
+      // hidden Dock icon and no menu bar presence.
+      if (!next.keepInMenuBar && process.platform === 'darwin') void app.dock.show()
+    }
     return next
   })
 
@@ -301,6 +318,17 @@ app.whenReady().then(() => {
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
+    // Restoring the Dock icon flips the app back to a regular Dock app; the
+    // window is refocused once that completes because the activation-policy
+    // switch can steal focus from a window shown in the same beat.
+    window.on('show', () => {
+      if (process.platform !== 'darwin' || app.dock.isVisible()) return
+      void app.dock.show().then(() => {
+        if (!window.isDestroyed()) window.focus()
+      })
+    })
+    window.on('hide', () => hideDockIfBackgrounded())
+    window.on('closed', () => setImmediate(hideDockIfBackgrounded))
   })
 
   Menu.setApplicationMenu(buildAppMenu())

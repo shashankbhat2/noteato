@@ -47,6 +47,9 @@ export class TrayManager {
         label: 'Quit Noteato',
         click: () => {
           this.onQuit()
+          // Drop the tray icon right away so quitting feels immediate even
+          // if teardown takes a beat.
+          this.destroy()
           app.quit()
         }
       }

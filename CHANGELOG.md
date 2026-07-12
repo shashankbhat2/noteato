@@ -1,5 +1,11 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- With "Keep in menu bar" on, closing the window now also removes Noteato from the Dock (no icon or running dot) while it keeps running in the menu bar — like other menu-bar apps. Reopening it from the menu bar, a reminder, or Spotlight restores the Dock icon, and quitting from the menu bar removes the tray icon immediately.
+
 ## [0.7.1] - 2026-07-12
 
 ### Fixed
