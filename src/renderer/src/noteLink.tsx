@@ -1,13 +1,14 @@
 import { BlockNoteEditor, BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core'
 import { createReactInlineContentSpec } from '@blocknote/react'
-import { FileText } from 'lucide-react'
+import { IconFileText as FileText } from '@tabler/icons-react'
+import { NOTE_LINK_PREFIX } from '../../shared/noteLink'
 
 // Note mentions are stored in markdown as "[Title](#note/<id>)". Ids survive
 // the target being moved or renamed (paths don't), and a fragment href passes
 // BlockNote's link protocol allowlist — a custom "note:" scheme would be
 // stripped when the markdown is parsed back on reopen. linkifyBlocks converts
 // these links into noteLink inline content after every markdown parse.
-export const NOTE_LINK_PREFIX = '#note/'
+export { NOTE_LINK_PREFIX }
 
 // Fired by a mention chip (rendered deep inside BlockNote) to ask the app
 // shell to open the target note in a tab. detail = the note id.

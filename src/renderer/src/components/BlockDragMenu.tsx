@@ -7,19 +7,19 @@ import {
   useExtensionState
 } from '@blocknote/react'
 import {
-  Code,
-  Copy,
-  CopyPlus,
-  Heading1,
-  Heading2,
-  Heading3,
-  List,
-  ListChecks,
-  ListOrdered,
-  Pilcrow,
-  TextQuote,
-  Trash2
-} from 'lucide-react'
+  IconBlockquote as TextQuote,
+  IconCode as Code,
+  IconCopy as Copy,
+  IconCopyPlus as CopyPlus,
+  IconH1 as Heading1,
+  IconH2 as Heading2,
+  IconH3 as Heading3,
+  IconList as List,
+  IconListCheck as ListChecks,
+  IconListNumbers as ListOrdered,
+  IconPilcrow as Pilcrow,
+  IconTrash as Trash2
+} from '@tabler/icons-react'
 import type { NoteatoBlock, NoteatoEditor } from '../noteLink'
 
 interface TurnIntoOption {

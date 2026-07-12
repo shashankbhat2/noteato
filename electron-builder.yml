@@ -11,6 +11,9 @@ files:
   - '!**/test/**'
   - '!**/*.d.ts'
 asar: true
+afterPack: scripts/afterPack.cjs
+electronLanguages:
+  - en
 artifactName: '${productName}-${version}-${arch}.${ext}'
 # Register with the OS as an editor for markdown files (enables Finder
 # "Open With" / double-click via Launch Services on macOS).

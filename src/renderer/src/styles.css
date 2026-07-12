@@ -511,6 +511,11 @@ button {
   flex-shrink: 0;
 }
 
+.note-reminder-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
 .note-item.active .note-title {
   color: var(--text);
   font-weight: 600;
@@ -634,6 +639,16 @@ button {
    extend into since nothing here clips overflow. */
 .note-editor .bn-editor {
   padding-inline: 2px;
+}
+
+/* BlockNote hardcodes Inter on .bn-default-styles, which otherwise wins over
+   its theme font variable. Keep rich note content on the selected app stack;
+   code and code-block elements retain their own monospace declarations. */
+.note-editor .bn-root,
+.note-editor .bn-editor,
+.note-editor .bn-default-styles {
+  --bn-font-family: var(--font-family);
+  font-family: var(--font-family);
 }
 
 /* BlockNote renders some blocks with hardcoded colors that ignore the
@@ -1040,6 +1055,97 @@ button {
 .modal-close-btn:hover {
   color: var(--text);
   background: var(--bg-tertiary);
+}
+
+/* Import from Notion — two-pane modal: preview banner + how-to guide. */
+.import-notion-modal {
+  width: 620px;
+  max-width: calc(100vw - 40px);
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.import-notion-preview {
+  flex: 0 0 38%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: linear-gradient(160deg, var(--bg-tertiary), var(--bg));
+  border-right: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.import-notion-preview svg {
+  opacity: 0.5;
+}
+
+.import-notion-preview span {
+  font-size: 12px;
+}
+
+.import-notion-content {
+  flex: 1;
+  min-width: 0;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.import-notion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.import-notion-header h1 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.import-notion-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.import-notion-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.import-notion-cancel {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.import-notion-cancel:hover {
+  background: var(--bg-tertiary);
+}
+
+.import-notion-submit {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: 7px;
+  cursor: pointer;
 }
 
 .settings-toggle-row {
@@ -1534,6 +1640,44 @@ button {
   color: var(--text-muted);
 }
 
+/* Reminder popover — reuses .ai-popup / .ai-popup-preset for the shell and presets. */
+.reminder-popover-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.reminder-popover-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 6px;
+}
+
+.reminder-popover-set {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.reminder-popover-clear {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-muted);
+}
+
 /* Overlay result bubble (proofread / summarize). */
 .ai-popup-result {
   max-height: 240px;
@@ -1624,10 +1768,12 @@ button {
   transition: width 0.15s ease;
 }
 
+/* With the sidebar collapsed there's room to give the agent a third of the window,
+   but never less than its usual width on narrow windows. */
 .app-body.sidebar-collapsed .agent-panel {
-  width: 33.333%;
-  min-width: var(--sidebar-expanded-w);
+  width: max(var(--sidebar-expanded-w), 33.333vw);
 }
+
 
 .agent-header {
   min-height: 40px;

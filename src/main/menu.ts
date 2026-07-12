@@ -48,9 +48,13 @@ export function buildAppMenu(): Menu {
         },
         { type: 'separator' },
         {
-          label: 'Import Markdown…',
+          label: 'Open Markdown…',
           accelerator: 'CmdOrCtrl+O',
           click: () => sendShortcut('import-markdown')
+        },
+        {
+          label: 'Import Notion Export…',
+          click: () => sendShortcut('import-notion')
         },
         {
           label: 'Find in Notes…',

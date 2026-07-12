@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Keyboard } from 'lucide-react'
+import { IconKeyboard as Keyboard } from '@tabler/icons-react'
 
 const SHORTCUTS: [string, string][] = [
   ['⌘T', 'New note'],
   ['⌘K', 'Search notes'],
   ['⌘⇧N', 'New sticky note'],
-  ['⌘O', 'Import markdown'],
+  ['⌘O', 'Open markdown'],
   ['⌘W', 'Close tab'],
   ['⌘\\', 'Toggle sidebar'],
   ['⌘.', 'Toggle zen mode'],

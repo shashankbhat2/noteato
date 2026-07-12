@@ -1,4 +1,4 @@
-import { Mic, Square } from 'lucide-react'
+import { IconMicrophone as Mic, IconSquare as Square } from '@tabler/icons-react'
 import type { NoteatoEditor } from '../noteLink'
 import { useDictation } from '../dictation/useDictation'
 import Waveform from './Waveform'

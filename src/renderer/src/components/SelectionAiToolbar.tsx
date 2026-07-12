@@ -4,7 +4,7 @@ import {
   getFormattingToolbarItems,
   useComponentsContext
 } from '@blocknote/react'
-import { Sparkles } from 'lucide-react'
+import { IconSparkles as Sparkles } from '@tabler/icons-react'
 import type { NoteatoBlock, NoteatoEditor } from '../noteLink'
 
 interface OpenPayload {

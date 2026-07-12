@@ -4,6 +4,7 @@ import type {
   DeletedEntry,
   Note,
   NoteSummary,
+  NotionImportResult,
   SaveOptions,
   SearchResult,
   Settings,
@@ -18,7 +19,9 @@ interface NoteatoApi {
     create: (title?: string, folder?: string) => Promise<Note>
     save: (path: string, options: SaveOptions) => Promise<Note>
     setPinned: (path: string, pinned: boolean) => Promise<NoteSummary | null>
+    setReminder: (path: string, reminderAt: string | null) => Promise<NoteSummary | null>
     delete: (path: string) => Promise<DeletedEntry>
+    removeExternal: (path: string) => Promise<boolean>
     restore: (
       trashName: string,
       originalPath: string,
@@ -35,10 +38,16 @@ interface NoteatoApi {
     getDir: () => Promise<string>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
+    importNotion: () => Promise<NotionImportResult | null>
   }
   settings: {
     get: () => Promise<Settings>
     set: (patch: Partial<Settings>) => Promise<Settings>
+  }
+  reminders: {
+    takeFired: () => Promise<NoteSummary[]>
+    subscribeFired: (callback: (note: NoteSummary) => void) => () => void
+    subscribeOpen: (callback: (note: NoteSummary) => void) => () => void
   }
   sticky: {
     list: () => Promise<StickyNoteData[]>

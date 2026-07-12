@@ -5,6 +5,7 @@ import type {
   DeletedEntry,
   Note,
   NoteSummary,
+  NotionImportResult,
   SaveOptions,
   SearchResult,
   Settings,
@@ -22,7 +23,11 @@ const api = {
     save: (path: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', path, options),
     setPinned: (path: string, pinned: boolean): Promise<NoteSummary | null> =>
       ipcRenderer.invoke('notes:setPinned', path, pinned),
+    setReminder: (path: string, reminderAt: string | null): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:setReminder', path, reminderAt),
     delete: (path: string): Promise<DeletedEntry> => ipcRenderer.invoke('notes:delete', path),
+    removeExternal: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke('notes:removeExternal', path),
     restore: (
       trashName: string,
       originalPath: string,
@@ -47,11 +52,26 @@ const api = {
     },
     getDir: () => ipcRenderer.invoke('notes:getDir'),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
-    import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import')
+    import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import'),
+    importNotion: (): Promise<NotionImportResult | null> =>
+      ipcRenderer.invoke('notes:importNotion')
   },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
     set: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch)
+  },
+  reminders: {
+    takeFired: (): Promise<NoteSummary[]> => ipcRenderer.invoke('reminders:takeFired'),
+    subscribeFired: (callback: (note: NoteSummary) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, note: NoteSummary): void => callback(note)
+      ipcRenderer.on('reminders:fired', listener)
+      return () => ipcRenderer.removeListener('reminders:fired', listener)
+    },
+    subscribeOpen: (callback: (note: NoteSummary) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, note: NoteSummary): void => callback(note)
+      ipcRenderer.on('reminders:open', listener)
+      return () => ipcRenderer.removeListener('reminders:open', listener)
+    }
   },
   sticky: {
     list: (): Promise<StickyNoteData[]> => ipcRenderer.invoke('sticky:list'),

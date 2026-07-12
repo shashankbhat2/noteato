@@ -16,6 +16,7 @@ export function createSettingsStore(): JsonStore<Settings> {
     anthropicApiKey: '',
     openaiApiKey: '',
     aiSelectionActions: true,
-    aiAgentEnabled: false
+    aiAgentEnabled: false,
+    keepInMenuBar: false
   })
 }

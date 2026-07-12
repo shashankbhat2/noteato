@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  AlignLeft,
-  ArrowUp,
-  Check,
-  Copy,
-  ListChecks,
-  ListPlus,
-  Loader2,
-  PenLine,
-  SpellCheck,
-  Square,
-  X
-} from 'lucide-react'
+  IconAlignLeft as AlignLeft,
+  IconArrowUp as ArrowUp,
+  IconCheck as Check,
+  IconCopy as Copy,
+  IconListCheck as ListChecks,
+  IconListDetails as ListPlus,
+  IconLoader2 as Loader2,
+  IconPencil as PenLine,
+  IconSquare as Square,
+  IconTextSpellcheck as SpellCheck,
+  IconX as X
+} from '@tabler/icons-react'
 import { aiStream } from '../ai/client'
 import type { NoteatoBlock, NoteatoEditor } from '../noteLink'
 

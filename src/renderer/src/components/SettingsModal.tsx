@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Check, FolderOpen, Monitor, Moon, Sun, X } from 'lucide-react'
+import {
+  IconCheck as Check,
+  IconDeviceDesktop as Monitor,
+  IconFolderOpen as FolderOpen,
+  IconMoon as Moon,
+  IconSun as Sun,
+  IconX as X
+} from '@tabler/icons-react'
 import type { AiProvider, Settings } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
@@ -162,6 +169,29 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
                 </button>
               </label>
               <p className="hint">Persists across restarts. Press ⌘. or ⌘, to get back here.</p>
+            </section>
+
+            <section className="settings-section">
+              <h2>Menu bar</h2>
+              <label className="settings-toggle-row">
+                <span>Keep Noteato running in the menu bar</span>
+                <button
+                  className={settings.keepInMenuBar ? 'settings-switch on' : 'settings-switch'}
+                  onClick={() => {
+                    const next = !settings.keepInMenuBar
+                    setSettings({ ...settings, keepInMenuBar: next })
+                    window.api.settings.set({ keepInMenuBar: next })
+                  }}
+                  role="switch"
+                  aria-checked={settings.keepInMenuBar}
+                >
+                  <span className="settings-switch-knob" />
+                </button>
+              </label>
+              <p className="hint">
+                Lets reminders fire even after closing the window or pressing ⌘Q — quit fully
+                from the menu bar icon instead.
+              </p>
             </section>
 
             <section className="settings-section settings-ai-preferences">

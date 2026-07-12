@@ -1,6 +1,22 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.7.0] - 2026-07-12
+
+### Added
+
+- Reminders: set a one-time date/time reminder on any note from the editor toolbar or the sidebar's right-click menu, with quick presets and a custom picker. Fires a native notification even if the note isn't open; clicking it opens the note. Reminders that pass while the app is closed surface as a catch-up notification on the next launch.
+- Notion import: "Import Notion Export…" (Note menu) turns a folder from Notion's own "Export → Markdown & CSV" into notes and folders, preserving the page hierarchy, stripping Notion's id suffixes from titles/filenames, and rewriting internal page and image links to point at their new location. Database exports are copied in as plain `.csv` files rather than parsed.
+- Menu bar option (Settings → Menu bar, off by default): keeps Noteato running in the menu bar instead of quitting on ⌘Q or the traffic-light close, so reminders can still fire. Quit fully from the menu bar icon's own "Quit Noteato."
+- The sidebar's import button is now a dropdown: "From Markdown…" and "From Notion…". Choosing Notion first shows a how-to guide before the folder picker.
+
+### Changed
+
+- New app icon, and a matching menu-bar icon that now renders as a template image so it adapts to light and dark menu bars.
+- Notion import: links between imported pages now become real, durable note links (Noteato's own mention chips, resolved by id) instead of plain relative-path links, so they keep working even if a note is later renamed or moved. A page that has sub-pages now imports as a note living inside its own children's folder, rather than as an oddly-duplicated same-named sibling.
+
+### Fixed
+
+- Backspace at the very start of a note's first (paragraph) block now moves the cursor into the title, and the down arrow in the title now moves into the body — matching the existing up-arrow/Enter behavior in the other direction.
 
 ## [0.6.0] - 2026-07-11
 

@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, FileText, Loader2, Sparkles, Square, SquarePen, X } from 'lucide-react'
+import {
+  IconArrowUp as ArrowUp,
+  IconFileText as FileText,
+  IconLoader2 as Loader2,
+  IconPlus as Plus,
+  IconSquare as Square,
+  IconX as X
+} from '@tabler/icons-react'
 import type { Note, NoteSummary, Settings } from '../../../shared/types'
 import type { Tab } from '../tabs'
 import { aiStream } from '../ai/client'
@@ -368,8 +375,7 @@ export default function AgentPanel({
     <aside className="agent-panel">
       <div className="agent-header">
         <div className="agent-title">
-          <Sparkles size={13} />
-          <span>Agent</span>
+          <span>Assistant</span>
         </div>
         <div className="agent-header-actions">
           <button
@@ -378,7 +384,7 @@ export default function AgentPanel({
             title="New chat"
             disabled={pending || messages.length === 0}
           >
-            <SquarePen size={13} />
+            <Plus size={14} />
           </button>
         </div>
       </div>

@@ -8,17 +8,25 @@ import {
 } from '@blocknote/react'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
-import { Code, FileText, FoldHorizontal, UnfoldHorizontal } from 'lucide-react'
+import {
+  IconArrowsMaximize as UnfoldHorizontal,
+  IconArrowsMinimize as FoldHorizontal,
+  IconBell as Bell,
+  IconCode as Code,
+  IconFileText as FileText
+} from '@tabler/icons-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
+import { formatReminderAt } from '../reminderPresets'
 import { createNoteatoEditor, type NoteatoBlock, type NoteatoEditor } from '../noteLink'
 import DictationPanel from './DictationPanel'
 import SelectionAiToolbar from './SelectionAiToolbar'
 import SelectionAiPopup from './SelectionAiPopup'
 import BlockDragMenu from './BlockDragMenu'
+import ReminderPopover from './ReminderPopover'
 
 interface Props {
   path: string
@@ -72,8 +80,10 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   const [markdownText, setMarkdownText] = useState('')
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
+  const [reminderPopover, setReminderPopover] = useState<{ x: number; y: number } | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const titleRef = useRef<HTMLInputElement>(null)
+  const reminderBtnRef = useRef<HTMLButtonElement>(null)
   const aiStreamingRef = useRef(false)
   const onEditorReadyRef = useRef(onEditorReady)
   onEditorReadyRef.current = onEditorReady
@@ -119,8 +129,12 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     return () => onEditorReadyRef.current?.(null)
   }, [editor])
 
-  const save = async (markdown: string, nextTitle: string, nextFullWidth: boolean): Promise<void> => {
-    if (!note) return
+  const save = async (
+    markdown: string,
+    nextTitle: string,
+    nextFullWidth: boolean
+  ): Promise<Note | undefined> => {
+    if (!note) return undefined
     const saved = await window.api.notes.save(note.path, {
       title: nextTitle,
       body: markdown,
@@ -129,6 +143,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     })
     setNote(saved)
     onSaved(saved)
+    return saved
   }
 
   const currentMarkdown = async (): Promise<string> => {
@@ -136,8 +151,8 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     return editor ? editor.blocksToMarkdownLossy(editor.document) : ''
   }
 
-  const persist = async (nextTitle: string, nextFullWidth: boolean): Promise<void> => {
-    await save(await currentMarkdown(), nextTitle, nextFullWidth)
+  const persist = async (nextTitle: string, nextFullWidth: boolean): Promise<Note | undefined> => {
+    return save(await currentMarkdown(), nextTitle, nextFullWidth)
   }
 
   const scheduleSave = (nextTitle = title): void => {
@@ -166,6 +181,41 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     persist(title, next)
   }
 
+  // Live-clears the bell icon if this note's reminder fires while its tab is open.
+  useEffect(() => {
+    if (!note) return
+    return window.api.reminders.subscribeFired((fired) => {
+      if (fired.id !== note.id) return
+      setNote((prev) => (prev ? { ...prev, reminderAt: fired.reminderAt } : prev))
+    })
+  }, [note?.id])
+
+  const handleSetReminder = async (reminderAt: string | null): Promise<void> => {
+    if (!note) return
+    // A pending debounced autosave (e.g. a title edit) can still be in flight
+    // and about to rename this note's file — flush it first and use its
+    // result, not the pre-flush `note` closure, so the reminder is written
+    // against the current path rather than one about to go stale.
+    let base = note
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = undefined
+      const flushed = await persist(title, fullWidth)
+      if (flushed) base = flushed
+    }
+    let result
+    try {
+      result = await window.api.notes.setReminder(base.path, reminderAt)
+    } catch {
+      return
+    }
+    if (!result) return
+    const updated = { ...base, reminderAt: result.reminderAt }
+    setNote(updated)
+    onSaved(updated)
+    setReminderPopover(null)
+  }
+
   const toggleMarkdownMode = async (): Promise<void> => {
     if (!editor) return
     if (!markdownMode) {
@@ -187,30 +237,63 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     }
   }, [])
 
-  // Arrow-up from the top line of the first block moves the caret into the
-  // title, mirroring how Enter in the title drops into the content.
-  const handleEditorKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key !== 'ArrowUp' || !editor) return
-    if (!(event.target as HTMLElement).closest?.('.bn-editor')) return
-    try {
-      const firstBlock = editor.document[0]
-      const cursorBlock = editor.getTextCursorPosition().block
-      if (
-        !firstBlock ||
-        cursorBlock.id !== firstBlock.id ||
-        !editor.prosemirrorView.endOfTextblock('up')
-      ) {
-        return
-      }
-    } catch {
-      return
-    }
-    event.preventDefault()
-    event.stopPropagation()
+  const focusTitleAtEnd = (): void => {
     const input = titleRef.current
     if (input) {
       input.focus()
       input.setSelectionRange(input.value.length, input.value.length)
+    }
+  }
+
+  // Arrow-up from the top line of the first block, or backspace at the very
+  // start of it, moves the caret into the title — mirroring how Enter/down
+  // in the title drops into the content.
+  const handleEditorKeyDown = (event: React.KeyboardEvent): void => {
+    if (!editor) return
+    if (!(event.target as HTMLElement).closest?.('.bn-editor')) return
+
+    if (event.key === 'ArrowUp') {
+      try {
+        const firstBlock = editor.document[0]
+        const cursorBlock = editor.getTextCursorPosition().block
+        if (
+          !firstBlock ||
+          cursorBlock.id !== firstBlock.id ||
+          !editor.prosemirrorView.endOfTextblock('up')
+        ) {
+          return
+        }
+      } catch {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      focusTitleAtEnd()
+      return
+    }
+
+    if (event.key === 'Backspace') {
+      try {
+        const firstBlock = editor.document[0]
+        // Only once the first block is already a plain paragraph — otherwise
+        // this backspace is BlockNote's own "convert to paragraph" step
+        // (heading/list/todo → paragraph), which a second backspace then
+        // follows into the title.
+        if (!firstBlock || firstBlock.type !== 'paragraph') return
+        const cursorBlock = editor.getTextCursorPosition().block
+        if (
+          cursorBlock.id !== firstBlock.id ||
+          !editor.prosemirrorView.state.selection.empty ||
+          !editor.prosemirrorView.endOfTextblock('backward')
+        ) {
+          return
+        }
+      } catch {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      focusTitleAtEnd()
     }
   }
 
@@ -219,6 +302,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   const segments = note.path.split('/')
   const fileLabel = segments[segments.length - 1].replace(/\.md$/, '')
   const folderSegments = segments.slice(0, -1)
+  const reminderAt = note.reminderAt
 
   return (
     <div
@@ -237,6 +321,21 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
         </div>
         <div className="toolbar-actions">
           {!markdownMode && <DictationPanel editor={editor} />}
+          <button
+            ref={reminderBtnRef}
+            className={reminderAt ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
+            onClick={() => {
+              if (reminderPopover) {
+                setReminderPopover(null)
+                return
+              }
+              const rect = reminderBtnRef.current?.getBoundingClientRect()
+              setReminderPopover(rect ? { x: rect.left, y: rect.bottom + 6 } : { x: 0, y: 80 })
+            }}
+            title={reminderAt ? `Reminder: ${formatReminderAt(reminderAt)}` : 'Set reminder'}
+          >
+            <Bell size={15} />
+          </button>
           <button
             className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
             onClick={toggleFullWidth}
@@ -268,6 +367,11 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
             if (e.key === 'Enter') {
               e.preventDefault()
               if (!markdownMode) editor.focus()
+            } else if (e.key === 'ArrowDown' && !markdownMode) {
+              e.preventDefault()
+              const firstBlock = editor.document[0]
+              editor.focus()
+              if (firstBlock) editor.setTextCursorPosition(firstBlock.id, 'start')
             }
           }}
         />
@@ -314,6 +418,15 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
         </>
       )}
       {aiError && <div className="ai-error-toast">{aiError}</div>}
+      {reminderPopover && (
+        <ReminderPopover
+          position={reminderPopover}
+          value={reminderAt}
+          onSet={(iso) => void handleSetReminder(iso)}
+          onClear={() => void handleSetReminder(null)}
+          onClose={() => setReminderPopover(null)}
+        />
+      )}
     </div>
   )
 }

@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin({ exclude: ['@anthropic-ai/sdk', 'openai'] })]
   },
   preload: {
     plugins: [externalizeDepsPlugin()]

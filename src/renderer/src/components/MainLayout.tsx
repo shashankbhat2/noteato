@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { IconPlus as Plus } from '@tabler/icons-react'
 import type { DeletedEntry, Note, NoteSummary } from '../../../shared/types'
 import type { Tab } from '../tabs'
 import { useTheme } from '../theme'
@@ -12,6 +12,7 @@ import NoteEditor from './NoteEditor'
 import SettingsModal from './SettingsModal'
 import ConfirmDialog from './ConfirmDialog'
 import SearchModal from './SearchModal'
+import ImportNotionModal from './ImportNotionModal'
 
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
@@ -43,6 +44,8 @@ export default function MainLayout() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
   const [undoState, setUndoState] = useState<(DeletedEntry & { label: string }) | null>(null)
+  const [notionImportStatus, setNotionImportStatus] = useState<string | null>(null)
+  const [notionGuideOpen, setNotionGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
   )
@@ -50,6 +53,7 @@ export default function MainLayout() {
     () => localStorage.getItem(AGENT_PANEL_OPEN_KEY) !== 'false'
   )
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const notionStatusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Active BlockNote editors keyed by tab id, so menu Undo/Redo can reach the
   // focused note's own history.
   const editorsRef = useRef(new Map<string, NoteatoEditor>())
@@ -162,8 +166,8 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notes])
 
-  // Markdown files opened via the OS ("Open With" / double-click) are imported
-  // by the main process; collect any queued before this window was ready, then
+  // Markdown files opened via the OS ("Open With" / double-click) are linked
+  // in place by the main process; collect any queued before this window was ready, then
   // listen for opens while running.
   useEffect(() => {
     window.api.notes.takeExternalOpens().then(async (opened) => {
@@ -175,6 +179,29 @@ export default function MainLayout() {
       await refresh()
       openNoteTab(note)
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Reminders that fired before this window was ready (app was closed when
+  // one was due) arrive via takeFired(); ones that fire while running arrive
+  // live via subscribeFired(). Clicking a notification opens its note.
+  useEffect(() => {
+    const applyFired = (fired: NoteSummary[]): void => {
+      if (fired.length === 0) return
+      setNotes((prev) =>
+        prev.map((n) => {
+          const f = fired.find((x) => x.id === n.id)
+          return f ? { ...n, reminderAt: f.reminderAt } : n
+        })
+      )
+    }
+    window.api.reminders.takeFired().then(applyFired)
+    const unsubFired = window.api.reminders.subscribeFired((note) => applyFired([note]))
+    const unsubOpen = window.api.reminders.subscribeOpen((note) => openNoteTab(note))
+    return () => {
+      unsubFired()
+      unsubOpen()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -321,6 +348,14 @@ export default function MainLayout() {
     await refresh()
   }
 
+  const handleSetReminder = async (note: NoteSummary, reminderAt: string | null): Promise<void> => {
+    const updated = await window.api.notes.setReminder(note.path, reminderAt)
+    if (!updated) return
+    setNotes((prev) =>
+      prev.map((n) => (n.id === updated.id ? { ...n, reminderAt: updated.reminderAt } : n))
+    )
+  }
+
   const requestDeleteNote = (note: NoteSummary): void => setConfirm({ kind: 'note', note })
   const requestDeleteFolder = (path: string): void => setConfirm({ kind: 'folder', path })
 
@@ -328,6 +363,12 @@ export default function MainLayout() {
     if (undoTimer.current) clearTimeout(undoTimer.current)
     setUndoState({ ...token, label })
     undoTimer.current = setTimeout(() => setUndoState(null), UNDO_TOAST_MS)
+  }
+
+  const showNotionStatus = (message: string): void => {
+    if (notionStatusTimer.current) clearTimeout(notionStatusTimer.current)
+    setNotionImportStatus(message)
+    notionStatusTimer.current = setTimeout(() => setNotionImportStatus(null), UNDO_TOAST_MS)
   }
 
   const performDelete = async (): Promise<void> => {
@@ -375,6 +416,30 @@ export default function MainLayout() {
     imported.forEach(openNoteTab)
   }
 
+  // A Notion export can produce far more notes than the plain-markdown import
+  // above, so this deliberately doesn't open every imported note as a tab —
+  // it just refreshes the sidebar (folders included) and reports a summary.
+  const handleImportNotion = async (): Promise<void> => {
+    const result = await window.api.notes.importNotion()
+    if (!result) return
+    await refresh()
+    const count = result.created.length
+    const summary =
+      count === 0
+        ? 'No notes were imported.'
+        : `Imported ${count} note${count === 1 ? '' : 's'} from Notion.`
+    showNotionStatus(
+      result.skipped.length > 0 ? `${summary} ${result.skipped.length} skipped.` : summary
+    )
+  }
+
+  const handleRemoveExternal = async (note: NoteSummary): Promise<void> => {
+    if (!note.external) return
+    await window.api.notes.removeExternal(note.path)
+    closeTab(note.id)
+    await refresh()
+  }
+
   const handleNoteSaved = (saved: Note): void => {
     setNotes((prev) => {
       const idx = prev.findIndex((n) => n.id === saved.id)
@@ -386,7 +451,8 @@ export default function MainLayout() {
         path: saved.path,
         folder: saved.folder,
         excerpt: saved.excerpt,
-        updatedAt: saved.updatedAt
+        updatedAt: saved.updatedAt,
+        reminderAt: saved.reminderAt
       }
       return next
     })
@@ -401,6 +467,7 @@ export default function MainLayout() {
     handleCreateInSelectedFolder,
     handleCreateSticky,
     handleImport,
+    setNotionGuideOpen,
     closeTab,
     toggleSidebar,
     setSettingsOpen,
@@ -414,6 +481,7 @@ export default function MainLayout() {
     handleCreateInSelectedFolder,
     handleCreateSticky,
     handleImport,
+    setNotionGuideOpen,
     closeTab,
     toggleSidebar,
     setSettingsOpen,
@@ -435,6 +503,9 @@ export default function MainLayout() {
           break
         case 'import-markdown':
           h.handleImport()
+          break
+        case 'import-notion':
+          h.setNotionGuideOpen(true)
           break
         case 'open-settings':
           h.setSettingsOpen(true)
@@ -474,6 +545,7 @@ export default function MainLayout() {
   useEffect(() => {
     return () => {
       if (undoTimer.current) clearTimeout(undoTimer.current)
+      if (notionStatusTimer.current) clearTimeout(notionStatusTimer.current)
     }
   }, [])
 
@@ -516,12 +588,15 @@ export default function MainLayout() {
             onRenameFolder={handleRenameFolder}
             onDeleteFolder={requestDeleteFolder}
             onDeleteNote={requestDeleteNote}
+            onRemoveNote={(note) => void handleRemoveExternal(note)}
             onRenameNote={(note, title) => void handleRenameNote(note, title)}
             onTogglePin={handleTogglePin}
+            onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
             onMoveNote={handleMoveNote}
             onMoveFolder={handleMoveFolder}
             onCreateSticky={handleCreateSticky}
             onImport={handleImport}
+            onImportNotion={() => setNotionGuideOpen(true)}
             onSearch={() => setSearchOpen(true)}
           />
         )}
@@ -571,6 +646,15 @@ export default function MainLayout() {
           onSelect={(r) => openNoteTab({ id: r.id, path: r.path, title: r.title })}
         />
       )}
+      {notionGuideOpen && (
+        <ImportNotionModal
+          onClose={() => setNotionGuideOpen(false)}
+          onImport={() => {
+            setNotionGuideOpen(false)
+            void handleImportNotion()
+          }}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           title={confirm.kind === 'note' ? 'Delete note?' : 'Delete folder?'}
@@ -589,6 +673,11 @@ export default function MainLayout() {
         <div className="undo-toast">
           <span>{undoState.label}</span>
           <button onClick={handleUndoDelete}>Undo</button>
+        </div>
+      )}
+      {notionImportStatus && (
+        <div className="undo-toast">
+          <span>{notionImportStatus}</span>
         </div>
       )}
     </div>

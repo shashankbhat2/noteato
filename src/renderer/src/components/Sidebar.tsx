@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown,
-  ChevronRight,
-  FolderPlus,
-  Pin,
-  Plus,
-  Search,
-  StickyNote,
-  Trash2,
-  Upload
-} from 'lucide-react'
+  IconBell as Bell,
+  IconChevronDown as ChevronDown,
+  IconChevronRight as ChevronRight,
+  IconFolderPlus as FolderPlus,
+  IconNote as StickyNote,
+  IconPin as Pin,
+  IconPlus as Plus,
+  IconSearch as Search,
+  IconTrash as Trash2,
+  IconUpload as Upload,
+  IconX as X
+} from '@tabler/icons-react'
 import type { NoteSummary } from '../../../shared/types'
+import { REMINDER_PRESETS } from '../reminderPresets'
 import { buildTree, type FolderNode } from '../tree'
 import ContextMenu, { type MenuItem } from './ContextMenu'
+import ReminderPopover from './ReminderPopover'
 
 const EXPANDED_KEY = 'noteato:expandedFolders'
 
@@ -29,12 +33,15 @@ interface Props {
   onRenameFolder: (path: string, name: string) => void
   onDeleteFolder: (path: string) => void
   onDeleteNote: (note: NoteSummary) => void
+  onRemoveNote: (note: NoteSummary) => void
   onRenameNote: (note: NoteSummary, title: string) => void
   onTogglePin: (note: NoteSummary) => void
+  onSetReminder: (note: NoteSummary, reminderAt: string | null) => void
   onMoveNote: (path: string, targetFolder: string) => void
   onMoveFolder: (path: string, targetParent: string) => void
   onCreateSticky: () => void
   onImport: () => void
+  onImportNotion: () => void
   onSearch: () => void
 }
 
@@ -62,12 +69,15 @@ export default function Sidebar({
   onRenameFolder,
   onDeleteFolder,
   onDeleteNote,
+  onRemoveNote,
   onRenameNote,
   onTogglePin,
+  onSetReminder,
   onMoveNote,
   onMoveFolder,
   onCreateSticky,
   onImport,
+  onImportNotion,
   onSearch
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -78,11 +88,35 @@ export default function Sidebar({
     }
   })
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const [reminderPopover, setReminderPopover] = useState<{
+    note: NoteSummary
+    x: number
+    y: number
+  } | null>(null)
   const [editing, setEditing] = useState<Editing>(null)
   const [editValue, setEditValue] = useState('')
   const [dragOver, setDragOver] = useState<string | null>(null)
 
-  const tree = useMemo(() => buildTree(notes, folders), [notes, folders])
+  const tree = useMemo(
+    () => buildTree(notes.filter((note) => !note.external), folders),
+    [notes, folders]
+  )
+  const linkedFolders = useMemo(() => {
+    const groups = new Map<string, NoteSummary[]>()
+    for (const note of notes) {
+      if (!note.external) continue
+      const group = groups.get(note.folder) ?? []
+      group.push(note)
+      groups.set(note.folder, group)
+    }
+    return [...groups.entries()]
+      .map(([path, linkedNotes]) => ({
+        path,
+        name: path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path,
+        notes: linkedNotes.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [notes])
   const pinned = useMemo(
     () =>
       notes
@@ -120,7 +154,7 @@ export default function Sidebar({
   // Reveal the active note by expanding its ancestor folders.
   useEffect(() => {
     const active = notes.find((n) => n.id === activeNoteId)
-    if (active?.folder) expand(active.folder)
+    if (active?.folder) expand(active.external ? `linked:${active.folder}` : active.folder)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNoteId])
 
@@ -192,19 +226,44 @@ export default function Sidebar({
 
   // --- Rendering -----------------------------------------------------------
 
+  const remindMeSubmenu = (note: NoteSummary, x: number, y: number): MenuItem[] => {
+    const items: MenuItem[] = REMINDER_PRESETS.map((preset) => ({
+      label: preset.label,
+      onClick: () => onSetReminder(note, preset.at())
+    }))
+    items.push({ label: 'Custom…', onClick: () => setReminderPopover({ note, x, y }) })
+    if (note.reminderAt) {
+      items.push({ separator: true, label: '' })
+      items.push({ label: 'Clear reminder', onClick: () => onSetReminder(note, null) })
+    }
+    return items
+  }
+
   const openNoteMenu = (e: React.MouseEvent, note: NoteSummary): void => {
     e.preventDefault()
     e.stopPropagation()
+    const x = e.clientX
+    const y = e.clientY
+    const items: MenuItem[] = note.external
+      ? [
+          { label: note.pinned ? 'Unpin' : 'Pin', onClick: () => onTogglePin(note) },
+          { label: 'Remind me', submenu: remindMeSubmenu(note, x, y) },
+          { label: 'Rename title', onClick: () => startRenameNote(note) },
+          { separator: true, label: '' },
+          { label: 'Remove from Noteato', onClick: () => onRemoveNote(note) }
+        ]
+      : [
+          { label: note.pinned ? 'Unpin' : 'Pin', onClick: () => onTogglePin(note) },
+          { label: 'Remind me', submenu: remindMeSubmenu(note, x, y) },
+          { label: 'Rename', onClick: () => startRenameNote(note) },
+          { label: 'Move to', submenu: moveNoteSubmenu(note) },
+          { separator: true, label: '' },
+          { label: 'Delete', danger: true, onClick: () => onDeleteNote(note) }
+        ]
     setMenu({
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        { label: note.pinned ? 'Unpin' : 'Pin', onClick: () => onTogglePin(note) },
-        { label: 'Rename', onClick: () => startRenameNote(note) },
-        { label: 'Move to', submenu: moveNoteSubmenu(note) },
-        { separator: true, label: '' },
-        { label: 'Delete', danger: true, onClick: () => onDeleteNote(note) }
-      ]
+      x,
+      y,
+      items
     })
   }
 
@@ -260,8 +319,10 @@ export default function Sidebar({
       key={note.id}
       className={note.id === activeNoteId ? 'note-item active' : 'note-item'}
       style={{ paddingLeft: 10 + depth * 14 }}
-      draggable
-      onDragStart={(e) => onDragStart(e, { type: 'note', path: note.path })}
+      draggable={!note.external}
+      onDragStart={(e) => {
+        if (!note.external) onDragStart(e, { type: 'note', path: note.path })
+      }}
       onClick={() => onSelect(note)}
       onDoubleClick={(e) => {
         e.stopPropagation()
@@ -272,6 +333,7 @@ export default function Sidebar({
       <div className="note-item-main">
         <div className="note-title">
           {note.pinned && <Pin size={11} className="note-pin-icon" />}
+          {note.reminderAt && <Bell size={11} className="note-reminder-icon" />}
           {note.title || 'Untitled'}
         </div>
       </div>
@@ -287,14 +349,15 @@ export default function Sidebar({
           <Pin size={13} />
         </button>
         <button
-          className="row-icon-btn danger"
-          title="Delete"
+          className={note.external ? 'row-icon-btn' : 'row-icon-btn danger'}
+          title={note.external ? 'Remove from Noteato' : 'Delete'}
           onClick={(e) => {
             e.stopPropagation()
-            onDeleteNote(note)
+            if (note.external) onRemoveNote(note)
+            else onDeleteNote(note)
           }}
         >
-          <Trash2 size={13} />
+          {note.external ? <X size={13} /> : <Trash2 size={13} />}
         </button>
       </div>
     </li>
@@ -368,6 +431,30 @@ export default function Sidebar({
     )
   }
 
+  const renderLinkedFolder = (group: (typeof linkedFolders)[number]): React.ReactNode => {
+    const key = `linked:${group.path}`
+    const isOpen = expanded.has(key)
+    return (
+      <li key={group.path} className="folder-item">
+        <div
+          className="folder-row linked"
+          title={group.path}
+          onClick={() => toggle(key)}
+        >
+          <span className="folder-chevron">
+            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </span>
+          <span className="folder-name">{group.name}</span>
+        </div>
+        {isOpen && (
+          <ul className="tree-children">
+            {group.notes.map((note) => renderNote(note, 1))}
+          </ul>
+        )}
+      </li>
+    )
+  }
+
   const renderNewFolderInput = (depth: number): React.ReactNode => (
     <li className="folder-item">
       <div className="folder-row" style={{ paddingLeft: 8 + depth * 14 }}>
@@ -409,7 +496,21 @@ export default function Sidebar({
         <button className="sidebar-icon-btn" onClick={onCreateSticky} title="New sticky note">
           <StickyNote size={16} />
         </button>
-        <button className="sidebar-icon-btn" onClick={onImport} title="Import markdown files">
+        <button
+          className="sidebar-icon-btn"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            setMenu({
+              x: rect.left,
+              y: rect.bottom + 4,
+              items: [
+                { label: 'From Markdown…', onClick: onImport },
+                { label: 'From Notion…', onClick: onImportNotion }
+              ]
+            })
+          }}
+          title="Import notes"
+        >
           <Upload size={15} />
         </button>
       </div>
@@ -433,6 +534,13 @@ export default function Sidebar({
           </>
         )}
 
+        {linkedFolders.length > 0 && (
+          <>
+            <div className="sidebar-section-label">Linked</div>
+            <ul className="note-list">{linkedFolders.map(renderLinkedFolder)}</ul>
+          </>
+        )}
+
         <ul className="note-list tree-root">
           {tree.folders.map((child) => renderFolder(child, 0))}
           {editing?.mode === 'new-folder' && editing.parent === '' && renderNewFolderInput(0)}
@@ -442,6 +550,21 @@ export default function Sidebar({
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
+      )}
+      {reminderPopover && (
+        <ReminderPopover
+          position={{ x: reminderPopover.x, y: reminderPopover.y }}
+          value={reminderPopover.note.reminderAt}
+          onSet={(iso) => {
+            onSetReminder(reminderPopover.note, iso)
+            setReminderPopover(null)
+          }}
+          onClear={() => {
+            onSetReminder(reminderPopover.note, null)
+            setReminderPopover(null)
+          }}
+          onClose={() => setReminderPopover(null)}
+        />
       )}
     </aside>
   )

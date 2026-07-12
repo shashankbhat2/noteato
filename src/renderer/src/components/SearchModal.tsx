@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Search } from 'lucide-react'
+import { IconSearch as Search } from '@tabler/icons-react'
 import type { SearchResult } from '../../../shared/types'
 
 interface Props {

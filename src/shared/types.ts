@@ -6,6 +6,8 @@ export interface NoteMeta {
   tags: string[]
   fullWidth: boolean
   pinned: boolean
+  /** ISO timestamp for a pending one-shot reminder, or null if none is set. */
+  reminderAt: string | null
 }
 
 export interface NoteSummary extends NoteMeta {
@@ -14,6 +16,8 @@ export interface NoteSummary extends NoteMeta {
   /** Parent folder as a relative POSIX path ("" for the root). */
   folder: string
   excerpt: string
+  /** True when the note is linked from outside the managed notes directory. */
+  external?: boolean
 }
 
 export interface Note extends NoteSummary {
@@ -25,6 +29,12 @@ export interface DeletedEntry {
   trashName: string
   originalPath: string
   isFolder: boolean
+}
+
+export interface NotionImportResult {
+  created: NoteSummary[]
+  /** Relative source paths (within the chosen export folder) that failed to import. */
+  skipped: string[]
 }
 
 export interface SearchResult {
@@ -63,6 +73,8 @@ export interface Settings {
   openaiApiKey: string
   aiSelectionActions: boolean
   aiAgentEnabled: boolean
+  /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
+  keepInMenuBar: boolean
 }
 
 export interface SaveOptions {

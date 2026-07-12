@@ -1,5 +1,14 @@
 import { useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, PanelLeft, Pin, Plus, Settings, Sparkles, X } from 'lucide-react'
+import {
+  IconChevronLeft as ChevronLeft,
+  IconChevronRight as ChevronRight,
+  IconLayoutSidebar as PanelLeft,
+  IconPin as Pin,
+  IconPlus as Plus,
+  IconSettings as Settings,
+  IconSparkles as Sparkles,
+  IconX as X
+} from '@tabler/icons-react'
 import type { Tab } from '../tabs'
 import ShortcutsHelp from './ShortcutsHelp'
 import ContextMenu, { type MenuItem } from './ContextMenu'
