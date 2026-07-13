@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
-import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
 import type { AiCompleteRequest, Note, SaveOptions } from '../shared/types'
 import { NoteStore } from './storage'
 import { createSettingsStore } from './settings'
@@ -39,6 +39,27 @@ app.on('before-quit', (event) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
   }
 })
+
+// Chromium's Hunspell spellchecker takes a language list on Windows/Linux;
+// macOS always uses the native system spellchecker (this is a no-op there).
+function applySpellcheckLanguage(language: string): void {
+  if (process.platform === 'darwin') return
+  const ses = session.defaultSession
+  try {
+    ses.setSpellCheckerLanguages([language === 'auto' ? app.getLocale() : language])
+  } catch {
+    /* unknown language code — keep the current dictionary */
+  }
+}
+
+function isSafeExternalUrl(rawUrl: string): boolean {
+  try {
+    const { protocol } = new URL(rawUrl)
+    return protocol === 'https:' || protocol === 'http:' || protocol === 'mailto:'
+  } catch {
+    return false
+  }
+}
 
 const DARK_BG = '#171614'
 const LIGHT_BG = '#faf8f5'
@@ -142,8 +163,26 @@ function createMainWindow(): void {
     win.show()
   })
   win.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (isSafeExternalUrl(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  // Right-clicks are handled by the renderer (custom menus), but only the main
+  // process sees the spellchecker's suggestions — forward what it needs.
+  win.webContents.on('context-menu', (_event, params) => {
+    win.webContents.send('app:context-menu', {
+      x: params.x,
+      y: params.y,
+      misspelledWord: params.misspelledWord,
+      dictionarySuggestions: params.dictionarySuggestions,
+      selectionText: params.selectionText,
+      isEditable: params.isEditable,
+      editFlags: {
+        canCut: params.editFlags.canCut,
+        canCopy: params.editFlags.canCopy,
+        canPaste: params.editFlags.canPaste
+      }
+    })
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -271,6 +310,7 @@ function registerIpcHandlers(): void {
     const next = { ...settingsStore.read(), ...patch }
     settingsStore.write(next)
     if (patch.theme) nativeTheme.themeSource = patch.theme
+    if ('spellcheckLanguage' in patch) applySpellcheckLanguage(next.spellcheckLanguage)
     if ('keepInMenuBar' in patch) {
       trayManager.setEnabled(next.keepInMenuBar)
       // Turning the tray off must never leave the app unreachable with a
@@ -303,6 +343,28 @@ function registerIpcHandlers(): void {
     aiStreamAborts.get(requestId)?.abort()
   })
 
+  ipcMain.handle('app:spellcheckerLanguages', () =>
+    process.platform === 'darwin' ? [] : session.defaultSession.availableSpellCheckerLanguages
+  )
+
+  // Actions for the renderer's custom right-click menu. Cut/copy/paste go
+  // through webContents so they hit the OS clipboard and the focused editable.
+  ipcMain.handle('app:replaceMisspelling', (e, word: string) =>
+    e.sender.replaceMisspelling(word)
+  )
+  ipcMain.handle('app:addToDictionary', (e, word: string) =>
+    e.sender.session.addWordToSpellCheckerDictionary(word)
+  )
+  ipcMain.handle('app:lookUpSelection', (e) => {
+    if (process.platform === 'darwin') e.sender.showDefinitionForSelection()
+  })
+  ipcMain.handle('app:searchGoogle', (_e, text: string) =>
+    shell.openExternal(`https://www.google.com/search?q=${encodeURIComponent(text)}`)
+  )
+  ipcMain.handle('app:cut', (e) => e.sender.cut())
+  ipcMain.handle('app:copy', (e) => e.sender.copy())
+  ipcMain.handle('app:paste', (e) => e.sender.paste())
+
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.handle('app:toggleMaximize', (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -333,6 +395,7 @@ app.whenReady().then(() => {
 
   Menu.setApplicationMenu(buildAppMenu())
   registerIpcHandlers()
+  applySpellcheckLanguage(settingsStore.read().spellcheckLanguage)
   createMainWindow()
   stickyManager.openAll()
   reminderScheduler.rebuildAll()

@@ -37,10 +37,13 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
   const [notesDir, setNotesDir] = useState('')
   const [saved, setSaved] = useState(false)
   const [aiSaved, setAiSaved] = useState(false)
+  const [spellLanguages, setSpellLanguages] = useState<string[]>([])
+  const isMac = window.electron.process.platform === 'darwin'
 
   useEffect(() => {
     window.api.settings.get().then(setSettings)
     window.api.notes.getDir().then(setNotesDir)
+    window.api.app.spellcheckerLanguages().then(setSpellLanguages)
   }, [])
 
   const handleSaveKey = async (): Promise<void> => {
@@ -295,6 +298,44 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
                 </label>
               </div>
               {!hasAnyAiKey && <p className="hint">Add an API key to enable the agent panel.</p>}
+            </section>
+
+            <section className="settings-section">
+              <h2>Spelling</h2>
+              {isMac ? (
+                <p className="hint">
+                  Noteato uses the macOS system spellchecker. To change the language or English
+                  variant, open System Settings → Keyboard → Text Input → Edit… → Spelling.
+                </p>
+              ) : (
+                <>
+                  <label className="settings-label">
+                    Dictionary language
+                    <select
+                      value={settings.spellcheckLanguage}
+                      onChange={(e) => {
+                        const next = e.target.value
+                        setSettings({ ...settings, spellcheckLanguage: next })
+                        window.api.settings.set({ spellcheckLanguage: next })
+                      }}
+                    >
+                      <option value="auto">Automatic (system locale)</option>
+                      {[...spellLanguages]
+                        .sort((a, b) =>
+                          // English variants first — they're what people switch between.
+                          Number(b.startsWith('en')) - Number(a.startsWith('en')) ||
+                          a.localeCompare(b)
+                        )
+                        .map((lang) => (
+                          <option key={lang} value={lang}>
+                            {lang}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <p className="hint">Applies to spellcheck everywhere in the app.</p>
+                </>
+              )}
             </section>
 
             <section className="settings-section">

@@ -1,5 +1,29 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-07-13
+
+### Added
+
+- Find and replace within the current note, accessible with `⌘F`.
+- Syntax-highlighted code blocks, inline-code input, and automatic arrow substitutions in the editor.
+- A Recent section in the sidebar and restoration of open and pinned tabs between sessions.
+- Rich Markdown rendering for AI responses.
+- Native spelling suggestions and configurable spellcheck dictionaries on Windows and Linux.
+- A New page action in the editor slash menu.
+
+### Changed
+
+- Expanded editor context menus with spelling, lookup, web search, and standard editing actions.
+- Improved block and heading-section dragging, block merging, and keyboard movement between the title and body.
+- Improved sidebar drag-and-drop behavior and nested context-menu navigation.
+- Kept AI popups and context menus within the visible window.
+
+### Fixed
+
+- Preserved Noteato note links after paste, drag-and-drop, AI edits, and other editor updates.
+- Restricted links opened from AI responses to safe web and email protocols.
+- Made restored-tab data resilient to incomplete or older saved state.
+
 ## [0.7.3] - 2026-07-12
 
 ### Changed
@@ -148,7 +172,13 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/shashankbhat2/noteato/compare/v0.7.3...v0.8.0
+[0.7.3]: https://github.com/shashankbhat2/noteato/compare/v0.7.2...v0.7.3
+[0.7.2]: https://github.com/shashankbhat2/noteato/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/shashankbhat2/noteato/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/shashankbhat2/noteato/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/shashankbhat2/noteato/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/shashankbhat2/noteato/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shashankbhat2/noteato/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shashankbhat2/noteato/compare/v0.2.0...v0.3.0

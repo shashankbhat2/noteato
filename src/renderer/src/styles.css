@@ -620,7 +620,7 @@ button {
 }
 
 .note-editor {
-  max-width: 720px;
+  max-width: 860px;
   margin: 0 auto;
   padding: 48px 48px 112px;
   transition: max-width 0.2s ease;
@@ -669,6 +669,31 @@ button {
   border-top-color: var(--border);
 }
 
+/* Code blocks. BlockNote hardcodes a near-black card that disappears against
+   the dark app background — pick up shiki's theme background when available
+   (set as --prosemirror-highlight-bg by the highlight plugin) and give the
+   block a visible edge in dark mode. Tokens are colored inline by shiki
+   (github-dark), so the canvas stays dark in both app themes. */
+.note-editor .bn-block-content[data-content-type='codeBlock'] {
+  background-color: var(--prosemirror-highlight-bg, rgb(24 25 28));
+  color: var(--prosemirror-highlight, #e6edf3);
+  font-size: 0.92em;
+}
+
+:root[data-theme='dark'] .note-editor .bn-block-content[data-content-type='codeBlock'] {
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background-color: var(--prosemirror-highlight-bg, #1f2126);
+}
+
+.note-editor .bn-block-content[data-content-type='codeBlock'] > pre {
+  padding: 22px 20px 18px;
+}
+
+/* The language picker sits on the dark card in both themes. */
+.note-editor .bn-block-content[data-content-type='codeBlock'] > div > select {
+  color: #e6edf3;
+}
+
 /* Wide tables scroll horizontally within their own row instead of cutting
    off — macOS hides the scrollbar until you scroll, so force a thin,
    always-visible one to make that discoverable. */
@@ -692,6 +717,25 @@ button {
 
 .note-editor .bn-editor .tableWrapper::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* Inline code (`code` style) — typed with backticks or via the toolbar. */
+.note-editor .bn-editor code.bn-inline-content,
+.note-editor .bn-editor :not(pre) > code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.86em;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+  border-radius: 4px;
+  padding: 1.5px 4px;
+}
+
+/* Code inside code blocks keeps the block's own styling. */
+.note-editor .bn-block-content[data-content-type='codeBlock'] code {
+  background: none;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
 }
 
 /* Breathing room between a block's text and its side actions (drag/plus). */
@@ -750,6 +794,82 @@ button {
   flex-shrink: 0;
   position: relative;
   top: 1px;
+}
+
+/* Find & replace bar — pinned to the editor pane's top-right corner. */
+.find-bar {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  animation: fade-in 0.1s ease;
+}
+
+.find-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-bar-row input {
+  width: 170px;
+  border: none;
+  outline: none;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 5px;
+}
+
+.find-bar-count {
+  min-width: 34px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.find-bar-row button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 5px;
+  padding: 5px;
+  cursor: pointer;
+}
+
+.find-bar-row button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.find-bar-row button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.find-bar-text-btn {
+  font-size: 11.5px;
+}
+
+/* Match highlights (decorations from the search plugin). */
+.noteato-search-match {
+  background: color-mix(in srgb, #eab308 38%, transparent);
+  border-radius: 2px;
+}
+
+.noteato-search-match.active {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .note-editor-toolbar {
@@ -1281,7 +1401,8 @@ button {
   margin-bottom: 8px;
 }
 
-.settings-label input {
+.settings-label input,
+.settings-label select {
   display: block;
   width: 100%;
   margin-top: 8px;
@@ -1291,6 +1412,11 @@ button {
   font-size: 13px;
   background: transparent;
   color: var(--text);
+}
+
+.settings-label select:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
 }
 
 .settings-label input:focus {
@@ -1899,6 +2025,83 @@ button {
 .agent-message.assistant.pending {
   gap: 7px;
   color: var(--text-muted);
+}
+
+/* Rendered markdown inside assistant replies. The bubble itself keeps
+   pre-wrap for plain-text messages; rendered markdown resets it since its
+   structure already carries the line breaks. */
+.md-text {
+  white-space: normal;
+}
+
+.md-text > *:first-child {
+  margin-top: 0;
+}
+
+.md-text > *:last-child {
+  margin-bottom: 0;
+}
+
+.md-text p,
+.md-text ul,
+.md-text ol,
+.md-text blockquote,
+.md-text pre {
+  margin: 0 0 8px;
+}
+
+.md-text h1,
+.md-text h2,
+.md-text h3,
+.md-text h4 {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.md-text h1 {
+  font-size: 14px;
+}
+
+.md-text ul,
+.md-text ol {
+  padding-left: 18px;
+}
+
+.md-text li {
+  margin: 2px 0;
+}
+
+.md-text code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.md-text pre {
+  background: var(--bg-secondary);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md-text pre code {
+  background: none;
+  padding: 0;
+}
+
+.md-text blockquote {
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+  color: var(--text-muted);
+}
+
+.md-text a {
+  color: var(--accent);
 }
 
 .agent-edit-label {

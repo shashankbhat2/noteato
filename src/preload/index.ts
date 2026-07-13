@@ -14,6 +14,17 @@ import type {
 
 let nextAiStreamRequestId = 0
 
+/** Right-click details forwarded from the main process's context-menu event. */
+export interface ContextMenuParams {
+  x: number
+  y: number
+  misspelledWord: string
+  dictionarySuggestions: string[]
+  selectionText: string
+  isEditable: boolean
+  editFlags: { canCut: boolean; canCopy: boolean; canPaste: boolean }
+}
+
 const api = {
   notes: {
     list: () => ipcRenderer.invoke('notes:list'),
@@ -100,7 +111,24 @@ const api = {
   },
   app: {
     closeWindow: () => ipcRenderer.invoke('app:closeWindow'),
-    toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize')
+    toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize'),
+    spellcheckerLanguages: (): Promise<string[]> =>
+      ipcRenderer.invoke('app:spellcheckerLanguages'),
+    onContextMenu: (callback: (params: ContextMenuParams) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, params: ContextMenuParams): void =>
+        callback(params)
+      ipcRenderer.on('app:context-menu', listener)
+      return () => ipcRenderer.removeListener('app:context-menu', listener)
+    },
+    replaceMisspelling: (word: string): Promise<void> =>
+      ipcRenderer.invoke('app:replaceMisspelling', word),
+    addToDictionary: (word: string): Promise<void> =>
+      ipcRenderer.invoke('app:addToDictionary', word),
+    lookUpSelection: (): Promise<void> => ipcRenderer.invoke('app:lookUpSelection'),
+    searchGoogle: (text: string): Promise<void> => ipcRenderer.invoke('app:searchGoogle', text),
+    cut: (): Promise<void> => ipcRenderer.invoke('app:cut'),
+    copy: (): Promise<void> => ipcRenderer.invoke('app:copy'),
+    paste: (): Promise<void> => ipcRenderer.invoke('app:paste')
   },
   shortcuts: {
     subscribe: (callback: (action: string) => void) => {

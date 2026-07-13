@@ -75,6 +75,11 @@ export interface Settings {
   aiAgentEnabled: boolean
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
+  /**
+   * Spellchecker language code (e.g. "en-GB"), or "auto" for the app locale.
+   * Windows/Linux only — macOS always uses the system spellchecker.
+   */
+  spellcheckLanguage: string
 }
 
 export interface SaveOptions {

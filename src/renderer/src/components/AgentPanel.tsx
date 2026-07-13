@@ -11,6 +11,7 @@ import type { Note, NoteSummary, Settings } from '../../../shared/types'
 import type { Tab } from '../tabs'
 import { aiStream } from '../ai/client'
 import { AGENT_MODELS, type AgentModelChoice } from '../ai/models'
+import MarkdownText from './MarkdownText'
 
 const MODEL_KEY = 'noteato:agentModel'
 const HISTORY_PREFIX = 'noteato:agentHistory:'
@@ -394,7 +395,11 @@ export default function AgentPanel({
         {note && !configured && <div className="agent-empty">Add an API key in Settings.</div>}
         {messages.map((message) => (
           <div key={message.id} className={`agent-message ${message.role}`}>
-            <div>{message.content}</div>
+            {message.role === 'assistant' ? (
+              <MarkdownText text={message.content} />
+            ) : (
+              <div>{message.content}</div>
+            )}
             {message.edited && <span className="agent-edit-label">Note updated</span>}
             {message.created?.map((created) => (
               <button
@@ -412,7 +417,7 @@ export default function AgentPanel({
         {pending && streamingReply && streamingReply.noteId === note?.id && (
           <div className="agent-message assistant pending">
             {streamingReply.content ? (
-              <div>{streamingReply.content}</div>
+              <MarkdownText text={streamingReply.content} />
             ) : (
               <>
                 <Loader2 size={14} className="spin" />

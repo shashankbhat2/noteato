@@ -9,7 +9,6 @@ import {
 import {
   IconBlockquote as TextQuote,
   IconCode as Code,
-  IconCopy as Copy,
   IconCopyPlus as CopyPlus,
   IconH1 as Heading1,
   IconH2 as Heading2,
@@ -101,32 +100,8 @@ function TurnIntoItems() {
   )
 }
 
-function CopyBlockItem() {
-  const Components = useComponentsContext()!
-  const editor = useBlockNoteEditor() as unknown as NoteatoEditor
-  const block = useHoveredBlock()
-  if (!block) return null
-
-  return (
-    <Components.Generic.Menu.Item
-      className="bn-menu-item"
-      icon={<Copy size={14} />}
-      onClick={() => {
-        void (async () => {
-          const markdown = await editor.blocksToMarkdownLossy([
-            block
-          ] as Parameters<NoteatoEditor['blocksToMarkdownLossy']>[0])
-          await navigator.clipboard.writeText(markdown)
-        })()
-      }}
-    >
-      Copy
-    </Components.Generic.Menu.Item>
-  )
-}
-
 // Deep-copy a block without ids so the editor assigns fresh ones on insert.
-function stripIds(block: NoteatoBlock): Record<string, unknown> {
+export function stripIds(block: NoteatoBlock): Record<string, unknown> {
   const { id: _id, children, ...rest } = block as NoteatoBlock & { children?: NoteatoBlock[] }
   return { ...rest, children: (children ?? []).map(stripIds) }
 }
@@ -184,7 +159,6 @@ export default function BlockDragMenu() {
   return (
     <DragHandleMenu>
       <TurnIntoItems />
-      <CopyBlockItem />
       <DuplicateBlockItem />
       <DeleteBlockItem />
     </DragHandleMenu>

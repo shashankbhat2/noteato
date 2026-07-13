@@ -1,4 +1,5 @@
 import {
+  BasicTextStyleButton,
   FormattingToolbar,
   FormattingToolbarController,
   getFormattingToolbarItems,
@@ -61,10 +62,12 @@ function EnhanceButton({
 
 interface Props {
   editor: NoteatoEditor
+  /** Show the AI Enhance button (the rest of the toolbar always renders). */
+  aiActions: boolean
   onOpen: (payload: OpenPayload) => void
 }
 
-export default function SelectionAiToolbar({ editor, onOpen }: Props) {
+export default function SelectionAiToolbar({ editor, aiActions, onOpen }: Props) {
   return (
     <FormattingToolbarController
       formattingToolbar={() => {
@@ -77,7 +80,8 @@ export default function SelectionAiToolbar({ editor, onOpen }: Props) {
         return (
           <FormattingToolbar>
             {getFormattingToolbarItems()}
-            {allText && <EnhanceButton editor={editor} onOpen={onOpen} />}
+            <BasicTextStyleButton basicTextStyle="code" key="codeStyleButton" />
+            {aiActions && allText && <EnhanceButton editor={editor} onOpen={onOpen} />}
           </FormattingToolbar>
         )
       }}

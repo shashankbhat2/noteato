@@ -17,6 +17,33 @@ import ImportNotionModal from './ImportNotionModal'
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
 const AGENT_PANEL_OPEN_KEY = 'noteato:agentPanelOpen'
+const OPEN_TABS_KEY = 'noteato:openTabs'
+const RECENT_NOTES_KEY = 'noteato:recentNotes'
+const RECENT_NOTES_MAX = 8
+
+// Last session's open tabs, stored by note id (paths can go stale between
+// sessions — they're re-resolved against the current note list on restore).
+interface StoredTabs {
+  ids: string[]
+  pinnedIds: string[]
+  activeId: string | null
+}
+
+function readStoredTabs(): StoredTabs | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(OPEN_TABS_KEY) ?? 'null')
+    if (!parsed || !Array.isArray(parsed.ids)) return null
+    return {
+      ids: parsed.ids.filter((id: unknown): id is string => typeof id === 'string'),
+      pinnedIds: Array.isArray(parsed.pinnedIds)
+        ? parsed.pinnedIds.filter((id: unknown): id is string => typeof id === 'string')
+        : [],
+      activeId: typeof parsed.activeId === 'string' ? parsed.activeId : null
+    }
+  } catch {
+    return null
+  }
+}
 
 type ConfirmState =
   | { kind: 'note'; note: NoteSummary }
@@ -39,6 +66,14 @@ export default function MainLayout() {
   const [folders, setFolders] = useState<string[]>([])
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  const [recentIds, setRecentIds] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(RECENT_NOTES_KEY) ?? '[]')
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -138,12 +173,63 @@ export default function MainLayout() {
 
   useEffect(() => {
     refresh().then((list) => {
-      // Most recently updated note first (see NoteStore.list) — open it instead
-      // of landing on the empty "New note" state when notes exist.
-      if (list.length > 0) openNoteTab(list[0])
+      // Reopen everything from the last session (dropping notes that no
+      // longer exist); fall back to the most recently updated note.
+      const stored = readStoredTabs()
+      const restored = (stored?.ids ?? [])
+        .map((id) => list.find((n) => n.id === id))
+        .filter((n): n is NoteSummary => Boolean(n))
+        .map((n) => ({
+          id: n.id,
+          path: n.path,
+          title: n.title,
+          pinned: stored?.pinnedIds.includes(n.id) || undefined
+        }))
+      if (restored.length > 0) {
+        setTabs(restored)
+        const active =
+          stored?.activeId && restored.some((t) => t.id === stored.activeId)
+            ? stored.activeId
+            : restored[restored.length - 1].id
+        setActiveTabId(active)
+      } else if (list.length > 0) {
+        // Most recently updated note first (see NoteStore.list).
+        openNoteTab(list[0])
+      }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Most-recently-viewed notes, newest first — feeds the sidebar's Recent
+  // section. Every activation counts, whether from the sidebar, a tab click,
+  // a mention, or a restored session.
+  useEffect(() => {
+    if (!activeTabId) return
+    setRecentIds((prev) => {
+      const next = [activeTabId, ...prev.filter((id) => id !== activeTabId)].slice(
+        0,
+        RECENT_NOTES_MAX
+      )
+      localStorage.setItem(RECENT_NOTES_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [activeTabId])
+
+  // Persist the open tab set (skipped until the initial restore has run, so
+  // a fast quit right after launch can't wipe the previous session).
+  const tabsRestored = useRef(false)
+  useEffect(() => {
+    if (!tabsRestored.current) {
+      tabsRestored.current = tabs.length > 0 || activeTabId !== null
+      if (!tabsRestored.current) return
+    }
+    const stored: StoredTabs = {
+      ids: tabs.map((t) => t.id),
+      pinnedIds: tabs.filter((t) => t.pinned).map((t) => t.id),
+      activeId: activeTabId
+    }
+    localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(stored))
+  }, [tabs, activeTabId])
 
   useEffect(() => {
     if (selectedFolder && !folders.includes(selectedFolder)) setSelectedFolder(null)
@@ -513,6 +599,10 @@ export default function MainLayout() {
         case 'search':
           h.setSearchOpen(true)
           break
+        case 'find':
+          // Handled by the visible note editor's find bar.
+          window.dispatchEvent(new CustomEvent('noteato:find'))
+          break
         case 'toggle-sidebar':
           h.toggleSidebar()
           break
@@ -575,6 +665,7 @@ export default function MainLayout() {
           <Sidebar
             notes={notes}
             folders={folders}
+            recentIds={recentIds}
             activeNoteId={activeTabId}
             selectedFolder={selectedFolder}
             collapsed={sidebarCollapsed}

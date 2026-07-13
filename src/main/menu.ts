@@ -61,6 +61,11 @@ export function buildAppMenu(): Menu {
           accelerator: 'CmdOrCtrl+K',
           click: () => sendShortcut('search')
         },
+        {
+          label: 'Find in Note…',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => sendShortcut('find')
+        },
         { type: 'separator' },
         {
           label: 'Close Tab',

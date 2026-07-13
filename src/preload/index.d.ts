@@ -11,6 +11,16 @@ import type {
   StickyNoteData
 } from '../shared/types'
 
+export interface ContextMenuParams {
+  x: number
+  y: number
+  misspelledWord: string
+  dictionarySuggestions: string[]
+  selectionText: string
+  isEditable: boolean
+  editFlags: { canCut: boolean; canCopy: boolean; canPaste: boolean }
+}
+
 interface NoteatoApi {
   notes: {
     list: () => Promise<NoteSummary[]>
@@ -66,6 +76,15 @@ interface NoteatoApi {
   app: {
     closeWindow: () => Promise<void>
     toggleMaximize: () => Promise<void>
+    spellcheckerLanguages: () => Promise<string[]>
+    onContextMenu: (callback: (params: ContextMenuParams) => void) => () => void
+    replaceMisspelling: (word: string) => Promise<void>
+    addToDictionary: (word: string) => Promise<void>
+    lookUpSelection: () => Promise<void>
+    searchGoogle: (text: string) => Promise<void>
+    cut: () => Promise<void>
+    copy: () => Promise<void>
+    paste: () => Promise<void>
   }
   shortcuts: {
     subscribe: (callback: (action: string) => void) => () => void

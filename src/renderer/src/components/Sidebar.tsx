@@ -23,6 +23,8 @@ const EXPANDED_KEY = 'noteato:expandedFolders'
 interface Props {
   notes: NoteSummary[]
   folders: string[]
+  /** Most-recently-viewed note ids, newest first (see MainLayout). */
+  recentIds: string[]
   activeNoteId: string | null
   selectedFolder: string | null
   collapsed: boolean
@@ -59,6 +61,7 @@ type Editing =
 export default function Sidebar({
   notes,
   folders,
+  recentIds,
   activeNoteId,
   selectedFolder,
   collapsed,
@@ -124,6 +127,15 @@ export default function Sidebar({
         .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
     [notes]
   )
+  // Pinned notes are already surfaced at the top, so Recent skips them.
+  const recent = useMemo(
+    () =>
+      recentIds
+        .map((id) => notes.find((n) => n.id === id))
+        .filter((n): n is NoteSummary => Boolean(n && !n.pinned))
+        .slice(0, 5),
+    [recentIds, notes]
+  )
   const folderPaths = useMemo(() => folders.slice().sort((a, b) => a.localeCompare(b)), [folders])
 
   const persistExpanded = (next: Set<string>): void => {
@@ -151,10 +163,13 @@ export default function Sidebar({
     persistExpanded(next)
   }
 
-  // Reveal the active note by expanding its ancestor folders.
+  // Reveal the active note by expanding its ancestor folders. Pinned notes
+  // are already visible in the Pinned section, so leave their folder alone.
   useEffect(() => {
     const active = notes.find((n) => n.id === activeNoteId)
-    if (active?.folder) expand(active.external ? `linked:${active.folder}` : active.folder)
+    if (active?.folder && !active.pinned) {
+      expand(active.external ? `linked:${active.folder}` : active.folder)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeNoteId])
 
@@ -294,7 +309,11 @@ export default function Sidebar({
     })
   }
 
-  const renderNote = (note: NoteSummary, depth: number): React.ReactNode => {
+  const renderNote = (
+    note: NoteSummary,
+    depth: number,
+    section: 'pinned' | 'recent' | 'tree' = 'tree'
+  ): React.ReactNode => {
     const isRenaming = editing?.mode === 'rename-note' && editing.note.id === note.id
     if (isRenaming) {
       return (
@@ -314,14 +333,36 @@ export default function Sidebar({
         </li>
       )
     }
+    // A note can appear in several sections (Recent, Pinned, its folder) —
+    // the active state shows in exactly one: Pinned wins for pinned notes,
+    // the folder tree otherwise. Recent is a shortcut list, never active.
+    const isActive =
+      note.id === activeNoteId &&
+      (section === 'pinned' || (section === 'tree' && !note.pinned))
+    // Hovering a note during a drag targets the note's own folder; pinned and
+    // linked entries opt out (their location isn't a valid drop target).
+    const droppable = section === 'tree' && !note.external
     return (
     <li
       key={note.id}
-      className={note.id === activeNoteId ? 'note-item active' : 'note-item'}
+      className={isActive ? 'note-item active' : 'note-item'}
       style={{ paddingLeft: 10 + depth * 14 }}
       draggable={!note.external}
       onDragStart={(e) => {
         if (!note.external) onDragStart(e, { type: 'note', path: note.path })
+      }}
+      onDragOver={(e) => {
+        e.stopPropagation()
+        if (!droppable) return
+        e.preventDefault()
+        setDragOver(note.folder)
+      }}
+      onDragLeave={() => {
+        if (droppable) setDragOver((p) => (p === note.folder ? null : p))
+      }}
+      onDrop={(e) => {
+        e.stopPropagation()
+        if (droppable) dropInto(e, note.folder)
       }}
       onClick={() => onSelect(note)}
       onDoubleClick={(e) => {
@@ -375,18 +416,26 @@ export default function Sidebar({
       .filter(Boolean)
       .join(' ')
     return (
-      <li key={node.path} className="folder-item">
+      // Drag targeting lives on the whole <li> — hovering anywhere inside the
+      // folder (its row, its notes, the gaps between them) highlights and
+      // drops into this folder; stopPropagation keeps ancestors from
+      // re-targeting the drag to themselves.
+      <li
+        key={node.path}
+        className="folder-item"
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setDragOver(node.path)
+        }}
+        onDragLeave={() => setDragOver((p) => (p === node.path ? null : p))}
+        onDrop={(e) => dropInto(e, node.path)}
+      >
         <div
           className={rowClass}
           style={{ paddingLeft: 8 + depth * 14 }}
           draggable={!isEditingThis}
           onDragStart={(e) => onDragStart(e, { type: 'folder', path: node.path })}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setDragOver(node.path)
-          }}
-          onDragLeave={() => setDragOver((p) => (p === node.path ? null : p))}
-          onDrop={(e) => dropInto(e, node.path)}
           onClick={() => {
             if (isEditingThis) return
             onSelectFolder(node.path)
@@ -435,7 +484,9 @@ export default function Sidebar({
     const key = `linked:${group.path}`
     const isOpen = expanded.has(key)
     return (
-      <li key={group.path} className="folder-item">
+      // Linked folders live outside the notes dir — not a valid drop target,
+      // and hovering one shouldn't highlight the root either.
+      <li key={group.path} className="folder-item" onDragOver={(e) => e.stopPropagation()}>
         <div
           className="folder-row linked"
           title={group.path}
@@ -527,10 +578,17 @@ export default function Sidebar({
         onDragLeave={() => setDragOver((p) => (p === '' ? null : p))}
         onDrop={(e) => dropInto(e, '')}
       >
+        {recent.length > 0 && (
+          <>
+            <div className="sidebar-section-label">Recent</div>
+            <ul className="note-list">{recent.map((note) => renderNote(note, 0, 'recent'))}</ul>
+          </>
+        )}
+
         {pinned.length > 0 && (
           <>
             <div className="sidebar-section-label">Pinned</div>
-            <ul className="note-list">{pinned.map((note) => renderNote(note, 0))}</ul>
+            <ul className="note-list">{pinned.map((note) => renderNote(note, 0, 'pinned'))}</ul>
           </>
         )}
 

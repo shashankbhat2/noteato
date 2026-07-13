@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
   IconAlignLeft as AlignLeft,
   IconArrowUp as ArrowUp,
@@ -79,6 +79,7 @@ export default function SelectionAiPopup({
   const [pending, setPending] = useState(false)
   const [overlay, setOverlay] = useState<{ text: string; done: boolean } | null>(null)
   const [copied, setCopied] = useState(false)
+  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const cancelStreamRef = useRef<(() => void) | null>(null)
@@ -258,11 +259,23 @@ export default function SelectionAiPopup({
     )
   }
 
-  // Anchor below the selection, clamped to the viewport.
+  // Anchor below the selection, clamped to the window using the popup's real
+  // height — it grows while an overlay result streams in, so keep watching.
+  useLayoutEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    const observer = new ResizeObserver(() => setMeasuredHeight(el.offsetHeight))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [overlay !== null])
+
+  const height = measuredHeight ?? 240
   const left = position
     ? Math.min(Math.max(position.x, 12), window.innerWidth - POPUP_WIDTH - 12)
     : (window.innerWidth - POPUP_WIDTH) / 2
-  const top = position ? Math.min(position.y + 8, window.innerHeight - 240) : 120
+  const top = position
+    ? Math.max(12, Math.min(position.y + 8, window.innerHeight - height - 12))
+    : 120
 
   if (overlay) {
     return (

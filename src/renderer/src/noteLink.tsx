@@ -1,7 +1,15 @@
-import { BlockNoteEditor, BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core'
+import {
+  BlockNoteEditor,
+  BlockNoteSchema,
+  createCodeBlockSpec,
+  defaultBlockSpecs,
+  defaultInlineContentSpecs
+} from '@blocknote/core'
+import { codeBlockOptions } from '@blocknote/code-block'
 import { createReactInlineContentSpec } from '@blocknote/react'
 import { IconFileText as FileText } from '@tabler/icons-react'
 import { NOTE_LINK_PREFIX } from '../../shared/noteLink'
+import { noteatoEditorExtension } from './editorExtensions'
 
 // Note mentions are stored in markdown as "[Title](#note/<id>)". Ids survive
 // the target being moved or renamed (paths don't), and a fragment href passes
@@ -51,6 +59,11 @@ const NoteLinkMention = createReactInlineContentSpec(
 )
 
 export const noteatoSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    // Shiki-backed syntax highlighting with the full language list.
+    codeBlock: createCodeBlockSpec(codeBlockOptions)
+  },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
     noteLink: NoteLinkMention
@@ -61,5 +74,9 @@ export type NoteatoEditor = typeof noteatoSchema.BlockNoteEditor
 export type NoteatoBlock = typeof noteatoSchema.Block
 
 export function createNoteatoEditor(initialContent?: NoteatoBlock[]): NoteatoEditor {
-  return BlockNoteEditor.create({ schema: noteatoSchema, initialContent })
+  return BlockNoteEditor.create({
+    schema: noteatoSchema,
+    initialContent,
+    extensions: [noteatoEditorExtension]
+  })
 }
