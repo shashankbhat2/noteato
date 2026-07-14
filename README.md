@@ -60,7 +60,7 @@ Notion is a great tool that happens to also be a browser tab pretending to be an
 
 ### Voice & quick capture
 
-- **Dictation** — press the mic button and talk; streamed live to text via [Deepgram Nova-3](https://deepgram.com/), with an optional AI cleanup pass. Bring your own API key.
+- **Dictation** — press the mic button and talk; [Deepgram Nova-3](https://deepgram.com/) streams your words directly into the open note. Say “scratch that” or “undo that” to remove the last dictated phrase. Bring your own API key.
 - **Sticky notes** — always-on-top, borderless, one click away, visible across every Space.
 
 <p align="center">
