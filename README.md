@@ -16,6 +16,10 @@
 
 Notion is a great tool that happens to also be a browser tab pretending to be an app: a web renderer, a sync engine, a database, a workspace/permissions model, and a note editor, all bundled together, for people who just want to write something down. Noteato is the opposite bet. Blocks and markdown for writing, folders and search for finding things again, dictation for when typing is slower than talking, sticky notes for the stuff that doesn't deserve a whole document, reminders for the stuff you'd otherwise forget, and AI that's entirely optional and bring-your-own-key — nothing routes through a Noteato server. Everything lives on your disk as plain `.md` files, not behind an account.
 
+<p align="center">
+  <img src="ss/editor.png" width="100%" alt="Noteato editor with the sidebar, recent notes, folders, and a focused writing surface" />
+</p>
+
 ## Features
 
 ### Writing
@@ -24,7 +28,17 @@ Notion is a great tool that happens to also be a browser tab pretending to be an
 - **Plain markdown mode** — flip any note to a raw markdown textarea and back, in place.
 - **Notion-style block menu** on the drag handle — turn into, duplicate, copy, delete.
 - **Note links** — type `@` to mention another note; opens it in a tab, and keeps pointing at the right note even after it's renamed or moved.
-- **Per-note full-width toggle**, a **Zen mode** (`⌘.`) that hides the sidebar and tabs for distraction-free writing, four fonts, and six accent colors.
+- **Per-note full-width toggle**, a **Zen mode** (`⌘.`) that hides AI, tabs, and the sidebar for distraction-free writing, four fonts, and six accent colors.
+
+<p align="center">
+  <img src="ss/blocks.png" width="100%" alt="Noteato slash menu with block types and keyboard shortcuts" />
+  <br />
+  <sub>Build a note with blocks, or press <code>⌘.</code> and leave every panel behind.</sub>
+</p>
+
+<p align="center">
+  <img src="ss/zen_mode.png" width="100%" alt="Noteato Zen mode with no AI panel, tabs, or sidebar" />
+</p>
 
 ### Organization
 
@@ -40,10 +54,18 @@ Notion is a great tool that happens to also be a browser tab pretending to be an
 - **Agent panel** — a right-side chat with per-note history, @-mentions of other notes as read-only context, creating new notes from chat, full-note edits, and a stop button with real cancellation.
 - Anthropic or OpenAI, your key, stored locally. No Noteato backend sits between the app and the provider, and every AI feature is off by default.
 
+<p align="center">
+  <img src="ss/assistant.png" width="100%" alt="Noteato assistant working beside an open note" />
+</p>
+
 ### Voice & quick capture
 
 - **Dictation** — press the mic button and talk; streamed live to text via [Deepgram Nova-3](https://deepgram.com/), with an optional AI cleanup pass. Bring your own API key.
 - **Sticky notes** — always-on-top, borderless, one click away, visible across every Space.
+
+<p align="center">
+  <img src="ss/dictation.png" width="100%" alt="Live dictation writing directly into a Noteato note" />
+</p>
 
 ### Files, tabs, and everything else
 
