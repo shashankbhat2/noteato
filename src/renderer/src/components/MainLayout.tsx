@@ -200,6 +200,56 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Sidebar mode writes through the same Markdown store in another renderer.
+  // Refresh summaries whenever the main window regains focus so notes created,
+  // renamed, or reminded there appear without restarting Noteato. This stays
+  // off the autosave hot path and therefore scales with the existing file store.
+  useEffect(() => {
+    const refreshOnFocus = (): void => void refresh()
+    window.addEventListener('focus', refreshOnFocus)
+    return () => window.removeEventListener('focus', refreshOnFocus)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Apply targeted changes from the compact renderer. Hidden editors are
+  // repointed to the changed path, which makes them reload the shared Markdown
+  // before the main window is used again; changes originating here keep the
+  // focused editor mounted and preserve its caret/history.
+  useEffect(() => {
+    return window.api.notes.subscribeChanged((change) => {
+      if (change.kind === 'refresh') {
+        void refresh()
+        return
+      }
+      if (change.kind === 'remove') {
+        setNotes((current) => current.filter((note) => note.id !== change.id))
+        setTabs((current) => {
+          const next = current.filter((tab) => tab.id !== change.id)
+          setActiveTabId((active) =>
+            active === change.id ? (next[next.length - 1]?.id ?? null) : active
+          )
+          return next
+        })
+        return
+      }
+      setNotes((current) => {
+        const index = current.findIndex((note) => note.id === change.note.id)
+        if (index === -1) return [change.note, ...current]
+        const next = [...current]
+        next[index] = { ...next[index], ...change.note }
+        return next
+      })
+      setTabs((current) =>
+        current.map((tab) =>
+          tab.id === change.note.id
+            ? { ...tab, path: change.note.path, title: change.note.title }
+            : tab
+        )
+      )
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Most-recently-viewed notes, newest first — feeds the sidebar's Recent
   // section. Every activation counts, whether from the sidebar, a tab click,
   // a mention, or a restored session.

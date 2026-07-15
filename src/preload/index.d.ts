@@ -3,11 +3,13 @@ import type {
   AiCompleteRequest,
   DeletedEntry,
   Note,
+  NoteChange,
   NoteSummary,
   NotionImportResult,
   SaveOptions,
   SearchResult,
   Settings,
+  SidebarModeState,
   StickyNoteData
 } from '../shared/types'
 
@@ -49,10 +51,21 @@ interface NoteatoApi {
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
     importNotion: () => Promise<NotionImportResult | null>
+    subscribeChanged: (callback: (change: NoteChange) => void) => () => void
   }
   settings: {
     get: () => Promise<Settings>
     set: (patch: Partial<Settings>) => Promise<Settings>
+  }
+  sidebar: {
+    getState: () => Promise<SidebarModeState>
+    show: () => Promise<void>
+    close: () => Promise<void>
+    setPinned: (pinned: boolean) => Promise<SidebarModeState>
+    subscribeState: (callback: (state: SidebarModeState) => void) => () => void
+  }
+  quickNote: {
+    close: () => Promise<void>
   }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>
@@ -85,6 +98,7 @@ interface NoteatoApi {
     cut: () => Promise<void>
     copy: () => Promise<void>
     paste: () => Promise<void>
+    openSettings: () => Promise<void>
   }
   shortcuts: {
     subscribe: (callback: (action: string) => void) => () => void

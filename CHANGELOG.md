@@ -1,5 +1,19 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-07-15
+
+### Added
+
+- A clean edge-docked sidebar for notes and reminders, with search, grouping, pin and close controls, and the compact block-based editor.
+- A centered quick-note overlay, available globally with `⌥⌘N` on macOS and `Ctrl+Alt+N` elsewhere.
+- A global sidebar shortcut (`⌥⌘S` on macOS and `Ctrl+Alt+S` elsewhere), menu-bar access, and compact settings in the sidebar header.
+
+### Changed
+
+- Enabled the menu bar, sidebar mode, and quick-note shortcut by default for new settings.
+- Kept notes and reminders synchronized across the main app, sidebar, and quick-note windows.
+- Updated the sidebar to use a solid surface and the Noteato app icon.
+
 ## [0.8.0] - 2026-07-13
 
 ### Added

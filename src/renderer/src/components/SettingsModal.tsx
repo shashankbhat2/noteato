@@ -12,6 +12,11 @@ import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
 import { ACCENT_OPTIONS } from '../accents'
 import { AI_MODELS } from '../ai/models'
+import {
+  QUICK_NOTE_ACCELERATOR,
+  SIDEBAR_MODE_ACCELERATOR,
+  shortcutDisplay
+} from '../../../shared/globalShortcuts'
 
 interface Props {
   onClose: () => void
@@ -39,6 +44,7 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
   const [aiSaved, setAiSaved] = useState(false)
   const [spellLanguages, setSpellLanguages] = useState<string[]>([])
   const isMac = window.electron.process.platform === 'darwin'
+  const platform = window.electron.process.platform
 
   useEffect(() => {
     window.api.settings.get().then(setSettings)
@@ -194,6 +200,60 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
               <p className="hint">
                 Lets reminders fire even after closing the window or pressing ⌘Q — quit fully
                 from the menu bar icon instead.
+              </p>
+            </section>
+
+            <section className="settings-section">
+              <h2>Sidebar mode</h2>
+              <label className="settings-toggle-row">
+                <span>Enable the compact notes and reminders sidebar</span>
+                <button
+                  className={settings.sidebarModeEnabled ? 'settings-switch on' : 'settings-switch'}
+                  onClick={() => {
+                    const next = !settings.sidebarModeEnabled
+                    setSettings({ ...settings, sidebarModeEnabled: next })
+                    window.api.settings.set({ sidebarModeEnabled: next })
+                  }}
+                  role="switch"
+                  aria-checked={settings.sidebarModeEnabled}
+                >
+                  <span className="settings-switch-knob" />
+                </button>
+              </label>
+              <p className="hint">
+                Keeps Noteato available from the menu bar after the main window is closed. Pin the
+                sidebar when you want it above other apps. Global shortcut:{' '}
+                <kbd className="settings-shortcut-key">
+                  {shortcutDisplay(SIDEBAR_MODE_ACCELERATOR, platform)}
+                </kbd>
+              </p>
+            </section>
+
+            <section className="settings-section">
+              <h2>Quick note</h2>
+              <label className="settings-toggle-row">
+                <span>Enable the centered quick-note shortcut</span>
+                <button
+                  className={
+                    settings.quickNoteShortcutEnabled ? 'settings-switch on' : 'settings-switch'
+                  }
+                  onClick={() => {
+                    const next = !settings.quickNoteShortcutEnabled
+                    setSettings({ ...settings, quickNoteShortcutEnabled: next })
+                    window.api.settings.set({ quickNoteShortcutEnabled: next })
+                  }}
+                  role="switch"
+                  aria-checked={settings.quickNoteShortcutEnabled}
+                >
+                  <span className="settings-switch-knob" />
+                </button>
+              </label>
+              <p className="hint">
+                Create and edit a new note from anywhere with{' '}
+                <kbd className="settings-shortcut-key">
+                  {shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform)}
+                </kbd>
+                .
               </p>
             </section>
 

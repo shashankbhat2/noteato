@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconKeyboard as Keyboard } from '@tabler/icons-react'
+import {
+  QUICK_NOTE_ACCELERATOR,
+  SIDEBAR_MODE_ACCELERATOR,
+  shortcutDisplay
+} from '../../../shared/globalShortcuts'
 
-const SHORTCUTS: [string, string][] = [
+const APP_SHORTCUTS: [string, string][] = [
   ['⌘T', 'New note'],
   ['⌘K', 'Search notes'],
   ['⌘⇧N', 'New sticky note'],
@@ -16,6 +21,12 @@ const SHORTCUTS: [string, string][] = [
 export default function ShortcutsHelp() {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const platform = window.electron.process.platform
+  const shortcuts: [string, string][] = [
+    [shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform), 'Quick note (global)'],
+    [shortcutDisplay(SIDEBAR_MODE_ACCELERATOR, platform), 'Sidebar notes (global)'],
+    ...APP_SHORTCUTS
+  ]
 
   useEffect(() => {
     if (!open) return
@@ -34,7 +45,7 @@ export default function ShortcutsHelp() {
         <div className="shortcuts-popup">
           <h3>Shortcuts</h3>
           <ul>
-            {SHORTCUTS.map(([key, label]) => (
+            {shortcuts.map(([key, label]) => (
               <li key={label}>
                 <span>{label}</span>
                 <kbd>{key}</kbd>

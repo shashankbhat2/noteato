@@ -88,8 +88,12 @@ export class ReminderScheduler {
     }
 
     if (this.ready) {
-      const win = this.getWindow()
-      if (win && !win.isDestroyed()) win.webContents.send('reminders:fired', cleared)
+      // The main editor and compact sidebar are separate renderer windows.
+      // Keep both reminder lists live; windows that do not subscribe simply
+      // ignore the event.
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('reminders:fired', cleared)
+      }
     } else {
       this.pendingFired.push(cleared)
     }

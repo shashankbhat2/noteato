@@ -75,12 +75,30 @@ export interface Settings {
   aiAgentEnabled: boolean
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
+  /** Make the compact notes/reminders edge window available from the menu bar. */
+  sidebarModeEnabled: boolean
+  /** Keep the sidebar above other windows and visible across workspaces. */
+  sidebarPinned: boolean
+  /** Register the system-wide shortcut that opens a centered quick-note editor. */
+  quickNoteShortcutEnabled: boolean
   /**
    * Spellchecker language code (e.g. "en-GB"), or "auto" for the app locale.
    * Windows/Linux only — macOS always uses the system spellchecker.
    */
   spellcheckLanguage: string
 }
+
+export interface SidebarModeState {
+  enabled: boolean
+  pinned: boolean
+  visible: boolean
+}
+
+/** Small cross-window invalidations; avoids rescanning the full notes tree on autosave. */
+export type NoteChange =
+  | { kind: 'upsert'; note: NoteSummary }
+  | { kind: 'remove'; id: string }
+  | { kind: 'refresh' }
 
 export interface SaveOptions {
   title: string

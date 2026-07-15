@@ -4,11 +4,13 @@ import type {
   AiCompleteRequest,
   DeletedEntry,
   Note,
+  NoteChange,
   NoteSummary,
   NotionImportResult,
   SaveOptions,
   SearchResult,
   Settings,
+  SidebarModeState,
   StickyNoteData
 } from '../shared/types'
 
@@ -65,11 +67,32 @@ const api = {
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import'),
     importNotion: (): Promise<NotionImportResult | null> =>
-      ipcRenderer.invoke('notes:importNotion')
+      ipcRenderer.invoke('notes:importNotion'),
+    subscribeChanged: (callback: (change: NoteChange) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, change: NoteChange): void => callback(change)
+      ipcRenderer.on('notes:changed', listener)
+      return () => ipcRenderer.removeListener('notes:changed', listener)
+    }
   },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
     set: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch)
+  },
+  sidebar: {
+    getState: (): Promise<SidebarModeState> => ipcRenderer.invoke('sidebar:getState'),
+    show: (): Promise<void> => ipcRenderer.invoke('sidebar:show'),
+    close: (): Promise<void> => ipcRenderer.invoke('sidebar:close'),
+    setPinned: (pinned: boolean): Promise<SidebarModeState> =>
+      ipcRenderer.invoke('sidebar:setPinned', pinned),
+    subscribeState: (callback: (state: SidebarModeState) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, state: SidebarModeState): void =>
+        callback(state)
+      ipcRenderer.on('sidebar:state-changed', listener)
+      return () => ipcRenderer.removeListener('sidebar:state-changed', listener)
+    }
+  },
+  quickNote: {
+    close: (): Promise<void> => ipcRenderer.invoke('quickNote:close')
   },
   reminders: {
     takeFired: (): Promise<NoteSummary[]> => ipcRenderer.invoke('reminders:takeFired'),
@@ -128,7 +151,8 @@ const api = {
     searchGoogle: (text: string): Promise<void> => ipcRenderer.invoke('app:searchGoogle', text),
     cut: (): Promise<void> => ipcRenderer.invoke('app:cut'),
     copy: (): Promise<void> => ipcRenderer.invoke('app:copy'),
-    paste: (): Promise<void> => ipcRenderer.invoke('app:paste')
+    paste: (): Promise<void> => ipcRenderer.invoke('app:paste'),
+    openSettings: (): Promise<void> => ipcRenderer.invoke('app:openSettings')
   },
   shortcuts: {
     subscribe: (callback: (action: string) => void) => {

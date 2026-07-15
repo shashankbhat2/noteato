@@ -361,6 +361,20 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     saveTimer.current = setTimeout(() => persist(nextTitle, fullWidth), SAVE_DEBOUNCE_MS)
   }
 
+  // A second renderer (sidebar mode) can open the same Markdown note. Flush
+  // this editor as soon as its window yields focus so the next renderer reads
+  // the latest body instead of racing a pending debounce.
+  useEffect(() => {
+    const flushOnWindowBlur = (): void => {
+      if (!rootRef.current || rootRef.current.offsetParent === null) return
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      void persist(title, fullWidth)
+    }
+    window.addEventListener('blur', flushOnWindowBlur)
+    return () => window.removeEventListener('blur', flushOnWindowBlur)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, fullWidth, editor, note])
+
   const handleAiStreamingChange = (streaming: boolean): void => {
     aiStreamingRef.current = streaming
     if (streaming) {

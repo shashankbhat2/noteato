@@ -17,7 +17,10 @@ export function createSettingsStore(): JsonStore<Settings> {
     openaiApiKey: '',
     aiSelectionActions: true,
     aiAgentEnabled: false,
-    keepInMenuBar: false,
+    keepInMenuBar: true,
+    sidebarModeEnabled: true,
+    sidebarPinned: true,
+    quickNoteShortcutEnabled: true,
     spellcheckLanguage: 'auto'
   })
 }

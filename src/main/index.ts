@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
-import type { AiCompleteRequest, Note, SaveOptions } from '../shared/types'
+import type { AiCompleteRequest, Note, NoteChange, SaveOptions, Settings } from '../shared/types'
 import { NoteStore } from './storage'
 import { createSettingsStore } from './settings'
 import { StickyManager } from './sticky'
@@ -11,21 +11,47 @@ import { completeAi, streamAi } from './ai'
 import { ReminderScheduler } from './reminders'
 import { importNotionExport } from './notionImport'
 import { TrayManager } from './tray'
+import { SidebarModeManager } from './sidebarMode'
+import { QuickNoteManager } from './quickNote'
+import { GlobalShortcutManager } from './globalShortcuts'
 
 const settingsStore = createSettingsStore()
 const noteStore = new NoteStore(settingsStore.read().notesDir ?? undefined)
 const stickyManager = new StickyManager()
 const windowStateStore = createWindowStateStore()
 const reminderScheduler = new ReminderScheduler(noteStore, () => mainWindow)
+const sidebarModeManager = new SidebarModeManager(() => settingsStore.read())
+const quickNoteManager = new QuickNoteManager(noteStore, (note) =>
+  broadcastNoteChange({ kind: 'upsert', note })
+)
+const globalShortcutManager = new GlobalShortcutManager(
+  () => quickNoteManager.showNew(),
+  () => sidebarModeManager.toggle()
+)
 // The tray's own "Quit Noteato" sets this before calling app.quit(), so the
 // before-quit handler below knows to let that one through.
 let allowQuit = false
 const trayManager = new TrayManager(
-  () => mainWindow,
+  () => showMainWindow(),
+  () => quickNoteManager.showNew(),
+  () => settingsStore.read().quickNoteShortcutEnabled,
+  () => sidebarModeManager.show(),
+  () => settingsStore.read().sidebarModeEnabled,
   () => {
     allowQuit = true
+    sidebarModeManager.destroy()
+    quickNoteManager.destroy()
   }
 )
+
+function shouldKeepRunning(): boolean {
+  const settings = settingsStore.read()
+  return (
+    settings.keepInMenuBar ||
+    settings.sidebarModeEnabled ||
+    settings.quickNoteShortcutEnabled
+  )
+}
 
 // Cmd+Q / Dock "Quit" / the app-menu Quit role all call app.quit(), which
 // fires this before any window closes. With keepInMenuBar on, treat that as
@@ -33,8 +59,12 @@ const trayManager = new TrayManager(
 // process regardless of whether any window is open, so keeping the process
 // alive is what actually keeps them firing.
 app.on('before-quit', (event) => {
-  if (allowQuit) return
-  if (settingsStore.read().keepInMenuBar) {
+  if (allowQuit) {
+    sidebarModeManager.destroy()
+    quickNoteManager.destroy()
+    return
+  }
+  if (shouldKeepRunning()) {
     event.preventDefault()
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
   }
@@ -68,14 +98,27 @@ const MIN_HEIGHT = 250
 
 let mainWindow: BrowserWindow | null = null
 
+function broadcastNoteChange(change: NoteChange, exceptWebContentsId?: number): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents.id !== exceptWebContentsId) {
+      win.webContents.send('notes:changed', change)
+    }
+  }
+}
+
 // While the app lives only in the menu bar (keepInMenuBar on, no visible
 // windows), drop the Dock icon and its running dot — the same behavior as
 // menu-bar apps like Docker Desktop. Any window becoming visible brings the
 // Dock icon back (see browser-window-created below).
 function hideDockIfBackgrounded(): void {
   if (process.platform !== 'darwin') return
-  const anyVisible = BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible())
-  if (!anyVisible && settingsStore.read().keepInMenuBar && app.dock.isVisible()) {
+  const sidebarWindow = sidebarModeManager.getWindow()
+  const quickNoteWindow = quickNoteManager.getWindow()
+  const anyVisibleRegularWindow = BrowserWindow.getAllWindows().some(
+    (w) =>
+      w !== sidebarWindow && w !== quickNoteWindow && !w.isDestroyed() && w.isVisible()
+  )
+  if (!anyVisibleRegularWindow && shouldKeepRunning() && app.dock.isVisible()) {
     app.dock.hide()
   }
 }
@@ -150,7 +193,7 @@ function createMainWindow(): void {
   // allowQuit distinguishes this from a window closing as part of a real quit
   // the tray itself initiated (see the before-quit handler above).
   win.on('close', (event) => {
-    if (!allowQuit && settingsStore.read().keepInMenuBar) {
+    if (!allowQuit && shouldKeepRunning()) {
       event.preventDefault()
       win.hide()
     }
@@ -192,27 +235,51 @@ function createMainWindow(): void {
   }
 }
 
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function openMainSettings(): void {
+  showMainWindow()
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+  const send = (): void => win.webContents.send('shortcut', 'open-settings')
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
+  else send()
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('notes:list', () => noteStore.list())
   ipcMain.handle('notes:listFolders', () => noteStore.listFolders())
   ipcMain.handle('notes:read', (_e, path: string) => noteStore.read(path))
-  ipcMain.handle('notes:create', (_e, title?: string, folder?: string) =>
-    noteStore.create(title, folder)
-  )
-  ipcMain.handle('notes:save', (_e, path: string, options: SaveOptions) => {
+  ipcMain.handle('notes:create', (e, title?: string, folder?: string) => {
+    const created = noteStore.create(title, folder)
+    broadcastNoteChange({ kind: 'upsert', note: created }, e.sender.id)
+    return created
+  })
+  ipcMain.handle('notes:save', (e, path: string, options: SaveOptions) => {
     const saved = noteStore.save(path, options)
     reminderScheduler.reschedule(saved)
+    broadcastNoteChange({ kind: 'upsert', note: saved }, e.sender.id)
     return saved
   })
-  ipcMain.handle('notes:setPinned', (_e, path: string, pinned: boolean) =>
-    noteStore.setPinned(path, pinned)
-  )
-  ipcMain.handle('notes:setReminder', (_e, path: string, reminderAt: string | null) => {
-    const result = noteStore.setReminder(path, reminderAt)
-    if (result) reminderScheduler.reschedule(result)
+  ipcMain.handle('notes:setPinned', (e, path: string, pinned: boolean) => {
+    const result = noteStore.setPinned(path, pinned)
+    if (result) broadcastNoteChange({ kind: 'upsert', note: result }, e.sender.id)
     return result
   })
-  ipcMain.handle('notes:delete', (_e, path: string) => {
+  ipcMain.handle('notes:setReminder', (e, path: string, reminderAt: string | null) => {
+    const result = noteStore.setReminder(path, reminderAt)
+    if (result) {
+      reminderScheduler.reschedule(result)
+      broadcastNoteChange({ kind: 'upsert', note: result }, e.sender.id)
+    }
+    return result
+  })
+  ipcMain.handle('notes:delete', (e, path: string) => {
     let id: string | null = null
     try {
       id = noteStore.read(path).id
@@ -221,9 +288,10 @@ function registerIpcHandlers(): void {
     }
     const result = noteStore.delete(path)
     if (id) reminderScheduler.unschedule(id)
+    if (id) broadcastNoteChange({ kind: 'remove', id }, e.sender.id)
     return result
   })
-  ipcMain.handle('notes:removeExternal', (_e, path: string) => {
+  ipcMain.handle('notes:removeExternal', (e, path: string) => {
     let id: string | null = null
     try {
       id = noteStore.read(path).id
@@ -232,31 +300,46 @@ function registerIpcHandlers(): void {
     }
     const result = noteStore.removeExternal(path)
     if (id) reminderScheduler.unschedule(id)
+    if (id) broadcastNoteChange({ kind: 'remove', id }, e.sender.id)
     return result
   })
-  ipcMain.handle('notes:restore', (_e, trashName: string, originalPath: string, isFolder: boolean) => {
+  ipcMain.handle('notes:restore', (e, trashName: string, originalPath: string, isFolder: boolean) => {
     const restored = noteStore.restore(trashName, originalPath, isFolder)
-    if (restored) reminderScheduler.reschedule(restored)
-    else reminderScheduler.rebuildAll()
+    if (restored) {
+      reminderScheduler.reschedule(restored)
+      broadcastNoteChange({ kind: 'upsert', note: restored }, e.sender.id)
+    } else {
+      reminderScheduler.rebuildAll()
+      broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
+    }
     return restored
   })
-  ipcMain.handle('notes:createFolder', (_e, path: string) => noteStore.createFolder(path))
-  ipcMain.handle('notes:renameFolder', (_e, path: string, newName: string) => {
+  ipcMain.handle('notes:createFolder', (e, path: string) => {
+    noteStore.createFolder(path)
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
+  })
+  ipcMain.handle('notes:renameFolder', (e, path: string, newName: string) => {
     noteStore.renameFolder(path, newName)
     reminderScheduler.rebuildAll()
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
   })
-  ipcMain.handle('notes:moveNote', (_e, path: string, targetFolder: string) => {
+  ipcMain.handle('notes:moveNote', (e, path: string, targetFolder: string) => {
     const moved = noteStore.moveNote(path, targetFolder)
-    if (moved) reminderScheduler.reschedule(moved)
+    if (moved) {
+      reminderScheduler.reschedule(moved)
+      broadcastNoteChange({ kind: 'upsert', note: moved }, e.sender.id)
+    }
     return moved
   })
-  ipcMain.handle('notes:moveFolder', (_e, path: string, targetParent: string) => {
+  ipcMain.handle('notes:moveFolder', (e, path: string, targetParent: string) => {
     noteStore.moveFolder(path, targetParent)
     reminderScheduler.rebuildAll()
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
   })
-  ipcMain.handle('notes:deleteFolder', (_e, path: string) => {
+  ipcMain.handle('notes:deleteFolder', (e, path: string) => {
     const result = noteStore.deleteFolder(path)
     reminderScheduler.rebuildAll()
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
     return result
   })
   ipcMain.handle('notes:search', (_e, query: string) => noteStore.search(query))
@@ -275,6 +358,7 @@ function registerIpcHandlers(): void {
     noteStore.setNotesDir(newDir)
     settingsStore.write({ ...settingsStore.read(), notesDir: newDir })
     reminderScheduler.rebuildAll()
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
     return newDir
   })
 
@@ -287,7 +371,9 @@ function registerIpcHandlers(): void {
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled) return []
 
-    return result.filePaths.map((filePath) => noteStore.openExternal(filePath))
+    const opened = result.filePaths.map((filePath) => noteStore.openExternal(filePath))
+    for (const note of opened) broadcastNoteChange({ kind: 'upsert', note }, e.sender.id)
+    return opened
   })
 
   ipcMain.handle('notes:importNotion', async (e) => {
@@ -295,7 +381,9 @@ function registerIpcHandlers(): void {
     const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
     const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (result.canceled || result.filePaths.length === 0) return null
-    return importNotionExport(noteStore, result.filePaths[0])
+    const imported = importNotionExport(noteStore, result.filePaths[0])
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
+    return imported
   })
 
   ipcMain.handle('notes:takeExternalOpens', () => {
@@ -306,19 +394,52 @@ function registerIpcHandlers(): void {
   ipcMain.handle('reminders:takeFired', () => reminderScheduler.markReady())
 
   ipcMain.handle('settings:get', () => settingsStore.read())
-  ipcMain.handle('settings:set', (_e, patch) => {
+  ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => {
     const next = { ...settingsStore.read(), ...patch }
     settingsStore.write(next)
     if (patch.theme) nativeTheme.themeSource = patch.theme
     if ('spellcheckLanguage' in patch) applySpellcheckLanguage(next.spellcheckLanguage)
-    if ('keepInMenuBar' in patch) {
-      trayManager.setEnabled(next.keepInMenuBar)
+    if ('sidebarModeEnabled' in patch) {
+      sidebarModeManager.setEnabled(next.sidebarModeEnabled)
+    }
+    if ('quickNoteShortcutEnabled' in patch && !next.quickNoteShortcutEnabled) {
+      quickNoteManager.close()
+    }
+    if ('sidebarModeEnabled' in patch || 'quickNoteShortcutEnabled' in patch) {
+      globalShortcutManager.sync(next)
+    }
+    if (
+      'keepInMenuBar' in patch ||
+      'sidebarModeEnabled' in patch ||
+      'quickNoteShortcutEnabled' in patch
+    ) {
+      trayManager.setEnabled(
+        next.keepInMenuBar || next.sidebarModeEnabled || next.quickNoteShortcutEnabled
+      )
       // Turning the tray off must never leave the app unreachable with a
       // hidden Dock icon and no menu bar presence.
-      if (!next.keepInMenuBar && process.platform === 'darwin') void app.dock.show()
+      if (
+        !next.keepInMenuBar &&
+        !next.sidebarModeEnabled &&
+        !next.quickNoteShortcutEnabled &&
+        process.platform === 'darwin'
+      ) {
+        void app.dock.show()
+      }
     }
     return next
   })
+
+  ipcMain.handle('sidebar:getState', () => sidebarModeManager.getState())
+  ipcMain.handle('sidebar:show', () => sidebarModeManager.show())
+  ipcMain.handle('sidebar:close', () => sidebarModeManager.hide())
+  ipcMain.handle('sidebar:setPinned', (_e, pinned: boolean) => {
+    const next = { ...settingsStore.read(), sidebarPinned: pinned }
+    settingsStore.write(next)
+    sidebarModeManager.setPinned(pinned)
+    return sidebarModeManager.getState()
+  })
+  ipcMain.handle('quickNote:close', () => quickNoteManager.close())
 
   ipcMain.handle('sticky:list', () => stickyManager.list())
   ipcMain.handle('sticky:create', () => stickyManager.create())
@@ -364,6 +485,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('app:cut', (e) => e.sender.cut())
   ipcMain.handle('app:copy', (e) => e.sender.copy())
   ipcMain.handle('app:paste', (e) => e.sender.paste())
+  ipcMain.handle('app:openSettings', () => openMainSettings())
 
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.handle('app:toggleMaximize', (e) => {
@@ -384,6 +506,13 @@ app.whenReady().then(() => {
     // window is refocused once that completes because the activation-policy
     // switch can steal focus from a window shown in the same beat.
     window.on('show', () => {
+      if (
+        window === sidebarModeManager.getWindow() ||
+        window === quickNoteManager.getWindow()
+      ) {
+        setImmediate(hideDockIfBackgrounded)
+        return
+      }
       if (process.platform !== 'darwin' || app.dock.isVisible()) return
       void app.dock.show().then(() => {
         if (!window.isDestroyed()) window.focus()
@@ -399,21 +528,20 @@ app.whenReady().then(() => {
   createMainWindow()
   stickyManager.openAll()
   reminderScheduler.rebuildAll()
-  trayManager.setEnabled(settingsStore.read().keepInMenuBar)
+  sidebarModeManager.setEnabled(settingsStore.read().sidebarModeEnabled)
+  globalShortcutManager.sync(settingsStore.read())
+  trayManager.setEnabled(shouldKeepRunning())
 
   // Windows/Linux deliver OS-opened files as launch arguments.
   for (const arg of process.argv.slice(1)) openExternalMarkdown(arg)
 
   app.on('activate', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show()
-      mainWindow.focus()
-    } else if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow()
-    }
+    showMainWindow()
   })
 })
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' && !shouldKeepRunning()) app.quit()
 })
+
+app.on('will-quit', () => globalShortcutManager.destroy())

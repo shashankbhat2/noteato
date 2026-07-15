@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron'
+import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
 
 // A small render of the tray glyph, embedded inline so the tray works
 // identically in dev and packaged builds without wiring a separate resource
@@ -11,13 +11,19 @@ export class TrayManager {
   private tray: Tray | null = null
 
   constructor(
-    private getWindow: () => BrowserWindow | null,
+    private showMainWindow: () => void,
+    private showQuickNote: () => void,
+    private isQuickNoteEnabled: () => boolean,
+    private showSidebar: () => void,
+    private isSidebarEnabled: () => boolean,
     private onQuit: () => void
   ) {}
 
   setEnabled(enabled: boolean): void {
-    if (enabled) this.create()
-    else this.destroy()
+    if (enabled) {
+      this.create()
+      this.tray?.setContextMenu(this.buildMenu())
+    } else this.destroy()
   }
 
   private create(): void {
@@ -35,13 +41,24 @@ export class TrayManager {
     return Menu.buildFromTemplate([
       {
         label: 'Show Noteato',
-        click: () => {
-          const win = this.getWindow()
-          if (!win || win.isDestroyed()) return
-          win.show()
-          win.focus()
-        }
+        click: () => this.showMainWindow()
       },
+      ...(this.isQuickNoteEnabled()
+        ? [
+            {
+              label: 'New Quick Note',
+              click: () => this.showQuickNote()
+            } as MenuItemConstructorOptions
+          ]
+        : []),
+      ...(this.isSidebarEnabled()
+        ? [
+            {
+              label: 'Show Sidebar',
+              click: () => this.showSidebar()
+            } as MenuItemConstructorOptions
+          ]
+        : []),
       { type: 'separator' },
       {
         label: 'Quit Noteato',
