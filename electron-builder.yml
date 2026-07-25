@@ -15,6 +15,8 @@ afterPack: scripts/afterPack.cjs
 electronLanguages:
   - en
 artifactName: '${productName}-${version}-${arch}.${ext}'
+# Never allow a release build to silently fall back to an unsigned app.
+forceCodeSigning: true
 # Register with the OS as an editor for markdown files (enables Finder
 # "Open With" / double-click via Launch Services on macOS).
 fileAssociations:
@@ -29,18 +31,15 @@ fileAssociations:
 mac:
   icon: build/icon.icns
   category: public.app-category.productivity
-  # Apple Silicon (arm64) only — no Intel builds.
+  # Publish native builds for both Apple Silicon and Intel Macs.
   target:
-    - target: dmg
-      arch: [arm64]
-    - target: zip
-      arch: [arm64]
-  # No Apple Developer account: the app is unsigned/not notarized.
-  # electron-builder still ad-hoc signs automatically so it can launch on
-  # Apple Silicon, but Gatekeeper will show an "unidentified developer"
-  # warning on first open (see README for the one-time bypass).
-  hardenedRuntime: false
+    - dmg
+    - zip
+  hardenedRuntime: true
   gatekeeperAssess: false
+  notarize: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     NSMicrophoneUsageDescription: Noteato uses your microphone for dictation.
 npmRebuild: false

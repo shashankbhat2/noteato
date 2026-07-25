@@ -8,10 +8,14 @@ import type {
   NoteSummary,
   NotionImportResult,
   SaveOptions,
+  ScratchChange,
+  ScratchNote,
+  ScratchSaveOptions,
   SearchResult,
   Settings,
   SidebarModeState,
-  StickyNoteData
+  StickyNoteData,
+  TrashEntry
 } from '../shared/types'
 
 let nextAiStreamRequestId = 0
@@ -57,6 +61,10 @@ const api = {
     deleteFolder: (path: string): Promise<DeletedEntry> =>
       ipcRenderer.invoke('notes:deleteFolder', path),
     search: (query: string): Promise<SearchResult[]> => ipcRenderer.invoke('notes:search', query),
+    listTrash: (): Promise<TrashEntry[]> => ipcRenderer.invoke('notes:listTrash'),
+    purgeTrash: (trashName: string): Promise<void> =>
+      ipcRenderer.invoke('notes:purgeTrash', trashName),
+    emptyTrash: (): Promise<void> => ipcRenderer.invoke('notes:emptyTrash'),
     takeExternalOpens: (): Promise<Note[]> => ipcRenderer.invoke('notes:takeExternalOpens'),
     subscribeExternalOpen: (callback: (note: Note) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, note: Note): void => callback(note)
@@ -66,12 +74,36 @@ const api = {
     getDir: () => ipcRenderer.invoke('notes:getDir'),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import'),
+    openFolder: (): Promise<NoteSummary[]> => ipcRenderer.invoke('notes:openFolder'),
     importNotion: (): Promise<NotionImportResult | null> =>
       ipcRenderer.invoke('notes:importNotion'),
     subscribeChanged: (callback: (change: NoteChange) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, change: NoteChange): void => callback(change)
       ipcRenderer.on('notes:changed', listener)
       return () => ipcRenderer.removeListener('notes:changed', listener)
+    }
+  },
+  scratch: {
+    list: (): Promise<ScratchNote[]> => ipcRenderer.invoke('scratch:list'),
+    read: (id: string): Promise<ScratchNote | null> => ipcRenderer.invoke('scratch:read', id),
+    create: (): Promise<ScratchNote> => ipcRenderer.invoke('scratch:create'),
+    save: (id: string, options: ScratchSaveOptions): Promise<ScratchNote | null> =>
+      ipcRenderer.invoke('scratch:save', id, options),
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('scratch:delete', id),
+    setPinned: (id: string, pinned: boolean): Promise<ScratchNote | null> =>
+      ipcRenderer.invoke('scratch:setPinned', id, pinned),
+    setReminder: (id: string, reminderAt: string | null): Promise<ScratchNote | null> =>
+      ipcRenderer.invoke('scratch:setReminder', id, reminderAt),
+    subscribeChanged: (callback: (change: ScratchChange) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, change: ScratchChange): void =>
+        callback(change)
+      ipcRenderer.on('scratch:changed', listener)
+      return () => ipcRenderer.removeListener('scratch:changed', listener)
+    },
+    subscribeOpen: (callback: (id: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, id: string): void => callback(id)
+      ipcRenderer.on('scratch:open', listener)
+      return () => ipcRenderer.removeListener('scratch:open', listener)
     }
   },
   settings: {

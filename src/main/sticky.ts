@@ -1,28 +1,25 @@
 import { randomUUID } from 'crypto'
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { app, BrowserWindow, screen } from 'electron'
+import { BrowserWindow, screen } from 'electron'
+import type Database from 'better-sqlite3'
 import type { StickyNoteData } from '../shared/types'
-import { JsonStore } from './jsonStore'
 
 const COLORS = ['#eee3c8', '#e8d4c9', '#d8e0d0', '#d3dde2', '#e0d8e2']
 
 export class StickyManager {
-  private store: JsonStore<{ notes: StickyNoteData[] }>
   private windows = new Map<string, BrowserWindow>()
 
-  constructor() {
-    this.store = new JsonStore(join(app.getPath('userData'), 'stickies.json'), { notes: [] })
-  }
+  constructor(private db: Database.Database) {}
 
   openAll(): void {
-    for (const note of this.store.read().notes) {
+    for (const note of this.list()) {
       this.openWindow(note)
     }
   }
 
   list(): StickyNoteData[] {
-    return this.store.read().notes
+    return this.db.prepare('SELECT * FROM stickies').all() as StickyNoteData[]
   }
 
   create(): StickyNoteData {
@@ -36,25 +33,30 @@ export class StickyManager {
       content: '',
       color: COLORS[Math.floor(Math.random() * COLORS.length)]
     }
-    const data = this.store.read()
-    data.notes.push(note)
-    this.store.write(data)
+    this.db
+      .prepare(
+        'INSERT INTO stickies (id, x, y, width, height, content, color) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      )
+      .run(note.id, note.x, note.y, note.width, note.height, note.content, note.color)
     this.openWindow(note)
     return note
   }
 
   update(id: string, patch: Partial<StickyNoteData>): void {
-    const data = this.store.read()
-    const idx = data.notes.findIndex((n) => n.id === id)
-    if (idx === -1) return
-    data.notes[idx] = { ...data.notes[idx], ...patch }
-    this.store.write(data)
+    const existing = this.db.prepare('SELECT * FROM stickies WHERE id = ?').get(id) as
+      | StickyNoteData
+      | undefined
+    if (!existing) return
+    const next = { ...existing, ...patch }
+    this.db
+      .prepare(
+        'UPDATE stickies SET x = ?, y = ?, width = ?, height = ?, content = ?, color = ? WHERE id = ?'
+      )
+      .run(next.x, next.y, next.width, next.height, next.content, next.color, id)
   }
 
   close(id: string): void {
-    const data = this.store.read()
-    data.notes = data.notes.filter((n) => n.id !== id)
-    this.store.write(data)
+    this.db.prepare('DELETE FROM stickies WHERE id = ?').run(id)
     this.windows.get(id)?.close()
     this.windows.delete(id)
   }

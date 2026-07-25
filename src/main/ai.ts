@@ -2,8 +2,8 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import type { AiCompleteRequest, Settings } from '../shared/types'
 
-const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-4-8'
-const DEFAULT_OPENAI_MODEL = 'gpt-5.6-terra'
+const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5'
+const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini'
 
 export async function completeAi(settings: Settings, req: AiCompleteRequest): Promise<string> {
   const maxTokens = req.maxTokens ?? 2048

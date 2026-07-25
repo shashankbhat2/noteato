@@ -15,24 +15,33 @@ import {
 } from 'fs'
 import { dirname, isAbsolute, join, relative } from 'path'
 import { app } from 'electron'
+import type Database from 'better-sqlite3'
 import type {
   DeletedEntry,
   Note,
   NoteMeta,
   NoteSummary,
   SaveOptions,
-  SearchResult
+  SearchResult,
+  TrashEntry
 } from '../shared/types'
-import { parseNoteFile, serializeNoteFile } from './frontmatter'
+import {
+  leadingH1,
+  parseNoteFile,
+  replaceLeadingH1,
+  serializeNoteFile,
+  stripLeadingH1
+} from './frontmatter'
 
-interface ExternalNoteEntry {
-  id: string
-  filePath: string
-  title?: string
-  createdAt?: string
-  fullWidth?: boolean
-  pinned?: boolean
-  reminderAt?: string | null
+// A registered external file or folder (the opened_files table). Files opened
+// from outside the notes dir are linked in place and never modified beyond
+// explicit edits to their markdown body; pin/reminder metadata lives here.
+interface OpenedFileRow {
+  path: string
+  kind: 'file' | 'folder'
+  pinned: number
+  reminder_at: string | null
+  added_at: string
 }
 
 function replaceExternalBody(raw: string, body: string): string {
@@ -77,33 +86,67 @@ export class NoteStore {
   // can be undone. Kept in userData rather than the notes folder to avoid
   // cluttering the user-facing markdown directory with trashed files.
   private trashDir: string
-  private externalNotesFile: string
-  private externalNotes: ExternalNoteEntry[]
 
-  constructor(notesDir?: string) {
+  constructor(
+    private db: Database.Database,
+    notesDir?: string
+  ) {
     this.notesDir = notesDir ?? join(app.getPath('documents'), 'Noteato')
     if (!existsSync(this.notesDir)) mkdirSync(this.notesDir, { recursive: true })
     this.trashDir = join(app.getPath('userData'), 'trash')
-    this.externalNotesFile = join(app.getPath('userData'), 'external-notes.json')
-    this.externalNotes = this.loadExternalNotes()
   }
 
-  private loadExternalNotes(): ExternalNoteEntry[] {
-    if (!existsSync(this.externalNotesFile)) return []
-    try {
-      const parsed = JSON.parse(readFileSync(this.externalNotesFile, 'utf-8'))
-      if (!Array.isArray(parsed)) return []
-      return parsed.filter(
-        (entry): entry is ExternalNoteEntry =>
-          typeof entry?.id === 'string' && typeof entry?.filePath === 'string'
-      )
-    } catch {
-      return []
+  // --- Registered external files/folders ------------------------------------
+
+  private openedRows(): OpenedFileRow[] {
+    return this.db.prepare('SELECT * FROM opened_files').all() as OpenedFileRow[]
+  }
+
+  private openedRow(path: string): OpenedFileRow | undefined {
+    return this.db.prepare('SELECT * FROM opened_files WHERE path = ?').get(path) as
+      | OpenedFileRow
+      | undefined
+  }
+
+  // The registered entry that surfaces an absolute path: the exact entry, or
+  // a registered folder containing it.
+  private externalRootOf(fullPath: string): OpenedFileRow | null {
+    const exact = this.openedRow(fullPath)
+    if (exact) return exact
+    for (const row of this.openedRows()) {
+      if (row.kind === 'folder' && fullPath.startsWith(`${row.path}/`)) return row
     }
+    return null
   }
 
-  private saveExternalNotes(): void {
-    writeFileSync(this.externalNotesFile, JSON.stringify(this.externalNotes, null, 2), 'utf-8')
+  private upsertFileMeta(
+    path: string,
+    patch: { pinned?: boolean; reminderAt?: string | null }
+  ): void {
+    const existing = this.openedRow(path)
+    if (existing) {
+      if (patch.pinned !== undefined) {
+        this.db
+          .prepare('UPDATE opened_files SET pinned = ? WHERE path = ?')
+          .run(patch.pinned ? 1 : 0, path)
+      }
+      if ('reminderAt' in patch) {
+        this.db
+          .prepare('UPDATE opened_files SET reminder_at = ? WHERE path = ?')
+          .run(patch.reminderAt ?? null, path)
+      }
+      return
+    }
+    this.db
+      .prepare(
+        "INSERT INTO opened_files (path, kind, pinned, reminder_at, added_at) VALUES (?, 'file', ?, ?, ?)"
+      )
+      .run(path, patch.pinned ? 1 : 0, patch.reminderAt ?? null, new Date().toISOString())
+  }
+
+  /** Registered roots the file watcher should observe. */
+  listOpenedRoots(): { path: string; kind: 'file' | 'folder' }[] {
+    return this.openedRows().map(({ path, kind }) => ({ path, kind }))
   }
 
   getNotesDir(): string {
@@ -146,9 +189,10 @@ export class NoteStore {
 
   private resolveNotePath(notePath: string): string {
     if (!isAbsolute(notePath)) return this.resolveWithin(notePath)
-    const entry = this.externalNotes.find((candidate) => candidate.filePath === notePath)
-    if (!entry) throw new Error('External note is not linked to Noteato.')
-    return entry.filePath
+    if (!this.externalRootOf(notePath)) {
+      throw new Error('External note is not linked to Noteato.')
+    }
+    return notePath
   }
 
   private walkNotes(dir: string, prefix: string, out: string[]): void {
@@ -172,33 +216,75 @@ export class NoteStore {
     }
   }
 
+  // Summary of a managed (notes-dir) markdown file.
   private toSummary(relPath: string): NoteSummary | null {
-    const full = this.resolveNotePath(relPath)
+    const full = this.resolveWithin(relPath)
     const raw = readFileSync(full, 'utf-8')
     const { meta, body } = parseNoteFile(raw)
-    const external = isAbsolute(relPath)
-    const externalEntry = external
-      ? this.externalNotes.find((candidate) => candidate.filePath === relPath)
-      : null
-    const id = externalEntry?.id ?? meta.id
-    if (!id) return null
+    if (!meta.id) return null
     const stats = statSync(full)
     return {
-      id,
-      title:
-        externalEntry?.title ?? meta.title ?? baseName(relPath).replace(/\.(md|markdown)$/i, ''),
-      createdAt: externalEntry?.createdAt ?? meta.createdAt ?? stats.birthtime.toISOString(),
-      updatedAt: external
-        ? stats.mtime.toISOString()
-        : meta.updatedAt ?? stats.mtime.toISOString(),
+      id: meta.id,
+      title: meta.title ?? baseName(relPath).replace(/\.(md|markdown)$/i, ''),
+      createdAt: meta.createdAt ?? stats.birthtime.toISOString(),
+      updatedAt: meta.updatedAt ?? stats.mtime.toISOString(),
       tags: meta.tags ?? [],
-      fullWidth: externalEntry?.fullWidth ?? meta.fullWidth ?? false,
-      pinned: externalEntry?.pinned ?? meta.pinned ?? false,
-      reminderAt: externalEntry?.reminderAt ?? meta.reminderAt ?? null,
+      fullWidth: meta.fullWidth ?? false,
+      pinned: meta.pinned ?? false,
+      reminderAt: meta.reminderAt ?? null,
       path: relPath,
-      folder: external ? dirname(full) : folderOf(relPath),
-      excerpt: body.trim().slice(0, 160),
-      external
+      folder: folderOf(relPath),
+      excerpt: stripLeadingH1(body).trim().slice(0, 160),
+      external: false
+    }
+  }
+
+  // Summary of an externally linked file. The file itself is never written by
+  // anything here: the id derives from the path, the title from the file's
+  // leading H1 (falling back to any frontmatter title another tool put there,
+  // then the filename), and pin/reminder metadata lives in opened_files.
+  private externalSummary(fullPath: string, root: OpenedFileRow): NoteSummary | null {
+    let raw: string
+    let stats: ReturnType<typeof statSync>
+    try {
+      raw = readFileSync(fullPath, 'utf-8')
+      stats = statSync(fullPath)
+    } catch {
+      return null
+    }
+    const { meta, body } = parseNoteFile(raw)
+    const metaRow = fullPath === root.path ? root : this.openedRow(fullPath)
+    return {
+      id: `ext:${fullPath}`,
+      title:
+        leadingH1(body) ?? meta.title ?? baseName(fullPath).replace(/\.(md|markdown)$/i, ''),
+      createdAt: stats.birthtime.toISOString(),
+      updatedAt: stats.mtime.toISOString(),
+      tags: meta.tags ?? [],
+      fullWidth: false,
+      pinned: (metaRow?.pinned ?? 0) === 1,
+      reminderAt: metaRow?.reminder_at ?? null,
+      path: fullPath,
+      folder: dirname(fullPath),
+      excerpt: stripLeadingH1(body).trim().slice(0, 160),
+      external: true,
+      externalRoot: root.path,
+      fromFolder: root.kind === 'folder'
+    }
+  }
+
+  private walkExternalDir(dir: string, out: string[]): void {
+    let entries: import('fs').Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) this.walkExternalDir(full, out)
+      else if (entry.isFile() && /\.(md|markdown)$/i.test(entry.name)) out.push(full)
     }
   }
 
@@ -208,15 +294,30 @@ export class NoteStore {
     const summaries = paths
       .map((p) => this.toSummary(p))
       .filter((s): s is NoteSummary => s !== null)
-    for (const entry of this.externalNotes) {
-      if (!existsSync(entry.filePath)) continue
-      try {
-        const summary = this.toSummary(entry.filePath)
+
+    // Linked folders first, then standalone linked files that a folder didn't
+    // already surface (a standalone entry may double as pin/reminder metadata
+    // for a folder child).
+    const seen = new Set<string>()
+    const rows = this.openedRows()
+    for (const row of rows) {
+      if (row.kind !== 'folder' || !existsSync(row.path)) continue
+      const files: string[] = []
+      this.walkExternalDir(row.path, files)
+      for (const file of files) {
+        if (seen.has(file)) continue
+        seen.add(file)
+        const summary = this.externalSummary(file, row)
         if (summary) summaries.push(summary)
-      } catch {
-        /* unreadable linked file — leave it registered for a later retry */
       }
     }
+    for (const row of rows) {
+      if (row.kind !== 'file' || seen.has(row.path) || !existsSync(row.path)) continue
+      seen.add(row.path)
+      const summary = this.externalSummary(row.path, row)
+      if (summary) summaries.push(summary)
+    }
+
     summaries.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
     return summaries
   }
@@ -229,30 +330,32 @@ export class NoteStore {
   }
 
   read(relPath: string): Note {
-    const full = this.resolveNotePath(relPath)
+    if (isAbsolute(relPath)) {
+      const root = this.externalRootOf(relPath)
+      if (!root) throw new Error('External note is not linked to Noteato.')
+      const summary = this.externalSummary(relPath, root)
+      if (!summary) throw new Error('Linked file could not be read.')
+      const { body } = parseNoteFile(readFileSync(relPath, 'utf-8'))
+      return { ...summary, body }
+    }
+
+    const full = this.resolveWithin(relPath)
     const raw = readFileSync(full, 'utf-8')
     const { meta, body } = parseNoteFile(raw)
-    const external = isAbsolute(relPath)
-    const externalEntry = external
-      ? this.externalNotes.find((candidate) => candidate.filePath === relPath)
-      : null
     const stats = statSync(full)
     return {
-      id: externalEntry?.id ?? meta.id ?? randomUUID(),
-      title:
-        externalEntry?.title ?? meta.title ?? baseName(relPath).replace(/\.(md|markdown)$/i, ''),
-      createdAt: externalEntry?.createdAt ?? meta.createdAt ?? stats.birthtime.toISOString(),
-      updatedAt: external
-        ? stats.mtime.toISOString()
-        : meta.updatedAt ?? stats.mtime.toISOString(),
+      id: meta.id ?? randomUUID(),
+      title: meta.title ?? baseName(relPath).replace(/\.(md|markdown)$/i, ''),
+      createdAt: meta.createdAt ?? stats.birthtime.toISOString(),
+      updatedAt: meta.updatedAt ?? stats.mtime.toISOString(),
       tags: meta.tags ?? [],
-      fullWidth: externalEntry?.fullWidth ?? meta.fullWidth ?? false,
-      pinned: externalEntry?.pinned ?? meta.pinned ?? false,
-      reminderAt: externalEntry?.reminderAt ?? meta.reminderAt ?? null,
+      fullWidth: meta.fullWidth ?? false,
+      pinned: meta.pinned ?? false,
+      reminderAt: meta.reminderAt ?? null,
       path: relPath,
-      folder: external ? dirname(full) : folderOf(relPath),
-      excerpt: body.trim().slice(0, 160),
-      external,
+      folder: folderOf(relPath),
+      excerpt: stripLeadingH1(body).trim().slice(0, 160),
+      external: false,
       body
     }
   }
@@ -263,6 +366,8 @@ export class NoteStore {
 
     const rel = relative(this.notesDir, full)
     if (!rel.startsWith('..') && !isAbsolute(rel)) {
+      // Inside the managed library: adopt it into the frontmatter format the
+      // library uses (this is Noteato's own directory).
       const managedPath = rel.replace(/\\/g, '/')
       const existing = this.toSummary(managedPath)
       if (existing) return this.read(managedPath)
@@ -272,7 +377,7 @@ export class NoteStore {
       const now = new Date().toISOString()
       const meta: NoteMeta = {
         id: randomUUID(),
-        title: baseName(managedPath).replace(/\.(md|markdown)$/i, ''),
+        title: leadingH1(body) ?? baseName(managedPath).replace(/\.(md|markdown)$/i, ''),
         createdAt: now,
         updatedAt: now,
         tags: [],
@@ -284,21 +389,38 @@ export class NoteStore {
       return this.read(managedPath)
     }
 
-    let entry = this.externalNotes.find((candidate) => candidate.filePath === full)
-    if (!entry) {
-      entry = { id: randomUUID(), filePath: full }
-      this.externalNotes.push(entry)
-      this.saveExternalNotes()
-    }
-    return this.read(entry.filePath)
+    // Outside the library: link in place, never write to the file.
+    this.db
+      .prepare("INSERT OR IGNORE INTO opened_files (path, kind, added_at) VALUES (?, 'file', ?)")
+      .run(full, new Date().toISOString())
+    return this.read(full)
+  }
+
+  /** Link a folder in place; its markdown files appear as external notes. */
+  openExternalFolder(dirPath: string): NoteSummary[] {
+    const full = realpathSync(dirPath)
+    const rel = relative(this.notesDir, full)
+    if (!rel.startsWith('..') && !isAbsolute(rel)) return []
+
+    this.db
+      .prepare("INSERT OR IGNORE INTO opened_files (path, kind, added_at) VALUES (?, 'folder', ?)")
+      .run(full, new Date().toISOString())
+    return this.list().filter((note) => note.externalRoot === full)
   }
 
   removeExternal(notePath: string): boolean {
     if (!isAbsolute(notePath)) return false
-    const next = this.externalNotes.filter((entry) => entry.filePath !== notePath)
-    if (next.length === this.externalNotes.length) return false
-    this.externalNotes = next
-    this.saveExternalNotes()
+    const row = this.openedRow(notePath)
+    if (!row) return false
+    const remove = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM opened_files WHERE path = ?').run(notePath)
+      // Removing a folder also drops pin/reminder metadata entries created
+      // for its children, so they don't linger as standalone links.
+      if (row.kind === 'folder') {
+        this.db.prepare("DELETE FROM opened_files WHERE path LIKE ? || '/%'").run(notePath)
+      }
+    })
+    remove()
     return true
   }
 
@@ -334,17 +456,18 @@ export class NoteStore {
   save(relPath: string, options: SaveOptions): Note {
     const existing = this.read(relPath)
     const external = isAbsolute(relPath)
+    // A title set outside the editor (sidebar rename) rewrites the body's
+    // leading title block; editor saves derive the title from that block, so
+    // for them this is a no-op.
+    const body = replaceLeadingH1(options.body, options.title)
     if (external) {
-      const entry = this.externalNotes.find((candidate) => candidate.filePath === relPath)
-      if (!entry) throw new Error('External note is not linked to Noteato.')
-      const raw = readFileSync(entry.filePath, 'utf-8')
-      writeFileSync(entry.filePath, replaceExternalBody(raw, options.body), 'utf-8')
-      entry.title = options.title
-      entry.createdAt = existing.createdAt
-      entry.fullWidth = options.fullWidth ?? existing.fullWidth
-      entry.pinned = existing.pinned
-      entry.reminderAt = existing.reminderAt
-      this.saveExternalNotes()
+      if (!this.externalRootOf(relPath)) {
+        throw new Error('External note is not linked to Noteato.')
+      }
+      // Replace only the markdown body; any frontmatter another tool keeps in
+      // the file (and the file's identity on disk) is left untouched.
+      const raw = readFileSync(relPath, 'utf-8')
+      writeFileSync(relPath, replaceExternalBody(raw, body), 'utf-8')
       return this.read(relPath)
     }
 
@@ -369,24 +492,23 @@ export class NoteStore {
       targetPath = desiredPath
     }
 
-    writeFileSync(this.resolveNotePath(targetPath), serializeNoteFile(meta, options.body), 'utf-8')
+    writeFileSync(this.resolveNotePath(targetPath), serializeNoteFile(meta, body), 'utf-8')
     return {
       ...meta,
       path: targetPath,
       folder: folderOf(targetPath),
-      excerpt: options.body.trim().slice(0, 160),
-      body: options.body
+      excerpt: stripLeadingH1(body).trim().slice(0, 160),
+      body
     }
   }
 
   // Toggle pin without bumping updatedAt, so pinning never reorders the list.
   setPinned(relPath: string, pinned: boolean): NoteSummary | null {
     if (isAbsolute(relPath)) {
-      const entry = this.externalNotes.find((candidate) => candidate.filePath === relPath)
-      if (!entry) return null
-      entry.pinned = pinned
-      this.saveExternalNotes()
-      return this.toSummary(relPath)
+      const root = this.externalRootOf(relPath)
+      if (!root) return null
+      this.upsertFileMeta(relPath, { pinned })
+      return this.externalSummary(relPath, root)
     }
     const full = this.resolveNotePath(relPath)
     const raw = readFileSync(full, 'utf-8')
@@ -409,11 +531,10 @@ export class NoteStore {
   // setPinned — reminders shouldn't reorder the recency-sorted sidebar list.
   setReminder(relPath: string, reminderAt: string | null): NoteSummary | null {
     if (isAbsolute(relPath)) {
-      const entry = this.externalNotes.find((candidate) => candidate.filePath === relPath)
-      if (!entry) return null
-      entry.reminderAt = reminderAt
-      this.saveExternalNotes()
-      return this.toSummary(relPath)
+      const root = this.externalRootOf(relPath)
+      if (!root) return null
+      this.upsertFileMeta(relPath, { reminderAt })
+      return this.externalSummary(relPath, root)
     }
     const full = this.resolveNotePath(relPath)
     const raw = readFileSync(full, 'utf-8')
@@ -490,7 +611,7 @@ export class NoteStore {
 
   // --- Trash (undoable delete for notes and folders) -----------------------
 
-  private moveToTrash(relPath: string, isFolder: boolean): DeletedEntry {
+  private moveToTrash(relPath: string, isFolder: boolean, title: string): DeletedEntry {
     if (!existsSync(this.trashDir)) mkdirSync(this.trashDir, { recursive: true })
     // Timestamp prefix so repeated deletes of the same name don't collide.
     const trashName = `${Date.now()}-${baseName(relPath)}`
@@ -507,21 +628,101 @@ export class NoteStore {
         unlinkSync(from)
       }
     }
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO trash_entries (trash_name, original_path, is_folder, title, deleted_at) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(trashName, relPath, isFolder ? 1 : 0, title, new Date().toISOString())
     return { trashName, originalPath: relPath, isFolder }
   }
 
   delete(relPath: string): DeletedEntry {
     if (isAbsolute(relPath)) throw new Error('Use Remove from Noteato for linked files.')
-    return this.moveToTrash(relPath, false)
+    let title = baseName(relPath).replace(/\.(md|markdown)$/i, '')
+    try {
+      title = this.read(relPath).title || title
+    } catch {
+      /* unreadable — keep the filename */
+    }
+    return this.moveToTrash(relPath, false, title)
   }
 
   deleteFolder(relPath: string): DeletedEntry {
-    return this.moveToTrash(relPath, true)
+    return this.moveToTrash(relPath, true, baseName(relPath))
+  }
+
+  listTrash(): TrashEntry[] {
+    interface TrashRow {
+      trash_name: string
+      original_path: string
+      is_folder: number
+      title: string
+      deleted_at: string
+    }
+    const rows = this.db
+      .prepare('SELECT * FROM trash_entries ORDER BY deleted_at DESC')
+      .all() as TrashRow[]
+    const entries: TrashEntry[] = []
+    const known = new Set<string>()
+    for (const row of rows) {
+      if (!existsSync(join(this.trashDir, row.trash_name))) {
+        // The file vanished outside Noteato — drop the stale record.
+        this.db.prepare('DELETE FROM trash_entries WHERE trash_name = ?').run(row.trash_name)
+        continue
+      }
+      known.add(row.trash_name)
+      entries.push({
+        trashName: row.trash_name,
+        originalPath: row.original_path,
+        isFolder: row.is_folder === 1,
+        title: row.title,
+        deletedAt: row.deleted_at
+      })
+    }
+    // Items trashed before metadata was recorded: recover what the
+    // "<timestamp>-<name>" convention preserves.
+    if (existsSync(this.trashDir)) {
+      for (const entry of readdirSync(this.trashDir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || known.has(entry.name)) continue
+        const match = /^(\d+)-(.+)$/.exec(entry.name)
+        if (!match) continue
+        entries.push({
+          trashName: entry.name,
+          originalPath: match[2],
+          isFolder: entry.isDirectory(),
+          title: match[2].replace(/\.(md|markdown)$/i, ''),
+          deletedAt: new Date(Number(match[1])).toISOString()
+        })
+      }
+      entries.sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : -1))
+    }
+    return entries
+  }
+
+  /** Permanently delete a single trashed item. */
+  purgeTrash(trashName: string): void {
+    // The name comes over IPC — never let it traverse out of the trash dir.
+    if (trashName.includes('/') || trashName.includes('\\') || trashName.startsWith('.')) {
+      throw new Error('Invalid trash entry.')
+    }
+    rmSync(join(this.trashDir, trashName), { recursive: true, force: true })
+    this.db.prepare('DELETE FROM trash_entries WHERE trash_name = ?').run(trashName)
+  }
+
+  /** Permanently delete everything in the trash. */
+  emptyTrash(): void {
+    if (existsSync(this.trashDir)) {
+      for (const entry of readdirSync(this.trashDir)) {
+        rmSync(join(this.trashDir, entry), { recursive: true, force: true })
+      }
+    }
+    this.db.prepare('DELETE FROM trash_entries').run()
   }
 
   restore(trashName: string, originalPath: string, isFolder: boolean): NoteSummary | null {
     const from = join(this.trashDir, trashName)
     if (!existsSync(from)) return null
+    this.db.prepare('DELETE FROM trash_entries WHERE trash_name = ?').run(trashName)
 
     // If something now occupies the original location, restore under a suffix.
     let target = originalPath
@@ -588,7 +789,9 @@ export class NoteStore {
       }
 
       const snippet =
-        firstIdx !== -1 ? makeSnippet(body, firstIdx, q.length) : body.trim().slice(0, 120)
+        firstIdx !== -1
+          ? makeSnippet(body, firstIdx, q.length)
+          : stripLeadingH1(body).trim().slice(0, 120)
       scored.push({
         id: summary.id,
         path: summary.path,

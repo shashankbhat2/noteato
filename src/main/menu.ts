@@ -53,6 +53,11 @@ export function buildAppMenu(): Menu {
           click: () => sendShortcut('import-markdown')
         },
         {
+          label: 'Open Folder…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => sendShortcut('open-folder')
+        },
+        {
           label: 'Import Notion Export…',
           click: () => sendShortcut('import-notion')
         },

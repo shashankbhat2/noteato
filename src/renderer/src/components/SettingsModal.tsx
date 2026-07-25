@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react'
 import {
+  IconAdjustmentsHorizontal as GeneralIcon,
   IconCheck as Check,
   IconDeviceDesktop as Monitor,
   IconFolderOpen as FolderOpen,
+  IconMicrophone as MicIcon,
   IconMoon as Moon,
+  IconPalette as PaletteIcon,
+  IconSparkles as SparklesIcon,
   IconSun as Sun,
   IconX as X
 } from '@tabler/icons-react'
@@ -11,7 +15,7 @@ import type { AiProvider, Settings } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
 import { ACCENT_OPTIONS } from '../accents'
-import { AI_MODELS } from '../ai/models'
+import { CHEAP_AI_MODELS } from '../ai/models'
 import {
   QUICK_NOTE_ACCELERATOR,
   SIDEBAR_MODE_ACCELERATOR,
@@ -21,6 +25,111 @@ import {
 interface Props {
   onClose: () => void
   onNotesDirChanged?: () => void
+}
+
+type SettingsTab = 'general' | 'appearance' | 'ai' | 'dictation'
+
+interface TabMeta {
+  id: SettingsTab
+  label: string
+  icon: React.ReactNode
+  title: string
+  subtitle: string
+}
+
+const NAV_GROUPS: { group: string; tabs: TabMeta[] }[] = [
+  {
+    group: 'General',
+    tabs: [
+      {
+        id: 'general',
+        label: 'General',
+        icon: <GeneralIcon size={16} />,
+        title: 'General settings',
+        subtitle: 'How Noteato behaves and where it keeps your notes'
+      },
+      {
+        id: 'appearance',
+        label: 'Appearance',
+        icon: <PaletteIcon size={16} />,
+        title: 'Appearance settings',
+        subtitle: 'Customise how Noteato looks and reads'
+      }
+    ]
+  },
+  {
+    group: 'Features',
+    tabs: [
+      {
+        id: 'ai',
+        label: 'AI',
+        icon: <SparklesIcon size={16} />,
+        title: 'AI settings',
+        subtitle: 'Bring your own key — nothing leaves your machine until you do'
+      },
+      {
+        id: 'dictation',
+        label: 'Dictation',
+        icon: <MicIcon size={16} />,
+        title: 'Dictation settings',
+        subtitle: 'Speech-to-text while you write'
+      }
+    ]
+  }
+]
+
+const ALL_TABS = NAV_GROUPS.flatMap((g) => g.tabs)
+
+/** A settings row: label and description on the left, its control on the right. */
+function Row({
+  label,
+  description,
+  children
+}: {
+  label: string
+  description?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <strong>{label}</strong>
+        {description && <span>{description}</span>}
+      </div>
+      <div className="settings-row-control">{children}</div>
+    </div>
+  )
+}
+
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section className="settings-group">
+      <div className="settings-group-label">{label}</div>
+      {children}
+    </section>
+  )
+}
+
+function Switch({
+  checked,
+  onToggle,
+  disabled
+}: {
+  checked: boolean
+  onToggle: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      className={checked ? 'settings-switch on' : 'settings-switch'}
+      onClick={onToggle}
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+    >
+      <span className="settings-switch-knob" />
+    </button>
+  )
 }
 
 export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
@@ -38,6 +147,7 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     aiAgentEnabled,
     setAiAgentEnabled
   } = useTheme()
+  const [tab, setTab] = useState<SettingsTab>('general')
   const [settings, setSettings] = useState<Settings | null>(null)
   const [notesDir, setNotesDir] = useState('')
   const [saved, setSaved] = useState(false)
@@ -45,12 +155,21 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
   const [spellLanguages, setSpellLanguages] = useState<string[]>([])
   const isMac = window.electron.process.platform === 'darwin'
   const platform = window.electron.process.platform
+  const active = ALL_TABS.find((t) => t.id === tab)!
 
   useEffect(() => {
     window.api.settings.get().then(setSettings)
     window.api.notes.getDir().then(setNotesDir)
     window.api.app.spellcheckerLanguages().then(setSpellLanguages)
   }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   const handleSaveKey = async (): Promise<void> => {
     if (!settings) return
@@ -75,11 +194,6 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     setTimeout(() => setAiSaved(false), 1500)
   }
 
-  const handleProviderChange = (provider: AiProvider): void => {
-    if (!settings) return
-    setSettings({ ...settings, aiProvider: provider, aiModel: '' })
-  }
-
   const handleChooseFolder = async (): Promise<void> => {
     const newDir = await window.api.notes.chooseFolder()
     if (!newDir) return
@@ -87,347 +201,325 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     onNotesDirChanged?.()
   }
 
+  const setAndPersist = (patch: Partial<Settings>): void => {
+    if (!settings) return
+    setSettings({ ...settings, ...patch })
+    void window.api.settings.set(patch)
+  }
+
   const hasAnyAiKey = Boolean(settings?.anthropicApiKey.trim() || settings?.openaiApiKey.trim())
+
+  const renderGeneral = (s: Settings): React.ReactNode => (
+    <>
+      <Group label="Behaviour">
+        <Row
+          label="Keep in menu bar"
+          description="Stay running after the window closes so reminders still fire"
+        >
+          <Switch
+            checked={s.keepInMenuBar}
+            onToggle={() => setAndPersist({ keepInMenuBar: !s.keepInMenuBar })}
+          />
+        </Row>
+        <Row
+          label="Sidebar mode"
+          description={
+            <>
+              Compact notes panel on the screen edge ·{' '}
+              <kbd className="settings-shortcut-key">
+                {shortcutDisplay(SIDEBAR_MODE_ACCELERATOR, platform)}
+              </kbd>
+            </>
+          }
+        >
+          <Switch
+            checked={s.sidebarModeEnabled}
+            onToggle={() => setAndPersist({ sidebarModeEnabled: !s.sidebarModeEnabled })}
+          />
+        </Row>
+        <Row
+          label="Quick note shortcut"
+          description={
+            <>
+              Capture a note from any app ·{' '}
+              <kbd className="settings-shortcut-key">
+                {shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform)}
+              </kbd>
+            </>
+          }
+        >
+          <Switch
+            checked={s.quickNoteShortcutEnabled}
+            onToggle={() =>
+              setAndPersist({ quickNoteShortcutEnabled: !s.quickNoteShortcutEnabled })
+            }
+          />
+        </Row>
+      </Group>
+
+      <Group label="Storage">
+        <Row label="Notes folder" description={notesDir}>
+          <button className="settings-btn" onClick={handleChooseFolder}>
+            <FolderOpen size={13} />
+            <span>Change…</span>
+          </button>
+        </Row>
+      </Group>
+
+      <Group label="Spelling">
+        {isMac ? (
+          <Row
+            label="Dictionary"
+            description="Noteato uses the macOS spellchecker — change languages in System Settings → Keyboard"
+          >
+            <span className="settings-static-value">System</span>
+          </Row>
+        ) : (
+          <Row label="Dictionary language" description="Applies everywhere in the app">
+            <select
+              className="settings-select"
+              value={s.spellcheckLanguage}
+              onChange={(e) => setAndPersist({ spellcheckLanguage: e.target.value })}
+            >
+              <option value="auto">Automatic</option>
+              {[...spellLanguages]
+                .sort(
+                  (a, b) =>
+                    Number(b.startsWith('en')) - Number(a.startsWith('en')) || a.localeCompare(b)
+                )
+                .map((lang) => (
+                  <option key={lang} value={lang}>
+                    {lang}
+                  </option>
+                ))}
+            </select>
+          </Row>
+        )}
+      </Group>
+    </>
+  )
+
+  const renderAppearance = (): React.ReactNode => (
+    <>
+      <Group label="Theme">
+        <Row label="Colour mode" description="Choose your colour mode">
+          <div className="segmented">
+            <button
+              className={theme === 'system' ? 'active' : undefined}
+              onClick={() => setTheme('system')}
+            >
+              <Monitor size={13} />
+              <span>System</span>
+            </button>
+            <button
+              className={theme === 'light' ? 'active' : undefined}
+              onClick={() => setTheme('light')}
+            >
+              <Sun size={13} />
+              <span>Light</span>
+            </button>
+            <button
+              className={theme === 'dark' ? 'active' : undefined}
+              onClick={() => setTheme('dark')}
+            >
+              <Moon size={13} />
+              <span>Dark</span>
+            </button>
+          </div>
+        </Row>
+        <Row label="Accent" description="Used for selection, links, and highlights">
+          <div className="accent-swatches">
+            {ACCENT_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={accent === option.id ? 'accent-swatch active' : 'accent-swatch'}
+                style={{ backgroundColor: option.swatch }}
+                title={option.label}
+                aria-label={option.label}
+                onClick={() => setAccent(option.id)}
+              >
+                {accent === option.id && <Check size={12} strokeWidth={3} />}
+              </button>
+            ))}
+          </div>
+        </Row>
+      </Group>
+
+      <Group label="Typography">
+        <Row label="Font" description="Applies to the editor and the interface">
+          <div className="segmented">
+            {FONT_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                className={fontFamily === option.id ? 'active' : undefined}
+                onClick={() => setFontFamily(option.id)}
+              >
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+        </Row>
+      </Group>
+
+      <Group label="Writing">
+        <Row label="Zen mode" description="Hide the sidebar and tabs while writing · ⌘.">
+          <Switch checked={zenMode} onToggle={() => setZenMode(!zenMode)} />
+        </Row>
+      </Group>
+    </>
+  )
+
+  const renderAi = (s: Settings): React.ReactNode => {
+    const provider = s.aiProvider
+    const cheapModels = provider === 'none' ? [] : CHEAP_AI_MODELS[provider]
+    const modelValue = s.aiModel || cheapModels[0]?.id || ''
+    const hasCustomModel = Boolean(s.aiModel) && !cheapModels.some((m) => m.id === s.aiModel)
+    return (
+      <>
+        <Group label="Provider">
+          <Row label="Service" description="Off by default — nothing is sent anywhere">
+            <div className="segmented">
+              {(['none', 'anthropic', 'openai'] as const).map((p) => (
+                <button
+                  key={p}
+                  className={provider === p ? 'active' : undefined}
+                  onClick={() => setSettings({ ...s, aiProvider: p, aiModel: '' })}
+                >
+                  <span>{p === 'none' ? 'Off' : p === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span>
+                </button>
+              ))}
+            </div>
+          </Row>
+
+          {provider !== 'none' && (
+            <>
+              <Row label="Model" description="Fast, inexpensive models suited to note editing">
+                <select
+                  className="settings-select"
+                  value={modelValue}
+                  onChange={(e) => setSettings({ ...s, aiModel: e.target.value })}
+                >
+                  {cheapModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                  {hasCustomModel && <option value={s.aiModel}>{s.aiModel} (custom)</option>}
+                </select>
+              </Row>
+              <Row
+                label={provider === 'anthropic' ? 'Anthropic API key' : 'OpenAI API key'}
+                description="Stored locally on this machine"
+              >
+                <div className="settings-inline-field">
+                  <input
+                    type="password"
+                    value={provider === 'anthropic' ? s.anthropicApiKey : s.openaiApiKey}
+                    placeholder={provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}
+                    onChange={(e) =>
+                      setSettings(
+                        provider === 'anthropic'
+                          ? { ...s, anthropicApiKey: e.target.value }
+                          : { ...s, openaiApiKey: e.target.value }
+                      )
+                    }
+                  />
+                  <button className="settings-btn" onClick={handleSaveAi}>
+                    {aiSaved ? 'Saved' : 'Save'}
+                  </button>
+                </div>
+              </Row>
+            </>
+          )}
+        </Group>
+
+        <Group label="Features">
+          <Row label="Selection actions" description="Summarise, improve, and extract in place">
+            <Switch
+              checked={aiSelectionActions}
+              onToggle={() => setAiSelectionActions(!aiSelectionActions)}
+            />
+          </Row>
+          <Row
+            label="Agent panel"
+            description={
+              hasAnyAiKey
+                ? 'Chat with and edit the active note'
+                : 'Add an API key above to enable this'
+            }
+          >
+            <Switch
+              checked={aiAgentEnabled}
+              onToggle={() => setAiAgentEnabled(!aiAgentEnabled)}
+              disabled={!hasAnyAiKey}
+            />
+          </Row>
+        </Group>
+      </>
+    )
+  }
+
+  const renderDictation = (s: Settings): React.ReactNode => (
+    <Group label="Deepgram">
+      <Row label="API key" description="Required for voice dictation · stored locally">
+        <div className="settings-inline-field">
+          <input
+            type="password"
+            value={s.deepgramApiKey}
+            onChange={(e) => setSettings({ ...s, deepgramApiKey: e.target.value })}
+            placeholder="dg_…"
+          />
+          <button className="settings-btn" onClick={handleSaveKey}>
+            {saved ? 'Saved' : 'Save'}
+          </button>
+        </div>
+      </Row>
+    </Group>
+  )
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-modal-header">
-          <h1>Settings</h1>
-          <button className="modal-close-btn" onClick={onClose} title="Close">
-            <X size={16} />
+        <nav className="settings-nav" aria-label="Settings sections">
+          <div className="settings-nav-title">Settings</div>
+          {NAV_GROUPS.map((group) => (
+            <div key={group.group} className="settings-nav-block">
+              <div className="settings-nav-group">{group.group}</div>
+              {group.tabs.map((item) => (
+                <button
+                  key={item.id}
+                  className={tab === item.id ? 'active' : undefined}
+                  onClick={() => setTab(item.id)}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+
+        <div className="settings-pane">
+          <button className="settings-close" onClick={onClose} title="Close">
+            <X size={17} />
           </button>
-        </div>
-
-        <div className="settings-body">
-        {!settings ? (
-          <div className="empty-state">Loading…</div>
-        ) : (
-          <>
-            <section className="settings-section">
-              <h2>Theme</h2>
-              <div className="theme-switch">
-                <button
-                  className={theme === 'system' ? 'theme-option active' : 'theme-option'}
-                  onClick={() => setTheme('system')}
-                >
-                  <Monitor size={15} />
-                  <span>System</span>
-                </button>
-                <button
-                  className={theme === 'light' ? 'theme-option active' : 'theme-option'}
-                  onClick={() => setTheme('light')}
-                >
-                  <Sun size={15} />
-                  <span>Light</span>
-                </button>
-                <button
-                  className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
-                  onClick={() => setTheme('dark')}
-                >
-                  <Moon size={15} />
-                  <span>Dark</span>
-                </button>
-              </div>
-            </section>
-
-            <section className="settings-section">
-              <h2>Accent</h2>
-              <div className="accent-swatches">
-                {ACCENT_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    className={accent === option.id ? 'accent-swatch active' : 'accent-swatch'}
-                    style={{ backgroundColor: option.swatch }}
-                    title={option.label}
-                    aria-label={option.label}
-                    onClick={() => setAccent(option.id)}
-                  >
-                    {accent === option.id && <Check size={13} strokeWidth={3} />}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="settings-section">
-              <h2>Font</h2>
-              <div className="theme-switch">
-                {FONT_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    className={fontFamily === option.id ? 'theme-option active' : 'theme-option'}
-                    onClick={() => setFontFamily(option.id)}
-                  >
-                    <span>{option.label}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="settings-section">
-              <h2>Zen mode</h2>
-              <label className="settings-toggle-row">
-                <span>Hide the sidebar and tabs for distraction-free writing</span>
-                <button
-                  className={zenMode ? 'settings-switch on' : 'settings-switch'}
-                  onClick={() => setZenMode(!zenMode)}
-                  role="switch"
-                  aria-checked={zenMode}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <p className="hint">Persists across restarts. Press ⌘. or ⌘, to get back here.</p>
-            </section>
-
-            <section className="settings-section">
-              <h2>Menu bar</h2>
-              <label className="settings-toggle-row">
-                <span>Keep Noteato running in the menu bar</span>
-                <button
-                  className={settings.keepInMenuBar ? 'settings-switch on' : 'settings-switch'}
-                  onClick={() => {
-                    const next = !settings.keepInMenuBar
-                    setSettings({ ...settings, keepInMenuBar: next })
-                    window.api.settings.set({ keepInMenuBar: next })
-                  }}
-                  role="switch"
-                  aria-checked={settings.keepInMenuBar}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <p className="hint">
-                Lets reminders fire even after closing the window or pressing ⌘Q — quit fully
-                from the menu bar icon instead.
-              </p>
-            </section>
-
-            <section className="settings-section">
-              <h2>Sidebar mode</h2>
-              <label className="settings-toggle-row">
-                <span>Enable the compact notes and reminders sidebar</span>
-                <button
-                  className={settings.sidebarModeEnabled ? 'settings-switch on' : 'settings-switch'}
-                  onClick={() => {
-                    const next = !settings.sidebarModeEnabled
-                    setSettings({ ...settings, sidebarModeEnabled: next })
-                    window.api.settings.set({ sidebarModeEnabled: next })
-                  }}
-                  role="switch"
-                  aria-checked={settings.sidebarModeEnabled}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <p className="hint">
-                Keeps Noteato available from the menu bar after the main window is closed. Pin the
-                sidebar when you want it above other apps. Global shortcut:{' '}
-                <kbd className="settings-shortcut-key">
-                  {shortcutDisplay(SIDEBAR_MODE_ACCELERATOR, platform)}
-                </kbd>
-              </p>
-            </section>
-
-            <section className="settings-section">
-              <h2>Quick note</h2>
-              <label className="settings-toggle-row">
-                <span>Enable the centered quick-note shortcut</span>
-                <button
-                  className={
-                    settings.quickNoteShortcutEnabled ? 'settings-switch on' : 'settings-switch'
-                  }
-                  onClick={() => {
-                    const next = !settings.quickNoteShortcutEnabled
-                    setSettings({ ...settings, quickNoteShortcutEnabled: next })
-                    window.api.settings.set({ quickNoteShortcutEnabled: next })
-                  }}
-                  role="switch"
-                  aria-checked={settings.quickNoteShortcutEnabled}
-                >
-                  <span className="settings-switch-knob" />
-                </button>
-              </label>
-              <p className="hint">
-                Create and edit a new note from anywhere with{' '}
-                <kbd className="settings-shortcut-key">
-                  {shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform)}
-                </kbd>
-                .
-              </p>
-            </section>
-
-            <section className="settings-section settings-ai-preferences">
-              <h2>AI</h2>
-              <p className="hint">Bring your own API key. Off by default — nothing is sent anywhere until you set a provider.</p>
-              <div className="theme-switch settings-ai-providers">
-                <button
-                  className={settings.aiProvider === 'none' ? 'theme-option active' : 'theme-option'}
-                  onClick={() => handleProviderChange('none')}
-                >
-                  <span>Off</span>
-                </button>
-                <button
-                  className={settings.aiProvider === 'anthropic' ? 'theme-option active' : 'theme-option'}
-                  onClick={() => handleProviderChange('anthropic')}
-                >
-                  <span>Anthropic</span>
-                </button>
-                <button
-                  className={settings.aiProvider === 'openai' ? 'theme-option active' : 'theme-option'}
-                  onClick={() => handleProviderChange('openai')}
-                >
-                  <span>OpenAI</span>
-                </button>
-              </div>
-
-              {settings.aiProvider !== 'none' && (
-                <div className="settings-ai-fields">
-                  <label className="settings-label">
-                    Model
-                    <input
-                      type="text"
-                      list="ai-model-list"
-                      value={settings.aiModel}
-                      placeholder={AI_MODELS[settings.aiProvider][0]?.id}
-                      onChange={(e) => setSettings({ ...settings, aiModel: e.target.value })}
-                    />
-                    <datalist id="ai-model-list">
-                      {AI_MODELS[settings.aiProvider].map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </datalist>
-                  </label>
-
-                  <label className="settings-label">
-                    {settings.aiProvider === 'anthropic' ? 'Anthropic API key' : 'OpenAI API key'}
-                    <input
-                      type="password"
-                      value={
-                        settings.aiProvider === 'anthropic'
-                          ? settings.anthropicApiKey
-                          : settings.openaiApiKey
-                      }
-                      placeholder={settings.aiProvider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
-                      onChange={(e) =>
-                        setSettings(
-                          settings.aiProvider === 'anthropic'
-                            ? { ...settings, anthropicApiKey: e.target.value }
-                            : { ...settings, openaiApiKey: e.target.value }
-                        )
-                      }
-                    />
-                  </label>
-                  <div className="settings-actions">
-                    <button className="primary" onClick={handleSaveAi}>
-                      {aiSaved ? 'Saved' : 'Save AI settings'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            <section className="settings-section settings-ai-features">
-              <h2>AI features</h2>
-              <div className="settings-toggle-stack">
-                <label className="settings-toggle-row">
-                  <span>Selection actions — summarize, improve, extract in place</span>
-                  <button
-                    className={aiSelectionActions ? 'settings-switch on' : 'settings-switch'}
-                    onClick={() => setAiSelectionActions(!aiSelectionActions)}
-                    role="switch"
-                    aria-checked={aiSelectionActions}
-                  >
-                    <span className="settings-switch-knob" />
-                  </button>
-                </label>
-                <label className="settings-toggle-row">
-                  <span>Agent panel — chat with and edit the active note</span>
-                  <button
-                    className={aiAgentEnabled ? 'settings-switch on' : 'settings-switch'}
-                    onClick={() => setAiAgentEnabled(!aiAgentEnabled)}
-                    role="switch"
-                    aria-checked={aiAgentEnabled}
-                    disabled={!hasAnyAiKey}
-                    title={hasAnyAiKey ? undefined : 'Add an OpenAI or Anthropic API key first'}
-                  >
-                    <span className="settings-switch-knob" />
-                  </button>
-                </label>
-              </div>
-              {!hasAnyAiKey && <p className="hint">Add an API key to enable the agent panel.</p>}
-            </section>
-
-            <section className="settings-section">
-              <h2>Spelling</h2>
-              {isMac ? (
-                <p className="hint">
-                  Noteato uses the macOS system spellchecker. To change the language or English
-                  variant, open System Settings → Keyboard → Text Input → Edit… → Spelling.
-                </p>
-              ) : (
-                <>
-                  <label className="settings-label">
-                    Dictionary language
-                    <select
-                      value={settings.spellcheckLanguage}
-                      onChange={(e) => {
-                        const next = e.target.value
-                        setSettings({ ...settings, spellcheckLanguage: next })
-                        window.api.settings.set({ spellcheckLanguage: next })
-                      }}
-                    >
-                      <option value="auto">Automatic (system locale)</option>
-                      {[...spellLanguages]
-                        .sort((a, b) =>
-                          // English variants first — they're what people switch between.
-                          Number(b.startsWith('en')) - Number(a.startsWith('en')) ||
-                          a.localeCompare(b)
-                        )
-                        .map((lang) => (
-                          <option key={lang} value={lang}>
-                            {lang}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <p className="hint">Applies to spellcheck everywhere in the app.</p>
-                </>
-              )}
-            </section>
-
-            <section className="settings-section">
-              <h2>Dictation</h2>
-              <label className="settings-label">
-                Deepgram API key
-                <input
-                  type="password"
-                  value={settings.deepgramApiKey}
-                  onChange={(e) => setSettings({ ...settings, deepgramApiKey: e.target.value })}
-                  placeholder="dg_..."
-                />
-              </label>
-              <div className="settings-actions">
-                <button className="primary" onClick={handleSaveKey}>
-                  {saved ? 'Saved' : 'Save key'}
-                </button>
-              </div>
-            </section>
-
-            <section className="settings-section">
-              <h2>Storage</h2>
-              <p className="hint">{notesDir}</p>
-              <div className="settings-actions">
-                <button className="primary" onClick={handleChooseFolder}>
-                  <FolderOpen size={13} />
-                  <span>Choose folder…</span>
-                </button>
-              </div>
-            </section>
-          </>
-        )}
+          <div className="settings-scroll">
+            <header className="settings-pane-header">
+              <h2>{active.title}</h2>
+              <p>{active.subtitle}</p>
+            </header>
+            {!settings ? (
+              <div className="empty-state">Loading…</div>
+            ) : tab === 'general' ? (
+              renderGeneral(settings)
+            ) : tab === 'appearance' ? (
+              renderAppearance()
+            ) : tab === 'ai' ? (
+              renderAi(settings)
+            ) : (
+              renderDictation(settings)
+            )}
+          </div>
         </div>
       </div>
     </div>

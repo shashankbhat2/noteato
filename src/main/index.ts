@@ -1,8 +1,20 @@
 import { join } from 'path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
-import type { AiCompleteRequest, Note, NoteChange, SaveOptions, Settings } from '../shared/types'
+import type {
+  AiCompleteRequest,
+  Note,
+  NoteChange,
+  SaveOptions,
+  ScratchChange,
+  ScratchNote,
+  ScratchSaveOptions,
+  Settings
+} from '../shared/types'
+import { getAppDb } from './db'
 import { NoteStore } from './storage'
+import { ScratchStore } from './scratchStore'
+import { ExternalWatcher } from './fileWatcher'
 import { createSettingsStore } from './settings'
 import { StickyManager } from './sticky'
 import { buildAppMenu } from './menu'
@@ -15,28 +27,59 @@ import { SidebarModeManager } from './sidebarMode'
 import { QuickNoteManager } from './quickNote'
 import { GlobalShortcutManager } from './globalShortcuts'
 
+const appDb = getAppDb()
 const settingsStore = createSettingsStore()
-const noteStore = new NoteStore(settingsStore.read().notesDir ?? undefined)
-const stickyManager = new StickyManager()
-const windowStateStore = createWindowStateStore()
-const reminderScheduler = new ReminderScheduler(noteStore, () => mainWindow)
-const sidebarModeManager = new SidebarModeManager(() => settingsStore.read())
-const quickNoteManager = new QuickNoteManager(noteStore, (note) =>
-  broadcastNoteChange({ kind: 'upsert', note })
+const noteStore = new NoteStore(appDb, settingsStore.read().notesDir ?? undefined)
+const scratchStore = new ScratchStore(appDb)
+// Linked external files/folders reload live: any on-disk change lands as an
+// upsert (single file) or refresh (folder) in every window.
+const externalWatcher = new ExternalWatcher((rootPath, kind) => {
+  if (kind === 'folder') {
+    broadcastNoteChange({ kind: 'refresh' })
+    return
+  }
+  try {
+    broadcastNoteChange({ kind: 'upsert', note: noteStore.read(rootPath) })
+  } catch {
+    broadcastNoteChange({ kind: 'refresh' })
+  }
+})
+const stickyManager = new StickyManager(appDb)
+const windowStateStore = createWindowStateStore(appDb)
+const sidebarModeManager = new SidebarModeManager(appDb, () => settingsStore.read())
+const reminderScheduler = new ReminderScheduler(
+  noteStore,
+  scratchStore,
+  () => mainWindow,
+  (note) => openScratchNote(note),
+  (change) => broadcastScratchChange(change)
+)
+const quickNoteManager = new QuickNoteManager(scratchStore, (note) =>
+  broadcastScratchChange({ kind: 'upsert', note })
 )
 const globalShortcutManager = new GlobalShortcutManager(
   () => quickNoteManager.showNew(),
   () => sidebarModeManager.toggle()
 )
+
+function runtimeSettings(settings: Settings = settingsStore.read()): Settings {
+  if (settings.onboardingCompleted) return settings
+  return {
+    ...settings,
+    keepInMenuBar: false,
+    sidebarModeEnabled: false,
+    quickNoteShortcutEnabled: false
+  }
+}
 // The tray's own "Quit Noteato" sets this before calling app.quit(), so the
 // before-quit handler below knows to let that one through.
 let allowQuit = false
 const trayManager = new TrayManager(
   () => showMainWindow(),
   () => quickNoteManager.showNew(),
-  () => settingsStore.read().quickNoteShortcutEnabled,
+  () => runtimeSettings().quickNoteShortcutEnabled,
   () => sidebarModeManager.show(),
-  () => settingsStore.read().sidebarModeEnabled,
+  () => runtimeSettings().sidebarModeEnabled,
   () => {
     allowQuit = true
     sidebarModeManager.destroy()
@@ -45,7 +88,7 @@ const trayManager = new TrayManager(
 )
 
 function shouldKeepRunning(): boolean {
-  const settings = settingsStore.read()
+  const settings = runtimeSettings()
   return (
     settings.keepInMenuBar ||
     settings.sidebarModeEnabled ||
@@ -106,6 +149,26 @@ function broadcastNoteChange(change: NoteChange, exceptWebContentsId?: number): 
   }
 }
 
+function broadcastScratchChange(change: ScratchChange, exceptWebContentsId?: number): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents.id !== exceptWebContentsId) {
+      win.webContents.send('scratch:changed', change)
+    }
+  }
+}
+
+// Clicking a scratch-note reminder notification opens the sidebar-mode window
+// on that note (scratch notes only live in the sidebar and quick-note
+// surfaces). No-op if sidebar mode is disabled in settings.
+function openScratchNote(note: ScratchNote): void {
+  sidebarModeManager.show()
+  const win = sidebarModeManager.getWindow()
+  if (!win || win.isDestroyed()) return
+  const send = (): void => win.webContents.send('scratch:open', note.id)
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
+  else send()
+}
+
 // While the app lives only in the menu bar (keepInMenuBar on, no visible
 // windows), drop the Dock icon and its running dot — the same behavior as
 // menu-bar apps like Docker Desktop. Any window becoming visible brings the
@@ -138,6 +201,7 @@ function openExternalMarkdown(filePath: string): void {
   } catch {
     return
   }
+  externalWatcher.sync(noteStore.listOpenedRoots())
   if (rendererReady && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('notes:external-open', note)
     mainWindow.show()
@@ -261,6 +325,9 @@ function registerIpcHandlers(): void {
     return created
   })
   ipcMain.handle('notes:save', (e, path: string, options: SaveOptions) => {
+    // An external save writes the watched file itself — flag it so the change
+    // doesn't echo back as an "edited outside Noteato" reload.
+    if (path.startsWith('/')) externalWatcher.markSelfWrite(path)
     const saved = noteStore.save(path, options)
     reminderScheduler.reschedule(saved)
     broadcastNoteChange({ kind: 'upsert', note: saved }, e.sender.id)
@@ -299,8 +366,10 @@ function registerIpcHandlers(): void {
       /* already gone */
     }
     const result = noteStore.removeExternal(path)
+    externalWatcher.sync(noteStore.listOpenedRoots())
     if (id) reminderScheduler.unschedule(id)
-    if (id) broadcastNoteChange({ kind: 'remove', id }, e.sender.id)
+    // Unlinking a folder removes many notes at once — easier to rescan.
+    broadcastNoteChange(id ? { kind: 'remove', id } : { kind: 'refresh' }, e.sender.id)
     return result
   })
   ipcMain.handle('notes:restore', (e, trashName: string, originalPath: string, isFolder: boolean) => {
@@ -344,6 +413,9 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('notes:search', (_e, query: string) => noteStore.search(query))
   ipcMain.handle('notes:getDir', () => noteStore.getNotesDir())
+  ipcMain.handle('notes:listTrash', () => noteStore.listTrash())
+  ipcMain.handle('notes:purgeTrash', (_e, trashName: string) => noteStore.purgeTrash(trashName))
+  ipcMain.handle('notes:emptyTrash', () => noteStore.emptyTrash())
 
   ipcMain.handle('notes:chooseFolder', async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -372,7 +444,20 @@ function registerIpcHandlers(): void {
     if (result.canceled) return []
 
     const opened = result.filePaths.map((filePath) => noteStore.openExternal(filePath))
+    externalWatcher.sync(noteStore.listOpenedRoots())
     for (const note of opened) broadcastNoteChange({ kind: 'upsert', note }, e.sender.id)
+    return opened
+  })
+
+  ipcMain.handle('notes:openFolder', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return []
+
+    const opened = noteStore.openExternalFolder(result.filePaths[0])
+    externalWatcher.sync(noteStore.listOpenedRoots())
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
     return opened
   })
 
@@ -393,35 +478,79 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('reminders:takeFired', () => reminderScheduler.markReady())
 
+  // --- Scratch notes (SQLite-backed; quick note + sidebar mode) -------------
+  ipcMain.handle('scratch:list', () => scratchStore.list())
+  ipcMain.handle('scratch:read', (_e, id: string) => scratchStore.read(id))
+  ipcMain.handle('scratch:create', (e) => {
+    const created = scratchStore.create()
+    broadcastScratchChange({ kind: 'upsert', note: created }, e.sender.id)
+    return created
+  })
+  ipcMain.handle('scratch:save', (e, id: string, options: ScratchSaveOptions) => {
+    const saved = scratchStore.save(id, options)
+    if (saved) broadcastScratchChange({ kind: 'upsert', note: saved }, e.sender.id)
+    return saved
+  })
+  ipcMain.handle('scratch:delete', (e, id: string) => {
+    const removed = scratchStore.delete(id)
+    if (removed) {
+      reminderScheduler.unschedule(id)
+      broadcastScratchChange({ kind: 'remove', id }, e.sender.id)
+    }
+    return removed
+  })
+  ipcMain.handle('scratch:setPinned', (e, id: string, pinned: boolean) => {
+    const updated = scratchStore.setPinned(id, pinned)
+    if (updated) broadcastScratchChange({ kind: 'upsert', note: updated }, e.sender.id)
+    return updated
+  })
+  ipcMain.handle('scratch:setReminder', (e, id: string, reminderAt: string | null) => {
+    const updated = scratchStore.setReminder(id, reminderAt)
+    if (updated) {
+      reminderScheduler.rescheduleScratch(updated)
+      broadcastScratchChange({ kind: 'upsert', note: updated }, e.sender.id)
+    }
+    return updated
+  })
+
   ipcMain.handle('settings:get', () => settingsStore.read())
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => {
     const next = { ...settingsStore.read(), ...patch }
     settingsStore.write(next)
+    const runtime = runtimeSettings(next)
     if (patch.theme) nativeTheme.themeSource = patch.theme
     if ('spellcheckLanguage' in patch) applySpellcheckLanguage(next.spellcheckLanguage)
-    if ('sidebarModeEnabled' in patch) {
-      sidebarModeManager.setEnabled(next.sidebarModeEnabled)
+    if ('sidebarModeEnabled' in patch || 'onboardingCompleted' in patch) {
+      sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
     }
-    if ('quickNoteShortcutEnabled' in patch && !next.quickNoteShortcutEnabled) {
+    if (
+      ('quickNoteShortcutEnabled' in patch || 'onboardingCompleted' in patch) &&
+      !runtime.quickNoteShortcutEnabled
+    ) {
       quickNoteManager.close()
     }
-    if ('sidebarModeEnabled' in patch || 'quickNoteShortcutEnabled' in patch) {
-      globalShortcutManager.sync(next)
+    if (
+      'sidebarModeEnabled' in patch ||
+      'quickNoteShortcutEnabled' in patch ||
+      'onboardingCompleted' in patch
+    ) {
+      globalShortcutManager.sync(runtime)
     }
     if (
       'keepInMenuBar' in patch ||
       'sidebarModeEnabled' in patch ||
-      'quickNoteShortcutEnabled' in patch
+      'quickNoteShortcutEnabled' in patch ||
+      'onboardingCompleted' in patch
     ) {
       trayManager.setEnabled(
-        next.keepInMenuBar || next.sidebarModeEnabled || next.quickNoteShortcutEnabled
+        runtime.keepInMenuBar || runtime.sidebarModeEnabled || runtime.quickNoteShortcutEnabled
       )
       // Turning the tray off must never leave the app unreachable with a
       // hidden Dock icon and no menu bar presence.
       if (
-        !next.keepInMenuBar &&
-        !next.sidebarModeEnabled &&
-        !next.quickNoteShortcutEnabled &&
+        !runtime.keepInMenuBar &&
+        !runtime.sidebarModeEnabled &&
+        !runtime.quickNoteShortcutEnabled &&
         process.platform === 'darwin'
       ) {
         void app.dock.show()
@@ -525,11 +654,13 @@ app.whenReady().then(() => {
   Menu.setApplicationMenu(buildAppMenu())
   registerIpcHandlers()
   applySpellcheckLanguage(settingsStore.read().spellcheckLanguage)
+  externalWatcher.sync(noteStore.listOpenedRoots())
   createMainWindow()
   stickyManager.openAll()
   reminderScheduler.rebuildAll()
-  sidebarModeManager.setEnabled(settingsStore.read().sidebarModeEnabled)
-  globalShortcutManager.sync(settingsStore.read())
+  const runtime = runtimeSettings()
+  sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
+  globalShortcutManager.sync(runtime)
   trayManager.setEnabled(shouldKeepRunning())
 
   // Windows/Linux deliver OS-opened files as launch arguments.
@@ -544,4 +675,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !shouldKeepRunning()) app.quit()
 })
 
-app.on('will-quit', () => globalShortcutManager.destroy())
+app.on('will-quit', () => {
+  globalShortcutManager.destroy()
+  externalWatcher.destroy()
+})

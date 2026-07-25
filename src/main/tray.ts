@@ -1,4 +1,8 @@
 import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
+import {
+  QUICK_NOTE_ACCELERATOR,
+  SIDEBAR_MODE_ACCELERATOR
+} from '../shared/globalShortcuts'
 
 // A small render of the tray glyph, embedded inline so the tray works
 // identically in dev and packaged builds without wiring a separate resource
@@ -47,6 +51,10 @@ export class TrayManager {
         ? [
             {
               label: 'New Quick Note',
+              // Display-only hint — the global shortcut manager owns the real
+              // registration, so this must not register a second handler.
+              accelerator: QUICK_NOTE_ACCELERATOR,
+              registerAccelerator: false,
               click: () => this.showQuickNote()
             } as MenuItemConstructorOptions
           ]
@@ -55,6 +63,8 @@ export class TrayManager {
         ? [
             {
               label: 'Show Sidebar',
+              accelerator: SIDEBAR_MODE_ACCELERATOR,
+              registerAccelerator: false,
               click: () => this.showSidebar()
             } as MenuItemConstructorOptions
           ]

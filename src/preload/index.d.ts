@@ -7,10 +7,14 @@ import type {
   NoteSummary,
   NotionImportResult,
   SaveOptions,
+  ScratchChange,
+  ScratchNote,
+  ScratchSaveOptions,
   SearchResult,
   Settings,
   SidebarModeState,
-  StickyNoteData
+  StickyNoteData,
+  TrashEntry
 } from '../shared/types'
 
 export interface ContextMenuParams {
@@ -45,13 +49,28 @@ interface NoteatoApi {
     moveFolder: (path: string, targetParent: string) => Promise<void>
     deleteFolder: (path: string) => Promise<DeletedEntry>
     search: (query: string) => Promise<SearchResult[]>
+    listTrash: () => Promise<TrashEntry[]>
+    purgeTrash: (trashName: string) => Promise<void>
+    emptyTrash: () => Promise<void>
     takeExternalOpens: () => Promise<Note[]>
     subscribeExternalOpen: (callback: (note: Note) => void) => () => void
     getDir: () => Promise<string>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
+    openFolder: () => Promise<NoteSummary[]>
     importNotion: () => Promise<NotionImportResult | null>
     subscribeChanged: (callback: (change: NoteChange) => void) => () => void
+  }
+  scratch: {
+    list: () => Promise<ScratchNote[]>
+    read: (id: string) => Promise<ScratchNote | null>
+    create: () => Promise<ScratchNote>
+    save: (id: string, options: ScratchSaveOptions) => Promise<ScratchNote | null>
+    delete: (id: string) => Promise<boolean>
+    setPinned: (id: string, pinned: boolean) => Promise<ScratchNote | null>
+    setReminder: (id: string, reminderAt: string | null) => Promise<ScratchNote | null>
+    subscribeChanged: (callback: (change: ScratchChange) => void) => () => void
+    subscribeOpen: (callback: (id: string) => void) => () => void
   }
   settings: {
     get: () => Promise<Settings>

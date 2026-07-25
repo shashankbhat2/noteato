@@ -10,19 +10,51 @@ body,
 }
 
 :root {
-  --titlebar-leading-w: 280px;
+  --titlebar-leading-w: 252px;
   --tab-max-w: 180px;
+  /* Gutter between the floating panes, and the offset the tab strip needs to
+     line up with the note card's left edge. */
+  --pane-gap: 10px;
+  /* Distance every sidebar row and control keeps from the panel edges. */
+  --sidebar-inset: 10px;
+  /* Motion. One decelerating curve for anything that opens or closes, so a
+     panel, a section, and a folder all feel like the same mechanism. */
+  /* One row height shared by the header tabs and every sidebar row. */
+  --row-h: 32px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur: 220ms;
   --sidebar-expanded-w: var(--titlebar-leading-w);
   --bg: #faf8f5;
   --sidebar-bg: #f3f1ec;
   --sidebar-hover: #ece9e2;
   --bg-secondary: #f3f1ec;
   --bg-tertiary: #ece9e2;
-  --border: #e3e0d8;
+  /* Regions vs objects.
+     App chrome (sidebar, tab bar, panel seams) is borderless — it separates by
+     tone and whitespace. Objects that float or take input (modals, menus,
+     popovers, fields, buttons) keep a hairline over a --surface fill, and their
+     internal dividers stay too. That split is what keeps the mix deliberate
+     rather than arbitrary. --rule is for content the user inserts (dividers).
+     Borders and shadows are warm-tinted, not neutral grey — the whole palette
+     is paper, and generic black shadows read as plastic against it. */
+  --border: #e5e1d7;
+  --border-strong: #d8d3c6;
+  --surface: #edeae3;
+  --surface-hover: #e5e1d8;
+  --rule: #e3e0d8;
+  --shadow-1: 0 1px 2px rgba(74, 60, 46, 0.05), 0 2px 8px rgba(74, 60, 46, 0.06);
+  --shadow-2: 0 12px 36px rgba(74, 60, 46, 0.16);
+  --shadow-inset: inset 0 1px 3px rgba(74, 60, 46, 0.13);
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --text: #2b2a27;
   --text-muted: #938f84;
   --accent: #a1523c;
   --accent-soft: rgba(161, 82, 60, 0.12);
+  /* Selected-item wash — one value for the active tab and the active note. */
+  --accent-active: color-mix(in srgb, var(--accent) 15%, transparent);
   --danger: #b3452f;
   --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
 }
@@ -33,7 +65,14 @@ body,
   --sidebar-hover: #1d1c19;
   --bg-secondary: #1d1c19;
   --bg-tertiary: #26241f;
-  --border: #322f29;
+  --border: #302d27;
+  --border-strong: #3d3931;
+  --surface: #201e1b;
+  --surface-hover: #2b2925;
+  --rule: #322f29;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.26);
+  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.45);
   --text: #e9e6df;
   --text-muted: #8f8b81;
   --accent: #d98a70;
@@ -102,6 +141,509 @@ body {
     color 0.2s ease;
 }
 
+/* --------------------------------------------------------------------------
+   First-run onboarding — assembled from Noteato's settings and sidebar UI.
+   -------------------------------------------------------------------------- */
+
+.app-loading {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+.onboarding-window {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 620px;
+  padding: 28px;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  background: var(--sidebar-bg);
+  transition: background-color 0.2s ease;
+}
+
+.onboarding-drag-strip {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 34px;
+  -webkit-app-region: drag;
+}
+
+.onboarding-card {
+  display: flex;
+  width: min(460px, calc(100vw - 48px));
+  height: min(620px, calc(100vh - 56px));
+  min-height: 560px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.onboarding-card-header {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+}
+
+.onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.onboarding-brand img {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+}
+
+.onboarding-brand > div {
+  display: grid;
+  gap: 1px;
+}
+
+.onboarding-brand strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.onboarding-brand span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.onboarding-progress {
+  display: flex;
+  gap: 4px;
+}
+
+.onboarding-progress span {
+  width: 14px;
+  height: 2px;
+  background: var(--border);
+  transition: background-color 0.2s ease;
+}
+
+.onboarding-progress span.active {
+  background: var(--accent);
+}
+
+.onboarding-card-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 20px 18px;
+  animation: fade-in 0.15s ease;
+}
+
+.onboarding-heading {
+  padding: 23px 0 18px;
+}
+
+.onboarding-heading h1,
+.onboarding-thanks h1 {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+.onboarding-heading p,
+.onboarding-thanks p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.onboarding-fields-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding-bottom: 16px;
+}
+
+.onboarding-field {
+  min-width: 0;
+  margin: 0;
+}
+
+.onboarding-field > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.onboarding-field small {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.onboarding-section-block {
+  margin: 0;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+
+.onboarding-section-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.onboarding-section-label > span {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.onboarding-section-label small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.onboarding-storage-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.onboarding-storage-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.onboarding-storage-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.onboarding-storage-copy strong,
+.onboarding-storage-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.onboarding-storage-copy strong {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.onboarding-storage-copy small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.onboarding-storage-action,
+.onboarding-primary-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  color: var(--text);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.onboarding-storage-action:hover,
+.onboarding-primary-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.onboarding-theme-switch {
+  gap: 6px;
+}
+
+.onboarding-theme-switch .theme-option {
+  font-size: 12px;
+}
+
+.onboarding-accent-swatches {
+  margin-top: 0;
+}
+
+.onboarding-sync-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.onboarding-sync-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  width: 100%;
+  min-height: 104px;
+  align-content: start;
+  align-items: start;
+  gap: 9px;
+  padding: 13px 28px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  text-align: left;
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+
+.onboarding-sync-card:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.onboarding-sync-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.onboarding-sync-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.onboarding-sync-card.selected .onboarding-sync-icon {
+  color: var(--accent);
+}
+
+.onboarding-sync-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.onboarding-sync-title {
+  display: grid;
+  gap: 2px;
+}
+
+.onboarding-sync-title strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.onboarding-sync-title small {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.onboarding-sync-select {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--bg);
+}
+
+.onboarding-sync-card.selected .onboarding-sync-select {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.onboarding-local-note {
+  margin: 15px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.onboarding-local-note strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.onboarding-availability {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.onboarding-availability h2 {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.onboarding-toggle-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.onboarding-thanks {
+  display: flex;
+  height: 100%;
+  min-height: 350px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  text-align: center;
+}
+
+.onboarding-thanks img {
+  width: 52px;
+  height: 52px;
+  margin-bottom: 18px;
+  border-radius: 11px;
+}
+
+.onboarding-thanks > span {
+  margin-bottom: 8px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.onboarding-thanks p {
+  max-width: 310px;
+}
+
+.onboarding-actions {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px;
+  border-top: 1px solid var(--border);
+}
+
+.onboarding-actions > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.onboarding-primary-button {
+  min-width: 108px;
+}
+
+.onboarding-primary-button:disabled,
+.onboarding-storage-action:disabled,
+.onboarding-skip-button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.onboarding-skip-button,
+.onboarding-text-button {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 3px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.onboarding-skip-button:hover,
+.onboarding-text-button:hover {
+  color: var(--text);
+}
+
+.onboarding-error {
+  max-width: 180px;
+  color: var(--danger);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.onboarding-storage-action:focus-visible,
+.onboarding-sync-card:focus-visible,
+.onboarding-primary-button:focus-visible,
+.onboarding-skip-button:focus-visible,
+.onboarding-text-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 500px) {
+  .onboarding-window {
+    min-height: 680px;
+    padding: 18px;
+  }
+
+  .onboarding-card {
+    width: 100%;
+    height: calc(100vh - 36px);
+    min-height: 640px;
+  }
+
+  .onboarding-fields-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-card-body {
+    animation: none;
+  }
+}
+
 button {
   font-family: inherit;
   color: inherit;
@@ -167,10 +709,15 @@ button {
   }
 }
 
+/* Depth model: the window base is the recessed layer that the tab bar and
+   sidebar sit directly on; the editor and agent panel float above it as
+   rounded cards. Reading order comes from elevation rather than from dividers,
+   which is what lets the chrome stay borderless while content stays crisp. */
 .app-shell {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background: var(--sidebar-bg);
 }
 
 /* Tab bar — flat, underline-style, no chrome cards */
@@ -178,10 +725,10 @@ button {
 .tab-bar {
   display: flex;
   align-items: center;
-  height: 42px;
+  height: calc(var(--row-h) + 14px);
   flex-shrink: 0;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  padding: 7px 0;
+  background: transparent;
   -webkit-app-region: drag;
 }
 
@@ -192,39 +739,18 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px 0 92px;
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--border);
+  padding: 0 6px 0 92px;
+  background: transparent;
   transition:
     width 0.15s ease,
     padding 0.15s ease;
 }
 
+/* Collapsed, there is no sidebar column to span — shrink to the controls. */
 .titlebar-sidebar.collapsed {
-  width: 112px;
-  gap: 0;
-  padding: 0 8px 0 76px;
-}
-
-.app-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
-  transition:
-    opacity 0.1s ease,
-    width 0.15s ease;
-}
-
-.titlebar-sidebar.collapsed .app-title {
-  flex: 0 1 0;
-  width: 0;
-  opacity: 0;
-  pointer-events: none;
+  width: auto;
+  gap: 4px;
+  padding: 0 4px 0 76px;
 }
 
 .tab-strip {
@@ -234,6 +760,8 @@ button {
   flex: 1;
   overflow-x: auto;
   height: 100%;
+  /* Lines the first tab up with the left edge of the note card below. */
+  padding-left: var(--pane-gap);
   /* Left as a drag region (inherited from .tab-bar) so the empty space
      after the last tab is still draggable/double-click-to-maximize —
      only the tabs and the "+" button below opt back out of it. */
@@ -244,26 +772,37 @@ button {
   align-items: center;
   gap: 7px;
   max-width: var(--tab-max-w);
-  padding: 0 6px 0 16px;
+  padding: 0 6px 0 12px;
   cursor: pointer;
   font-size: 12.5px;
   color: var(--text-muted);
   flex-shrink: 0;
+  border-radius: var(--radius-sm);
   border-bottom: 2px solid transparent;
   transition:
     color 0.12s ease,
-    border-bottom-color 0.15s ease;
+    background-color 0.12s ease;
   animation: fade-in-up 0.15s ease;
   -webkit-app-region: no-drag;
 }
 
 .tab:hover {
   color: var(--text);
+  background: var(--surface);
 }
 
+.tab.active:hover {
+  background: var(--accent-active);
+}
+
+/* Inset from the header's edges, so the wash reads as a pill rather than a
+   full-height block. The underline goes with it — a floating pill has nothing
+   left to attach to. */
 .tab.active {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  background: var(--accent-active);
+  border-bottom-color: transparent;
+  border-radius: var(--radius-sm);
 }
 
 .tab-pin-icon {
@@ -356,14 +895,19 @@ button {
   background: transparent;
 }
 
+/* Sits at the sidebar's trailing edge; symmetric padding so both arrows read
+   as one evenly-spaced pair. */
 .tab-nav {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 10px 0 2px;
-  margin-right: 4px;
-  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  gap: 2px;
+  margin-left: auto;
+  padding: 0;
   flex-shrink: 0;
+}
+
+.titlebar-sidebar.collapsed .tab-nav {
+  margin-left: 0;
 }
 
 /* Body layout */
@@ -377,15 +921,13 @@ button {
 .sidebar {
   width: var(--sidebar-expanded-w);
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  background: var(--sidebar-bg);
+  background: transparent;
   overflow: hidden;
   transition:
-    width 0.15s ease,
-    opacity 0.1s ease,
-    border-color 0.15s ease,
+    width var(--dur) var(--ease),
+    opacity var(--dur-fast) linear,
     background-color 0.2s ease;
 }
 
@@ -415,48 +957,395 @@ button {
   background: var(--bg-tertiary);
 }
 
-.sidebar-actions {
-  display: flex;
-  gap: 2px;
-  padding: 20px 16px 14px;
-}
-
-.sidebar-icon-btn {
-  border: none;
-  background: transparent;
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
+.sidebar-search {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 7px;
+  margin: 18px var(--sidebar-inset) 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
   cursor: pointer;
+}
+
+.sidebar-search span {
+  flex: 1;
+  text-align: left;
+}
+
+.sidebar-search kbd {
+  padding: 1px 5px;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-muted) 13%, transparent);
+  font-family: inherit;
+  font-size: 10px;
   color: var(--text-muted);
 }
 
-.sidebar-icon-btn:hover {
+.sidebar-search:hover {
   color: var(--text);
-  background: var(--bg-tertiary);
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
-.sidebar-scroll {
+/* Split button: primary "New note" plus a caret for the rarer actions. */
+.sidebar-new-split {
+  display: flex;
+  margin: 0 var(--sidebar-inset) 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+.sidebar-new-note,
+.sidebar-new-more {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sidebar-new-note {
   flex: 1;
-  overflow-y: auto;
-  padding: 4px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+  font-weight: 550;
+  text-align: left;
 }
 
-.sidebar-scroll.drop-root {
-  background: var(--accent-soft);
+.sidebar-new-more {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
 }
 
-.sidebar-section-label {
+.sidebar-new-note:hover,
+.sidebar-new-more:hover {
+  background: var(--surface-hover);
+}
+
+.sidebar-new-more:hover {
+  color: var(--text);
+}
+
+/* Hover tooltips for icon-only actions (title + no native delay). */
+.sidebar [data-tip] {
+  position: relative;
+}
+
+.sidebar [data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-secondary, var(--bg-tertiary));
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  z-index: 60;
+}
+
+.sidebar-section {
+  margin-bottom: 4px;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 10px 5px 10px;
   font-size: 10.5px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  padding: 8px 20px 4px;
-  opacity: 0.8;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sidebar-section-header:hover {
+  color: var(--text);
+}
+
+.section-chevron {
+  display: grid;
+  place-items: center;
+  opacity: 0.7;
+}
+
+.section-title {
+  flex: 1;
+  text-align: left;
+}
+
+.section-extra {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-row-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  min-height: var(--row-h);
+  padding: 0 12px 0 14px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-row-btn:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+}
+
+.sidebar-row-btn:disabled {
+  cursor: default;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.sidebar-row-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.sidebar-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.soon-badge {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.sidebar-trash-row {
+  width: 100%;
+  margin: 8px 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-trash-row:hover {
+  background: var(--sidebar-hover);
+  color: var(--text);
+}
+
+.sidebar-trash-row span:first-of-type {
+  flex: 1;
+}
+
+.sidebar-trash-count {
+  flex: none !important;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Trash tab ------------------------------------------------------------ */
+
+.trash-view {
+  height: 100%;
+  overflow-y: auto;
+  padding: 34px 38px 60px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.trash-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trash-view-header h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.trash-view-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.trash-empty-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.trash-empty-btn:hover {
+  color: #c0392b;
+  border-color: color-mix(in srgb, #c0392b 45%, var(--border));
+}
+
+.trash-view-hint {
+  margin: 8px 0 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.trash-view-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.trash-view-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.trash-view-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-radius: 8px;
+}
+
+.trash-view-item:hover {
+  background: var(--sidebar-hover);
+}
+
+.trash-glyph {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.trash-view-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trash-view-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.trash-view-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.trash-view-actions {
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+}
+
+.trash-view-item:hover .trash-view-actions {
+  opacity: 1;
+}
+
+.trash-view-actions button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.trash-view-actions button:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.trash-view-actions button.danger:hover {
+  color: #c0392b;
+  border-color: color-mix(in srgb, #c0392b 45%, var(--border));
+  background: transparent;
+}
+
+/* Rows are inset from the panel edges so their rounded hover/active wash has
+   room to breathe instead of colliding with the sidebar's sides. */
+.sidebar-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px var(--sidebar-inset) 16px;
+}
+
+.sidebar-scroll.drop-root {
+  background: var(--accent-soft);
 }
 
 .note-list,
@@ -464,6 +1353,9 @@ button {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .note-item {
@@ -471,21 +1363,19 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px 8px 10px;
+  min-height: var(--row-h);
+  padding: 0 12px 0 10px;
   cursor: pointer;
-  border-left: 2px solid transparent;
-  transition:
-    border-left-color 0.15s ease,
-    background-color 0.12s ease;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.12s ease;
 }
 
 .note-item:hover {
-  border-left-color: var(--border);
   background: var(--sidebar-hover);
 }
 
 .note-item.active {
-  border-left-color: var(--accent);
+  background: var(--accent-active);
 }
 
 .note-item-main {
@@ -562,9 +1452,10 @@ button {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 9px 12px 9px 8px;
+  min-height: var(--row-h);
+  padding: 0 12px 0 8px;
   cursor: pointer;
-  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
   color: var(--text);
   transition: background-color 0.12s ease;
   user-select: none;
@@ -612,17 +1503,31 @@ button {
   font-family: inherit;
 }
 
+/* Holds one editor card, or two side by side in split view. */
+.editor-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: var(--pane-gap);
+  margin: 0 var(--pane-gap) var(--pane-gap);
+}
+
 .editor-pane {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
 }
 
 .note-editor {
   max-width: 860px;
   margin: 0 auto;
-  padding: 48px 48px 112px;
+  padding: 20px 48px 112px;
   transition: max-width 0.2s ease;
 }
 
@@ -665,8 +1570,9 @@ button {
   border-left-color: var(--accent);
 }
 
+/* A divider is note content, not chrome — it keeps a visible rule. */
 .note-editor .bn-editor [data-content-type='divider'] hr {
-  border-top-color: var(--border);
+  border-top-color: var(--rule);
 }
 
 /* Code blocks. BlockNote hardcodes a near-black card that disappears against
@@ -877,8 +1783,27 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 32px;
-  margin-bottom: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  min-height: calc(var(--row-h) + 12px);
+  padding: 6px 20px;
+  background: var(--bg);
+  /* Matches the card's rounded top so it doesn't square off the corners. */
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.note-editor-shell {
+  position: relative;
+  min-height: 100%;
+}
+
+/* Zen mode has no title bar, so the sticky header would sit under the macOS
+   traffic lights — start it clear of them instead. */
+.app-shell.zen .note-editor-toolbar {
+  padding-left: 92px;
+  border-radius: 0;
 }
 
 .toolbar-actions {
@@ -917,48 +1842,6 @@ button {
   text-overflow: ellipsis;
 }
 
-.note-editor-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.note-markdown-textarea {
-  width: 100%;
-  min-height: 65vh;
-  border: none;
-  outline: none;
-  resize: none;
-  background: transparent;
-  color: var(--text);
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 14px;
-  line-height: 1.7;
-  padding: 0 2px;
-  tab-size: 2;
-}
-
-.note-markdown-textarea::placeholder {
-  color: var(--text-muted);
-  opacity: 0.5;
-}
-
-.note-title-input {
-  flex: 1;
-  border: none;
-  outline: none;
-  font-family: inherit;
-  font-size: 30px;
-  font-weight: 500;
-  background: transparent;
-  color: var(--text);
-}
-
-.note-title-input::placeholder {
-  color: var(--text-muted);
-  opacity: 0.6;
-}
 
 .icon-toggle-btn {
   display: flex;
@@ -1132,31 +2015,274 @@ button {
   animation: modal-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Settings — a rail of grouped sections beside a scrolling detail pane.
+   Every setting is one row: label and description left, control right. */
 .settings-modal {
-  width: 460px;
+  width: 920px;
+  max-width: calc(100vw - 56px);
+  height: 700px;
+  max-height: calc(100vh - 64px);
   padding: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
 }
 
-.settings-modal-header {
-  position: sticky;
-  top: 0;
+.settings-nav {
+  flex: 0 0 232px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 22px 12px 16px;
+}
+
+.settings-nav-title {
+  padding: 0 11px 18px;
+  font-size: 21px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.settings-nav-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-nav-block + .settings-nav-block {
+  margin-top: 16px;
+}
+
+.settings-nav-group {
+  padding: 0 11px 6px;
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--text-muted);
+}
+
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-nav button svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.settings-nav button:hover {
+  background: var(--surface);
+}
+
+.settings-nav button.active {
+  background: var(--surface-hover);
+  font-weight: 550;
+}
+
+.settings-nav button.active svg {
+  color: var(--accent);
+}
+
+.settings-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.settings-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
   z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.settings-close:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px 40px 40px;
+}
+
+.settings-pane-header h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.settings-pane-header p {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.settings-group {
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-group-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text-muted);
+}
+
+.settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  border-radius: 12px 12px 0 0;
+  gap: 28px;
+  padding: 13px 0;
 }
 
-.settings-modal-header h1 {
-  font-size: 16px;
-  font-weight: 600;
+.settings-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.settings-body {
-  padding: 0 20px 20px;
+.settings-row-copy strong {
+  font-size: 13.5px;
+  font-weight: 560;
+  color: var(--text);
+}
+
+.settings-row-copy span {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.settings-row-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-static-value {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* Compact segmented control — the selected cell lifts off the track. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-inset);
+}
+
+.segmented button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 4px);
+  padding: 5px 11px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+/* Seated into the track — depth comes from the groove around it, not from a
+   drop shadow lifting it off the surface. */
+.segmented button.active {
+  background: var(--accent-active);
+  color: var(--accent);
+  font-weight: 560;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.settings-select,
+.settings-inline-field input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+}
+
+.settings-select {
+  min-width: 168px;
+}
+
+.settings-inline-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.settings-inline-field input {
+  width: 210px;
+}
+
+.settings-inline-field input:focus,
+.settings-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.settings-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .modal-close-btn {
@@ -1195,7 +2321,6 @@ button {
   gap: 10px;
   overflow: hidden;
   background: linear-gradient(160deg, var(--bg-tertiary), var(--bg));
-  border-right: 1px solid var(--border);
   color: var(--text-muted);
 }
 
@@ -1318,12 +2443,7 @@ button {
 }
 
 .settings-section {
-  border-top: 1px solid var(--border);
   padding: 16px 0;
-}
-
-.settings-body > .settings-section:first-child {
-  border-top: none;
 }
 
 .settings-section h2 {
@@ -1333,11 +2453,6 @@ button {
   color: var(--text-muted);
   margin-bottom: 14px;
   font-weight: 600;
-}
-
-.settings-ai-preferences > .hint {
-  max-width: 390px;
-  line-height: 1.55;
 }
 
 .settings-ai-providers {
@@ -1898,31 +3013,73 @@ button {
 
 /* Agent panel */
 
+/* Floats as its own card beside the editor, same elevation.
+   Its width is half the window minus the sidebar column, which makes it match
+   the note exactly while the sidebar is open. Because that width doesn't
+   depend on whether the sidebar is actually showing, collapsing the sidebar
+   leaves the agent where it is and hands the freed column to the note, which
+   grows leftward. */
 .agent-panel {
-  width: var(--sidebar-expanded-w);
+  width: calc(
+    (100vw - var(--sidebar-expanded-w) - (var(--pane-gap) * 3)) / 2
+  );
+  min-width: 280px;
+  max-width: 620px;
   flex-shrink: 0;
+  opacity: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  margin: 0 var(--pane-gap) var(--pane-gap) 0;
   background: var(--bg);
-  border-left: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
-  transition: width 0.15s ease;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition:
+    width var(--dur) var(--ease),
+    min-width var(--dur) var(--ease),
+    margin-right var(--dur) var(--ease),
+    opacity var(--dur-fast) linear;
 }
 
-/* With the sidebar collapsed there's room to give the agent a third of the window,
-   but never less than its usual width on narrow windows. */
-.app-body.sidebar-collapsed .agent-panel {
-  width: max(var(--sidebar-expanded-w), 33.333vw);
+/* Closed: collapses to nothing rather than unmounting, so it animates both
+   ways and the editor grows into the space it leaves. */
+.app-body.agent-closed .agent-panel {
+  width: 0;
+  min-width: 0;
+  margin-right: 0;
+  border-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 
+/* Zen mode drops the card entirely — the point is the page, not the frame. */
+.app-shell.zen {
+  background: var(--bg);
+}
+
+.app-shell.zen .editor-area {
+  margin: 0;
+}
+
+.app-shell.zen .editor-pane {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+
+
+/* Same height as the note header so the two cards' headers line up. */
 .agent-header {
-  min-height: 40px;
+  min-height: calc(var(--row-h) + 12px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 14px;
+  padding: 6px 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 
@@ -2539,11 +3696,35 @@ button {
 }
 
 .sidebar-note-row {
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
   align-items: start;
   gap: 7px;
   min-height: 46px;
   padding: 7px 9px;
+}
+
+.sidebar-note-delete {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.sidebar-note-row:hover .sidebar-note-delete,
+.sidebar-note-delete:focus-visible {
+  opacity: 1;
+}
+
+.sidebar-note-delete:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 78%, transparent);
+  color: #c0392b;
 }
 
 .sidebar-note-row:hover,
@@ -2726,58 +3907,13 @@ button {
   }
 }
 
-.sidebar-editor-meta {
-  height: 29px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 17px 4px;
-}
-
-.sidebar-editor-path,
-.sidebar-save-state {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 9.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-save-state.saved {
-  color: var(--accent);
-}
-
-.sidebar-editor-title {
-  width: 100%;
-  flex-shrink: 0;
-  border: none;
-  outline: none;
-  padding: 3px 17px 11px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-family: var(--font-family);
-  font-size: 22px;
-  font-weight: 570;
-  letter-spacing: -0.025em;
-}
-
-.sidebar-editor-title::placeholder {
-  color: var(--text-muted);
-  opacity: 0.55;
-}
-
 .sidebar-editor-formatting {
   height: 34px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 2px;
-  margin: 0 13px;
-  padding: 0 2px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  padding: 0 6px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
 }
 
@@ -2812,7 +3948,7 @@ button {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 13px 70px;
+  padding: 10px 6px 70px;
 }
 
 .sidebar-editor-canvas .bn-root,
@@ -2886,7 +4022,6 @@ body:has(.quick-note-shell) {
   justify-content: space-between;
   gap: 12px;
   padding: 0 10px 0 12px;
-  border-bottom: 1px solid var(--border);
   background: var(--sidebar-bg);
   -webkit-app-region: drag;
   user-select: none;
@@ -2932,7 +4067,7 @@ body:has(.quick-note-shell) {
 }
 
 .quick-note-shell .sidebar-editor-canvas {
-  padding-bottom: 30px;
+  padding: 10px 18px 30px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3200,7 +4335,6 @@ body:has(.quick-note-shell) {
   align-items: center;
   gap: 10px;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
   color: var(--text-muted);
 }
 
@@ -3282,5 +4416,1419 @@ body:has(.quick-note-shell) {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    /* Deferred visibility flips (see .collapsible-inner) must not linger. */
+    transition-delay: 0s !important;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Object layer
+   Regions go borderless (see the seams stripped above); objects get the
+   opposite treatment — a hairline over a --surface fill, warm elevation when
+   they float, and one shared roundness. Collected here so the character of an
+   "object" is defined once instead of drifting per component.
+   -------------------------------------------------------------------------- */
+
+.trash-empty-btn,
+.trash-view-actions button,
+.empty-state-btn,
+.settings-actions button.primary,
+.confirm-btn,
+.import-notion-cancel,
+.sidebar-mode-empty button,
+.settings-label select,
+.settings-label input,
+.reminder-popover-input,
+.onboarding-primary-button,
+.onboarding-sync-select {
+  background: var(--surface);
+}
+
+.trash-empty-btn:hover,
+.trash-view-actions button:hover,
+.empty-state-btn:hover,
+.settings-actions button.primary:hover,
+.confirm-btn:hover,
+.import-notion-cancel:hover,
+.sidebar-mode-empty button:hover {
+  background: var(--surface-hover);
+}
+
+/* Destructive actions keep their meaning through colour, not an outline. */
+.trash-view-actions button.danger:hover,
+.trash-empty-btn:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+/* Keycap chips read as recessed fills instead of outlined boxes. */
+.settings-shortcut-key,
+.quick-note-titlebar kbd {
+  background: color-mix(in srgb, var(--text-muted) 13%, transparent);
+}
+
+/* Floating layers: hairline for the crisp edge, warm elevation for the lift. */
+.modal,
+.shortcuts-popup,
+.ai-error-toast,
+.dictation-panel-error {
+  box-shadow: var(--shadow-2);
+}
+
+/* One roundness across every floating object — the most legible signature the
+   app has, and the thing that most makes it feel like one piece of software. */
+.modal,
+.shortcuts-popup,
+.context-menu,
+.ai-popup,
+.sidebar-settings-popover,
+.agent-mention-menu,
+.reminder-popover,
+.find-bar,
+.undo-toast,
+.ai-error-toast {
+  border-radius: var(--radius-lg);
+}
+
+/* Inputs and buttons share the smaller step. */
+.settings-label input,
+.settings-label select,
+.reminder-popover-input,
+.settings-actions button.primary,
+.confirm-btn,
+.import-notion-cancel,
+.empty-state-btn,
+.trash-empty-btn,
+.trash-view-actions button,
+.sidebar-mode-empty button {
+  border-radius: var(--radius-sm);
+}
+
+/* The settings rail is recessed against its pane — the same figure/ground
+   relationship the sidebar has against the editor card in the main window. */
+.settings-nav {
+  background: var(--sidebar-bg);
+}
+
+/* --------------------------------------------------------------------------
+   Disclosure motion
+   Sections, folders, and the linked-folder groups all open the same way: the
+   content stays in the DOM and its row track grows from 0fr to 1fr, which the
+   compositor can interpolate without any measuring in JS.
+   -------------------------------------------------------------------------- */
+
+.collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition:
+    grid-template-rows var(--dur) var(--ease),
+    opacity var(--dur-fast) linear;
+  opacity: 0;
+}
+
+.collapsible.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+/* Hidden only once the close finishes, so collapsed rows can't be tabbed into
+   while still animating out. */
+.collapsible-inner {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear var(--dur);
+}
+
+.collapsible.open .collapsible-inner {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* One chevron that turns, rather than two icons swapping. */
+.section-chevron,
+.folder-chevron {
+  display: grid;
+  place-items: center;
+  transition: transform var(--dur) var(--ease);
+}
+
+.section-chevron.open,
+.folder-chevron.open {
+  transform: rotate(90deg);
+}
+
+/* The header shifts as the sidebar column appears and disappears. */
+.titlebar-sidebar {
+  transition:
+    width var(--dur) var(--ease),
+    padding var(--dur) var(--ease);
+}
+
+/* Toggling a pane resizes the note; let it keep pace instead of snapping. */
+.editor-pane {
+  transition:
+    margin var(--dur) var(--ease),
+    max-width 0.2s ease;
+}
+
+/* --------------------------------------------------------------------------
+   Table of contents rail
+   Tick marks down the right edge of a note, one per heading and indented by
+   level. The anchor is a zero-height sticky element so the rail follows the
+   scroll without taking part in the note's layout; hovering expands the marks
+   into readable labels.
+   -------------------------------------------------------------------------- */
+
+.note-toc-anchor {
+  position: sticky;
+  top: 96px;
+  z-index: 4;
+  height: 0;
+}
+
+.note-toc {
+  position: absolute;
+  right: 14px;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition:
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease);
+}
+
+.note-toc::-webkit-scrollbar {
+  display: none;
+}
+
+.note-toc:hover {
+  background: var(--bg);
+  border-color: var(--border);
+  box-shadow: var(--shadow-2);
+}
+
+.toc-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.toc-line:hover .toc-dash {
+  opacity: 1;
+  background: var(--accent);
+}
+
+.toc-line:hover .toc-label {
+  color: var(--text);
+}
+
+.toc-label {
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-align: right;
+  transition:
+    max-width var(--dur) var(--ease),
+    opacity var(--dur-fast) linear,
+    color 0.12s ease;
+}
+
+.note-toc:hover .toc-label {
+  max-width: 190px;
+  opacity: 1;
+}
+
+.toc-dash {
+  flex-shrink: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-muted);
+  opacity: 0.4;
+  transition:
+    opacity var(--dur-fast) linear,
+    background-color 0.12s ease;
+}
+
+/* Depth reads from the length of the mark. */
+.toc-line[data-level='1'] .toc-dash {
+  width: 18px;
+}
+
+.toc-line[data-level='2'] .toc-dash {
+  width: 13px;
+}
+
+.toc-line[data-level='3'] .toc-dash {
+  width: 9px;
+}
+
+/* Full-width notes run under the rail — nudge it clear of the text. The rail
+   precedes the note in the DOM, so this matches on the shell rather than with
+   a sibling combinator. */
+.note-editor-shell:has(.note-editor.full-width) .note-toc {
+  right: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   Split view
+   Dragging a tab over the editor area reveals two halves; dropping on one
+   docks that note there and the current note takes the other half.
+   -------------------------------------------------------------------------- */
+
+.split-dropzones {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+}
+
+.split-dropzone {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  border: 2px dashed transparent;
+  border-radius: var(--radius-lg);
+  transition:
+    background-color var(--dur-fast) linear,
+    border-color var(--dur-fast) linear;
+}
+
+.split-dropzone.over {
+  background: var(--accent-active);
+  border-color: var(--accent);
+}
+
+.split-dropzone-hint {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 550;
+  opacity: 0;
+  transition: opacity var(--dur-fast) linear;
+}
+
+.split-dropzone.over .split-dropzone-hint {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* A split view collapses into one tab holding both notes, mirroring the panes
+   on screen: left half is the left pane. */
+.tab-split {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  max-width: none;
+  padding: 0 2px 0 0;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  outline-offset: -1px;
+  cursor: default;
+}
+
+.tab-split:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.tab-split-cell {
+  display: flex;
+  align-items: stretch;
+}
+
+.tab-split-divider {
+  align-self: center;
+  width: 1px;
+  height: 15px;
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.tab-split-half {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(var(--tab-max-w) - 30px);
+  padding: 0 6px 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+/* Only one half drives the agent context and the editable pane. */
+.tab-split-half.focused {
+  color: var(--text);
+  font-weight: 550;
+}
+
+.tab-split-menu {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.tab-split-menu:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.agent-context-badge.split {
+  color: var(--accent);
+  background: var(--accent-active);
+}
+
+/* --------------------------------------------------------------------------
+   Home view
+   Assistant chat up top (height-capped, scrolls internally so an ongoing
+   conversation never pushes the page around), then recent/pinned cards, then
+   the reminders calendar.
+   -------------------------------------------------------------------------- */
+
+.home-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 40px 40px 26px;
+}
+
+.home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.home-assistant-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Greeting — one randomized verb phrase per visit, set in the accent. */
+
+.home-greeting {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+  color: var(--accent);
+}
+
+.home-greeting-name {
+  color: var(--accent);
+}
+
+/* Assistant launcher + floating panel */
+
+/* Bottom-docked composer. Collapsed it is only the input; open, the chat
+   expands upward from the same anchor over a blurred backdrop. */
+
+.home-ai-backdrop {
+  /* Absolute, not fixed: backdrop-filter samples only what is painted behind
+     this element's own box, so scoping it to .home-view leaves the sidebar,
+     tab bar, and agent panel untouched. */
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--sidebar-bg) 30%, transparent);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  animation: fade-in 0.14s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.home-ai-dock {
+  position: sticky;
+  bottom: 16px;
+  z-index: 50;
+  width: min(100%, 520px);
+  margin: auto auto 0;
+  padding-top: 24px;
+}
+
+.home-ai-expand {
+  display: flex;
+  flex-direction: column;
+  max-height: min(520px, calc(100vh - 220px));
+  margin-bottom: 8px;
+  /* No outer padding — the header and thread run edge to edge, each carrying
+     its own inset, and the header's rule is what divides them. */
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  transform-origin: bottom center;
+  animation: ai-expand-up var(--dur) var(--ease);
+}
+
+@keyframes ai-expand-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+.home-ai-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px 9px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.home-ai-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.home-ai-head-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.home-ai-head-actions button {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.home-ai-head-actions button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.home-ai-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 26px 14px 22px;
+}
+
+.home-ai-avatar {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 12px;
+  border-radius: 999px;
+  background: var(--accent-active);
+  color: var(--accent);
+}
+
+.home-ai-greet {
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+}
+
+.home-ai-sub {
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 550;
+}
+
+.home-ai-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 18px;
+  align-self: stretch;
+}
+
+.home-ai-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.home-ai-suggestion:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.home-ai-suggestion:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.home-ai-suggestion-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.home-ai-thread {
+  flex: 1;
+  min-height: 120px;
+  max-height: none;
+}
+
+.home-ai-inputwrap {
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+}
+
+.home-ai-model {
+  flex-shrink: 0;
+  max-width: 120px;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 2px 4px 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.home-ai-model:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.home-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.home-chat-msg {
+  max-width: 85%;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.home-chat-msg.user {
+  align-self: flex-end;
+  padding: 7px 12px;
+  border-radius: var(--radius-md);
+  background: var(--accent-active);
+  color: var(--text);
+}
+
+.home-chat-msg.assistant {
+  align-self: flex-start;
+  color: var(--text);
+}
+
+.home-chat-thinking {
+  color: var(--text-muted);
+}
+
+.home-chat-inputwrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 4px 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.home-chat-inputwrap:focus-within {
+  border-color: var(--accent);
+}
+
+.home-chat-glyph {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.home-chat-inputwrap input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 10px 0;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+}
+
+.home-chat-inputwrap input::placeholder {
+  color: var(--text-muted);
+}
+
+.home-chat-send {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.home-chat-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Sections + cards */
+
+.home-section {
+  margin-top: 26px;
+}
+
+/* Lifted off the page while it is being moved. */
+.home-section.dragging {
+  position: relative;
+  z-index: 5;
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 4px;
+}
+
+/* Nothing should be selectable or hoverable while a section is in flight. */
+body.is-reordering {
+  user-select: none;
+  cursor: grabbing;
+}
+
+body.is-reordering * {
+  cursor: grabbing !important;
+}
+
+.home-section-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 10px -18px;
+}
+
+.home-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  color: var(--text-muted);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity var(--dur-fast) linear;
+}
+
+.home-drag-handle:active {
+  cursor: grabbing;
+}
+
+.home-section:hover .home-drag-handle {
+  opacity: 0.6;
+}
+
+.home-drag-handle:hover {
+  opacity: 1 !important;
+}
+
+.home-section h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text-muted);
+}
+
+.home-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  text-align: left;
+}
+
+.home-card:hover {
+  background: color-mix(in srgb, var(--surface) 45%, var(--bg));
+  border-color: var(--border-strong);
+}
+
+.home-card-glyph {
+  color: var(--accent);
+}
+
+.home-card-title {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.home-card-excerpt {
+  width: 100%;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.home-card-meta {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  opacity: 0.8;
+}
+
+/* --------------------------------------------------------------------------
+   Calendar — month view with reminders shown in the grid itself, Apple style.
+   Days are cells on a hairline grid rather than buttons; today is a filled
+   numeral, not a filled cell, so it stays legible next to a selection.
+   -------------------------------------------------------------------------- */
+
+.cal {
+  position: relative;
+}
+
+.cal-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.cal-month {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cal-nav button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.cal-nav button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cal-today {
+  width: auto !important;
+  margin-right: 4px;
+  padding: 0 10px;
+  height: 26px;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--accent) !important;
+}
+
+.cal-today:hover {
+  background: var(--accent-active) !important;
+}
+
+.cal-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  padding-bottom: 7px;
+}
+
+.cal-dow span {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Hairline grid: cells draw their own top/left rules and the container
+   supplies the outer edge, so lines never double up. */
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+}
+
+.cal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 88px;
+  padding: 6px 5px 5px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+
+.cal-cell:nth-child(-n + 7) {
+  border-top: none;
+}
+
+.cal-cell:nth-child(7n + 1) {
+  border-left: none;
+}
+
+.cal-cell:hover {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.cal-cell.active {
+  background: var(--accent-active);
+}
+
+.cal-cell.outside .cal-num {
+  opacity: 0.32;
+}
+
+.cal-cell.outside .cal-chip {
+  opacity: 0.5;
+}
+
+.cal-cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.cal-quick-add {
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) linear;
+}
+
+.cal-cell:hover .cal-quick-add,
+.cal-quick-add:focus-visible {
+  opacity: 1;
+}
+
+.cal-quick-add:hover {
+  background: var(--accent-active);
+  color: var(--accent);
+}
+
+.cal-num {
+  display: grid;
+  place-items: center;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Today is the filled numeral — the Apple tell. */
+.cal-num.today {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 620;
+}
+
+.cal-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cal-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  border: none;
+  border-radius: 5px;
+  padding: 2px 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cal-chip:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.cal-chip-time {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-chip-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.cal-more {
+  padding-left: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* Day popover */
+
+.cal-pop {
+  position: fixed;
+  z-index: 60;
+  width: 296px;
+  /* No outer padding — the header's rule must span the full width, so each
+     section carries its own inset (same as the assistant panel). */
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  animation: modal-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cal-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px 9px 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cal-pop-date {
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.cal-pop-add {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent-active);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.cal-pop-add:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.cal-pop-empty {
+  width: calc(100% - 24px);
+  margin: 11px 12px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px dashed color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 14px 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.cal-pop-empty:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cal-pop-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.cal-pop-list li {
+  display: flex;
+  align-items: center;
+  border-radius: 7px;
+}
+
+.cal-pop-list li:hover {
+  background: var(--surface);
+}
+
+.cal-pop-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: none;
+  border-radius: 7px;
+  padding: 7px 4px 7px 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cal-pop-time {
+  flex-shrink: 0;
+  min-width: 50px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-pop-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.cal-pop-remove {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) linear;
+}
+
+.cal-pop-list li:hover .cal-pop-remove,
+.cal-pop-remove:focus-visible {
+  opacity: 1;
+}
+
+.cal-pop-remove:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* Composer inside the popover */
+
+.cal-pop-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px 12px;
+}
+
+.cal-time {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cal-anchors {
+  display: flex;
+  gap: 4px;
+}
+
+.cal-anchors button {
+  flex: 1;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) linear;
+}
+
+.cal-anchors button:hover {
+  color: var(--text);
+}
+
+.cal-anchors button.active {
+  background: var(--accent-active);
+  color: var(--accent);
+}
+
+/* Half-hour rail. Scrolls horizontally and centres the selection; the edges
+   fade so it reads as a continuous strip rather than a clipped row. */
+.cal-rail {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  padding: 2px 0;
+  mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 14px,
+    #000 calc(100% - 14px),
+    transparent
+  );
+}
+
+.cal-rail::-webkit-scrollbar {
+  display: none;
+}
+
+.cal-slot {
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 5px 11px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cal-slot:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cal-slot.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 580;
+}
+
+.cal-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cal-pick-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.cal-pop-cancel {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.cal-pop-cancel:hover {
+  color: var(--text);
+}
+
+.cal-search {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.cal-search:focus {
+  border-color: var(--accent);
+}
+
+.cal-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.cal-results button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.cal-results button:hover {
+  background: var(--accent-active);
+  color: var(--accent);
+}
+
+.cal-results button span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.cal-result-bell {
+  flex: none !important;
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+.cal-noresult {
+  padding: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Sidebar entry point */
+
+.sidebar-home-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 var(--sidebar-inset) 2px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar-home-row:hover {
+  background: var(--sidebar-hover);
+}
+
+.sidebar-home-row svg {
+  color: var(--text-muted);
+}
+

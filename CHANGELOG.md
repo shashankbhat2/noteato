@@ -1,5 +1,38 @@
 All notable changes to Noteato are documented here. This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [1.0.0] - 2026-07-26
+
+### Added
+
+- A Home view with a randomized time-of-day greeting, recently opened and pinned notes as cards, and a month calendar for reminders. Sections can be reordered by dragging their handle.
+- A general-purpose assistant docked to the bottom of Home. It expands upward over a blurred backdrop, collapses to just its input, keeps streaming while collapsed, remembers the conversation between visits, and can be switched off entirely.
+- A month calendar that shows reminders inside the day cells. Reminders can be added from any day with a half-hour time rail and note search, and removed from the day popover.
+- Split view: drag a tab onto either half of the editor, or use the tab context menu. Split tabs collapse into a single grouped tab with an Arrange Split View menu to separate, close either side, or reverse the panes.
+- A Trash tab listing every deleted note and folder, with restore and permanent delete, plus Empty Trash.
+- A table-of-contents rail down the right edge of each note that expands into full headings on hover and scrolls to a heading on click.
+- Pin and unpin a note directly from its header.
+- Open external Markdown files and whole folders natively. Linked files and folders are watched, so edits made in other apps appear immediately.
+- A model picker for the Home assistant, offering only models whose provider has an API key.
+
+### Changed
+
+- Notes are now stored in a SQLite database for quick notes, sidebar notes, sticky notes, opened-file links, window state, and trash metadata. Existing data is migrated automatically on first launch. Library notes remain plain Markdown files.
+- A note's title is now its first block rather than a separate field, so the document begins with a normal heading.
+- Rebuilt Settings as a tabbed dialog with grouped sections and one row per setting, and limited AI model choices to fast, inexpensive models.
+- Redesigned the sidebar: a full-width search field with its shortcut, a split New note button, and collapsible Pinned Notes, Your Notes, and Import sections.
+- Redesigned the app shell around depth: the editor and assistant float as rounded cards above a recessed window base, with warm-tinted borders and shadows and one shared corner radius.
+- Made the note header sticky and full width, with the assistant panel header matched to its height.
+- External Markdown files are no longer modified when opened; Noteato no longer writes frontmatter into files outside its own library.
+- Smoothed open and close animations across the sidebar, assistant panel, note sections, and folders.
+- Restored native Intel Mac (x64) builds alongside Apple Silicon (arm64) builds, now signed and notarized.
+
+### Removed
+
+- The plain-Markdown editing mode has been removed from the note editor.
+- The Recent section has been removed from the sidebar; recently opened notes now appear on Home.
+
 ## [0.9.0] - 2026-07-15
 
 ### Added

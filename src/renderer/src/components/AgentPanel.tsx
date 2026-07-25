@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   IconArrowUp as ArrowUp,
+  IconColumns2 as Columns,
   IconFileText as FileText,
   IconLoader2 as Loader2,
   IconPlus as Plus,
@@ -33,6 +34,8 @@ interface ChatMessage {
 
 interface Props {
   note: Tab | null
+  /** The other half of a split view, sent along as read-only context. */
+  splitNote?: Tab | null
   notes: NoteSummary[]
   getMarkdown: (noteId: string) => Promise<string | null>
   applyMarkdown: (noteId: string, markdown: string) => Promise<string[]>
@@ -106,6 +109,7 @@ function parseStreamingReply(raw: string): { content: string; working: boolean }
 
 export default function AgentPanel({
   note,
+  splitNote,
   notes,
   getMarkdown,
   applyMarkdown,
@@ -272,13 +276,25 @@ export default function AgentPanel({
       const markdown = await getMarkdown(note.id)
       if (markdown === null) throw new Error('The active note is not ready yet.')
 
+      // The note open in the other half of a split is context too — read from
+      // its live editor so unsaved edits are included, same as the current note.
+      const splitSections: string[] = []
+      if (splitNote && splitNote.id !== note.id) {
+        const splitMarkdown = await getMarkdown(splitNote.id)
+        if (splitMarkdown !== null) {
+          splitSections.push(
+            `SPLIT NOTE (read-only)\nTitle: ${splitNote.title || 'Untitled'}\nPath: ${splitNote.path}\n\n${splitMarkdown}`
+          )
+        }
+      }
+
       // Mentioned notes ride along as read-only context. Resolve each mention's
       // current path by id first — the note may have been moved since it was
       // added — and skip any that no longer exist.
       const mentionSections: string[] = []
       for (const mention of mentions) {
         const current = notes.find((n) => n.id === mention.id) ?? mention
-        if (current.id === note.id) continue
+        if (current.id === note.id || current.id === splitNote?.id) continue
         try {
           const full = await window.api.notes.read(current.path)
           mentionSections.push(
@@ -306,9 +322,10 @@ export default function AgentPanel({
           model: resolved.model,
           maxTokens: 16384,
           system:
-            'You are the Noteato note agent. Answer questions using the current note and any mentioned notes as context. When the user asks to change the current note, output the entire updated note as markdown inside <note_edit>...</note_edit>. When the user asks for new notes, output each one as <note_create path="Folder/Note title.md">markdown body</note_create> — the path is relative to the notes root, the file name (without .md) becomes the title, missing folders are created automatically, and you may emit several note_create tags. Existing folders are listed in the prompt. Emit all note_edit/note_create tags FIRST, then always end with a short conversational response inside <reply>...</reply> — never describe a change before its tag has been emitted. Only the current note can be edited; mentioned notes are read-only. Omit tags you do not need. Do not use code fences around any tag.',
+            'You are the Noteato note agent. Answer questions using the current note and any mentioned notes as context. When the user asks to change the current note, output the entire updated note as markdown inside <note_edit>...</note_edit>. When the user asks for new notes, output each one as <note_create path="Folder/Note title.md">markdown body</note_create> — the path is relative to the notes root, the file name (without .md) becomes the title, missing folders are created automatically, and you may emit several note_create tags. Existing folders are listed in the prompt. Emit all note_edit/note_create tags FIRST, then always end with a short conversational response inside <reply>...</reply> — never describe a change before its tag has been emitted. Only the current note can be edited; the split note and mentioned notes are read-only context you may compare against and reference. Omit tags you do not need. Do not use code fences around any tag.',
           prompt: [
             `CURRENT NOTE\nTitle: ${note.title || 'Untitled'}\nPath: ${note.path}\n\n${markdown}`,
+            ...splitSections,
             ...mentionSections,
             `EXISTING FOLDERS\n${folderList.join('\n') || '(none — all notes live at the root)'}`,
             `RECENT CHAT\n${recentHistory}`
@@ -460,6 +477,12 @@ export default function AgentPanel({
             <FileText size={11} />
             <span>{note ? note.title || 'Untitled' : 'No note selected'}</span>
           </div>
+          {splitNote && splitNote.id !== note?.id && (
+            <div className="agent-context-badge split" title={splitNote.path}>
+              <Columns size={11} />
+              <span>{splitNote.title || 'Untitled'}</span>
+            </div>
+          )}
           {mentions.map((mention) => (
             <div key={mention.id} className="agent-context-badge mention" title={mention.path}>
               <FileText size={11} />

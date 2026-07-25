@@ -1,7 +1,7 @@
 {
   "name": "noteato",
-  "version": "0.9.0",
-  "description": "A minimal, bloat-free, block-based note taking app for Mac (Apple Silicon) — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
+  "version": "1.0.0",
+  "description": "A minimal, bloat-free, block-based note taking app for Mac — markdown, dictation, sticky notes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",
   "license": "MIT",
@@ -16,14 +16,18 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "clean": "rm -rf dist out",
-    "build:mac": "npm run clean && electron-vite build && electron-builder --mac",
-    "release": "npm run clean && electron-vite build && electron-builder --mac --publish always",
+    "build:mac": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64",
+    "build:mac:arm64": "npm run clean && electron-vite build && electron-builder --mac --arm64",
+    "build:mac:intel": "npm run clean && electron-vite build && electron-builder --mac --x64",
+    "release": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64 --publish always",
     "preview": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
-    "@electron-toolkit/utils": "^3.0.0"
+    "@electron-toolkit/utils": "^3.0.0",
+    "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
@@ -32,6 +36,7 @@
     "@blocknote/mantine": "^0.51.4",
     "@blocknote/react": "^0.51.4",
     "@tabler/icons-react": "^3.44.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",

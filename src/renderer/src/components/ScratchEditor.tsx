@@ -14,11 +14,12 @@ import {
   IconItalic as Italic,
   IconList as List
 } from '@tabler/icons-react'
-import type { Note, NoteSummary } from '../../../shared/types'
+import type { ScratchNote } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
+import { ensureTitleBlock, titleFromMarkdown } from '../titleBlock'
 import {
   createNoteatoEditor,
   type NoteatoBlock,
@@ -30,11 +31,9 @@ import ReminderPopover from './ReminderPopover'
 const SAVE_DEBOUNCE_MS = 450
 
 interface Props {
-  note: NoteSummary
-  onSaved: (note: Note) => void
+  note: ScratchNote
+  onSaved: (note: ScratchNote) => void
 }
-
-type SaveStatus = 'idle' | 'saving' | 'saved'
 
 function compactSlashItems(editor: NoteatoEditor, query: string) {
   const allowed = getDefaultReactSlashMenuItems(editor).filter((item) => {
@@ -53,42 +52,35 @@ function compactSlashItems(editor: NoteatoEditor, query: string) {
   return filterSuggestionItems(allowed, query)
 }
 
-export default function SidebarModeEditor({ note: summary, onSaved }: Props) {
+/** Compact editor for a SQLite-backed scratch note (sidebar mode, quick note). */
+export default function ScratchEditor({ note: summary, onSaved }: Props) {
   const { resolvedTheme, fontFamily } = useTheme()
-  const [note, setNote] = useState<Note | null>(null)
-  const [title, setTitle] = useState(summary.title)
+  const [note, setNote] = useState<ScratchNote | null>(null)
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | null>(null)
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [reminderPopover, setReminderPopover] = useState<{ x: number; y: number } | null>(null)
-  const noteRef = useRef<Note | null>(null)
-  const titleRef = useRef(summary.title)
+  const noteRef = useRef<ScratchNote | null>(null)
   const editorRef = useRef<NoteatoEditor | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const savedStatusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const saveChain = useRef<Promise<void>>(Promise.resolve())
   const reminderButtonRef = useRef<HTMLButtonElement>(null)
   const persistRef = useRef<() => Promise<void>>(async () => {})
 
   useEffect(() => {
     let cancelled = false
-    void window.api.notes.read(summary.path).then(async (loaded) => {
-      if (cancelled) return
+    void window.api.scratch.read(summary.id).then(async (loaded) => {
+      if (cancelled || !loaded) return
       noteRef.current = loaded
-      titleRef.current = loaded.title
       setNote(loaded)
-      setTitle(loaded.title)
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
         ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
         : scratch.document
-      if (!cancelled) setInitialBlocks(blocks)
+      // The first block is the title (see titleBlock.ts).
+      if (!cancelled) setInitialBlocks(ensureTitleBlock(blocks, loaded.title))
     })
     return () => {
       cancelled = true
     }
-    // The parent keys this component by note id, so a title-driven path rename
-    // updates the list without tearing down the editor and moving the caret.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary.id])
 
   const editor = useMemo(() => {
@@ -104,26 +96,20 @@ export default function SidebarModeEditor({ note: summary, onSaved }: Props) {
     const activeEditor = editorRef.current
     if (!activeEditor || !noteRef.current) return
     const body = await activeEditor.blocksToMarkdownLossy(activeEditor.document)
-    const nextTitle = titleRef.current.trim() || 'Untitled'
-    setSaveStatus('saving')
+    const nextTitle = titleFromMarkdown(body) || 'Untitled'
     saveChain.current = saveChain.current
       .then(async () => {
         const base = noteRef.current
         if (!base) return
-        const saved = await window.api.notes.save(base.path, {
-          title: nextTitle,
-          body,
-          tags: base.tags,
-          fullWidth: base.fullWidth
-        })
+        const saved = await window.api.scratch.save(base.id, { title: nextTitle, body })
+        if (!saved) return
         noteRef.current = saved
         setNote(saved)
         onSaved(saved)
-        setSaveStatus('saved')
-        if (savedStatusTimer.current) clearTimeout(savedStatusTimer.current)
-        savedStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 1200)
       })
-      .catch(() => setSaveStatus('idle'))
+      .catch(() => {
+        /* save failed — the next edit retries */
+      })
     await saveChain.current
   }
   persistRef.current = persist
@@ -145,20 +131,22 @@ export default function SidebarModeEditor({ note: summary, onSaved }: Props) {
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
-      if (savedStatusTimer.current) clearTimeout(savedStatusTimer.current)
     }
   }, [])
 
+  // Reminder fired (or the note changed) in the main process / another window.
   useEffect(() => {
-    if (!note) return
-    return window.api.reminders.subscribeFired((fired) => {
-      if (fired.id !== note.id) return
-      const updated = { ...noteRef.current!, reminderAt: null }
+    return window.api.scratch.subscribeChanged((change) => {
+      if (change.kind !== 'upsert' || change.note.id !== summary.id) return
+      const base = noteRef.current
+      if (!base) return
+      // Only adopt metadata here; body edits from elsewhere remount via the
+      // parent's revision key.
+      const updated = { ...base, pinned: change.note.pinned, reminderAt: change.note.reminderAt }
       noteRef.current = updated
       setNote(updated)
-      onSaved(updated)
     })
-  }, [note?.id, onSaved])
+  }, [summary.id])
 
   const setBlockType = (type: 'bulletListItem' | 'checkListItem'): void => {
     if (!editor) return
@@ -178,12 +166,11 @@ export default function SidebarModeEditor({ note: summary, onSaved }: Props) {
     await persist()
     const base = noteRef.current
     if (!base) return
-    const result = await window.api.notes.setReminder(base.path, reminderAt)
+    const result = await window.api.scratch.setReminder(base.id, reminderAt)
     if (!result) return
-    const updated: Note = { ...base, ...result, body: base.body }
-    noteRef.current = updated
-    setNote(updated)
-    onSaved(updated)
+    noteRef.current = result
+    setNote(result)
+    onSaved(result)
     setReminderPopover(null)
   }
 
@@ -200,30 +187,6 @@ export default function SidebarModeEditor({ note: summary, onSaved }: Props) {
         void persistRef.current()
       }}
     >
-      <div className="sidebar-editor-meta">
-        <span className="sidebar-editor-path">{note.folder || 'Notes'}</span>
-        <span className={`sidebar-save-state ${saveStatus}`}>
-          {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : ''}
-        </span>
-      </div>
-
-      <input
-        className="sidebar-editor-title"
-        value={title}
-        placeholder="Untitled"
-        onChange={(event) => {
-          setTitle(event.target.value)
-          titleRef.current = event.target.value
-          scheduleSave()
-        }}
-        onBlur={() => void persist()}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter') return
-          event.preventDefault()
-          editor.focus()
-        }}
-      />
-
       <div
         className="sidebar-editor-formatting"
         aria-label="Formatting tools"

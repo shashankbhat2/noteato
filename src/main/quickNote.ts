@@ -1,8 +1,8 @@
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { BrowserWindow, screen } from 'electron'
-import type { Note } from '../shared/types'
-import type { NoteStore } from './storage'
+import type { ScratchNote } from '../shared/types'
+import type { ScratchStore } from './scratchStore'
 
 const QUICK_NOTE_WIDTH = 540
 const QUICK_NOTE_HEIGHT = 500
@@ -13,8 +13,8 @@ export class QuickNoteManager {
   private closeTimer: ReturnType<typeof setTimeout> | undefined
 
   constructor(
-    private noteStore: NoteStore,
-    private onCreated: (note: Note) => void
+    private scratchStore: ScratchStore,
+    private onCreated: (note: ScratchNote) => void
   ) {}
 
   getWindow(): BrowserWindow | null {
@@ -30,7 +30,7 @@ export class QuickNoteManager {
       this.destroy()
     }
 
-    const note = this.noteStore.create('Quick note')
+    const note = this.scratchStore.create()
     this.onCreated(note)
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const x = Math.round(display.workArea.x + (display.workArea.width - QUICK_NOTE_WIDTH) / 2)

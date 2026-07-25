@@ -1,8 +1,9 @@
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
-import { app, BrowserWindow, nativeTheme, screen } from 'electron'
+import { BrowserWindow, nativeTheme, screen } from 'electron'
+import type Database from 'better-sqlite3'
 import type { Settings, SidebarModeState } from '../shared/types'
-import { JsonStore } from './jsonStore'
+import { SqlKvStore } from './db'
 
 interface SidebarWindowState {
   width: number
@@ -22,12 +23,16 @@ const DARK_BG = '#1b191d'
 export class SidebarModeManager {
   private window: BrowserWindow | null = null
   private destroying = false
-  private stateStore = new JsonStore<SidebarWindowState>(
-    join(app.getPath('userData'), 'sidebar-window-state.json'),
-    { width: DEFAULT_WIDTH }
-  )
+  private stateStore: SqlKvStore<SidebarWindowState>
 
-  constructor(private getSettings: () => Settings) {}
+  constructor(
+    db: Database.Database,
+    private getSettings: () => Settings
+  ) {
+    this.stateStore = new SqlKvStore<SidebarWindowState>(db, 'sidebar-window-state', {
+      width: DEFAULT_WIDTH
+    })
+  }
 
   getWindow(): BrowserWindow | null {
     return this.window
@@ -102,6 +107,10 @@ export class SidebarModeManager {
       resizable: true,
       skipTaskbar: true,
       hasShadow: true,
+      // A non-activating macOS panel: opening the sidebar never activates
+      // Noteato, so closing it hands focus straight back to whatever app was
+      // active — instead of surfacing the main window.
+      ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
       backgroundColor: nativeTheme.shouldUseDarkColors ? DARK_BG : LIGHT_BG,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),

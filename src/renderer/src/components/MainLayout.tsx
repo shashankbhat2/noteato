@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconPlus as Plus } from '@tabler/icons-react'
-import type { DeletedEntry, Note, NoteSummary } from '../../../shared/types'
+import type { DeletedEntry, Note, NoteSummary, TrashEntry } from '../../../shared/types'
 import type { Tab } from '../tabs'
 import { useTheme } from '../theme'
 import { linkifyBlocks } from '../linkify'
 import { OPEN_NOTE_LINK_EVENT, type NoteatoEditor } from '../noteLink'
 import Sidebar from './Sidebar'
 import TabBar from './TabBar'
+import TrashView from './TrashView'
+import HomeView from './HomeView'
 import AgentPanel from './AgentPanel'
 import NoteEditor from './NoteEditor'
 import SettingsModal from './SettingsModal'
@@ -18,6 +19,11 @@ const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
 const AGENT_PANEL_OPEN_KEY = 'noteato:agentPanelOpen'
 const OPEN_TABS_KEY = 'noteato:openTabs'
+// Sentinel tab id for the Trash view; never collides with note UUIDs and is
+// deliberately dropped on session restore (readStoredTabs resolves ids
+// against the note list).
+const TRASH_TAB_ID = '__trash__'
+const HOME_TAB_ID = '__home__'
 const RECENT_NOTES_KEY = 'noteato:recentNotes'
 const RECENT_NOTES_MAX = 8
 
@@ -48,6 +54,8 @@ function readStoredTabs(): StoredTabs | null {
 type ConfirmState =
   | { kind: 'note'; note: NoteSummary }
   | { kind: 'folder'; path: string }
+  | { kind: 'purge'; entry: TrashEntry }
+  | { kind: 'empty-trash' }
   | null
 
 interface OpenTarget {
@@ -64,8 +72,16 @@ export default function MainLayout() {
   const { zenMode, setZenMode, aiAgentEnabled } = useTheme()
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [folders, setFolders] = useState<string[]>([])
+  const [trash, setTrash] = useState<TrashEntry[]>([])
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
+  // Split view: a second tab pinned open beside the primary pane. splitSide is
+  // which half it occupies, so a drop on the left can push the current note right.
+  const [splitTabId, setSplitTabId] = useState<string | null>(null)
+  const [splitSide, setSplitSide] = useState<'left' | 'right'>('right')
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
+  const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [recentIds, setRecentIds] = useState<string[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(RECENT_NOTES_KEY) ?? '[]')
@@ -74,7 +90,6 @@ export default function MainLayout() {
       return []
     }
   })
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
@@ -156,12 +171,14 @@ export default function MainLayout() {
   // Reload notes + folders. Reconciles open tabs' titles by id (not paths — see
   // move handlers, which re-point paths deliberately).
   const refresh = async (): Promise<NoteSummary[]> => {
-    const [list, folderList] = await Promise.all([
+    const [list, folderList, trashList] = await Promise.all([
       window.api.notes.list(),
-      window.api.notes.listFolders()
+      window.api.notes.listFolders(),
+      window.api.notes.listTrash()
     ])
     setNotes(list)
     setFolders(folderList)
+    setTrash(trashList)
     setTabs((prev) =>
       prev.map((t) => {
         const n = list.find((x) => x.id === t.id)
@@ -192,9 +209,8 @@ export default function MainLayout() {
             ? stored.activeId
             : restored[restored.length - 1].id
         setActiveTabId(active)
-      } else if (list.length > 0) {
-        // Most recently updated note first (see NoteStore.list).
-        openNoteTab(list[0])
+      } else {
+        openHomeTab()
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -249,21 +265,6 @@ export default function MainLayout() {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Most-recently-viewed notes, newest first — feeds the sidebar's Recent
-  // section. Every activation counts, whether from the sidebar, a tab click,
-  // a mention, or a restored session.
-  useEffect(() => {
-    if (!activeTabId) return
-    setRecentIds((prev) => {
-      const next = [activeTabId, ...prev.filter((id) => id !== activeTabId)].slice(
-        0,
-        RECENT_NOTES_MAX
-      )
-      localStorage.setItem(RECENT_NOTES_KEY, JSON.stringify(next))
-      return next
-    })
-  }, [activeTabId])
 
   // Persist the open tab set (skipped until the initial restore has run, so
   // a fast quit right after launch can't wipe the previous session).
@@ -365,7 +366,38 @@ export default function MainLayout() {
     setActiveTabId(note.id)
   }
 
+  const openTrashTab = (): void => {
+    setTabs((prev) => {
+      if (prev.some((t) => t.id === TRASH_TAB_ID)) return prev
+      return [...prev, { id: TRASH_TAB_ID, path: '', title: 'Trash' }]
+    })
+    setActiveTabId(TRASH_TAB_ID)
+  }
+
+  const openHomeTab = (): void => {
+    setTabs((prev) => {
+      if (prev.some((t) => t.id === HOME_TAB_ID)) return prev
+      // Home leads the strip, like a browser start page.
+      return [{ id: HOME_TAB_ID, path: '', title: 'Home' }, ...prev]
+    })
+    setActiveTabId(HOME_TAB_ID)
+  }
+
+  // Feeds the Home view's Recent cards; special tabs don't count.
+  useEffect(() => {
+    if (!activeTabId || activeTabId.startsWith('__')) return
+    setRecentIds((prev) => {
+      const next = [activeTabId, ...prev.filter((id) => id !== activeTabId)].slice(
+        0,
+        RECENT_NOTES_MAX
+      )
+      localStorage.setItem(RECENT_NOTES_KEY, JSON.stringify(next))
+      return next
+    })
+  }, [activeTabId])
+
   const closeTab = (id: string): void => {
+    if (splitTabId === id) setSplitTabId(null)
     setTabs((prev) => {
       const idx = prev.findIndex((t) => t.id === id)
       const next = prev.filter((t) => t.id !== id)
@@ -373,6 +405,75 @@ export default function MainLayout() {
         const fallback = next[idx - 1] ?? next[0] ?? null
         setActiveTabId(fallback ? fallback.id : null)
       }
+      return next
+    })
+  }
+
+  // Drop a dragged tab onto one half of the editor area to split there. The
+  // primary pane must not end up showing the same note, so it falls back to
+  // another open tab when the dropped tab was the active one.
+  const selectTab = (id: string): void => {
+    if (id === splitTabId) setSplitTabId(null)
+    setActiveTabId(id)
+  }
+
+  // Clicking the other half of a split focuses it without disturbing the
+  // layout: the two notes swap roles, and the side flips to compensate so each
+  // stays exactly where it was on screen.
+  const focusSplitHalf = (id: string): void => {
+    if (id === activeTabId || id !== splitTabId || !activeTabId) return
+    setSplitTabId(activeTabId)
+    setActiveTabId(id)
+    setSplitSide((side) => (side === 'left' ? 'right' : 'left'))
+  }
+
+  const splitIdBySide = (side: 'left' | 'right'): string | null => {
+    if (!splitTabId || !activeTabId) return null
+    const leftId = splitSide === 'left' ? splitTabId : activeTabId
+    return side === 'left' ? leftId : leftId === splitTabId ? activeTabId : splitTabId
+  }
+
+  /** Close one half of the split; the survivor takes over the whole area. */
+  const closeSplitView = (side: 'left' | 'right'): void => {
+    const targetId = splitIdBySide(side)
+    const keepId = splitIdBySide(side === 'left' ? 'right' : 'left')
+    if (!targetId || !keepId) return
+    setSplitTabId(null)
+    setActiveTabId(keepId)
+    setTabs((prev) => prev.filter((tab) => tab.id !== targetId))
+  }
+
+  /** Swap the two panes without changing which note is focused. */
+  const reverseSplit = (): void => {
+    setSplitSide((side) => (side === 'left' ? 'right' : 'left'))
+    setTabs((prev) => {
+      if (!splitTabId || !activeTabId) return prev
+      const a = prev.findIndex((t) => t.id === splitTabId)
+      const b = prev.findIndex((t) => t.id === activeTabId)
+      if (a === -1 || b === -1) return prev
+      const next = [...prev]
+      ;[next[a], next[b]] = [next[b], next[a]]
+      return next
+    })
+  }
+
+  const openSplit = (id: string, side: 'left' | 'right'): void => {
+    if (tabs.length < 2) return
+    const partnerId = activeTabId === id ? tabs.find((t) => t.id !== id)?.id ?? null : activeTabId
+    if (!partnerId) return
+    setSplitTabId(id)
+    setSplitSide(side)
+    setActiveTabId(partnerId)
+    // Sit the pair next to each other in the strip, ordered to match the panes,
+    // so the tab group renders as one contiguous container.
+    setTabs((prev) => {
+      const moved = prev.find((t) => t.id === id)
+      if (!moved) return prev
+      const rest = prev.filter((t) => t.id !== id)
+      const anchor = rest.findIndex((t) => t.id === partnerId)
+      if (anchor === -1) return prev
+      const next = [...rest]
+      next.splice(side === 'left' ? anchor : anchor + 1, 0, moved)
       return next
     })
   }
@@ -511,6 +612,16 @@ export default function MainLayout() {
     const c = confirm
     if (!c) return
     setConfirm(null)
+    if (c.kind === 'purge') {
+      await window.api.notes.purgeTrash(c.entry.trashName)
+      await refresh()
+      return
+    }
+    if (c.kind === 'empty-trash') {
+      await window.api.notes.emptyTrash()
+      await refresh()
+      return
+    }
     if (c.kind === 'note') {
       const token = await window.api.notes.delete(c.note.path)
       closeTab(c.note.id)
@@ -526,6 +637,16 @@ export default function MainLayout() {
       await refresh()
       showUndo(token, `Deleted folder “${folderName(c.path)}”`)
     }
+  }
+
+  const handleRestoreTrash = async (entry: TrashEntry): Promise<void> => {
+    const restored = await window.api.notes.restore(
+      entry.trashName,
+      entry.originalPath,
+      entry.isFolder
+    )
+    await refresh()
+    if (restored) openNoteTab(restored)
   }
 
   const handleUndoDelete = async (): Promise<void> => {
@@ -552,6 +673,13 @@ export default function MainLayout() {
     imported.forEach(openNoteTab)
   }
 
+  // Linking a folder can surface many notes — refresh the sidebar without
+  // opening a tab for each.
+  const handleOpenFolder = async (): Promise<void> => {
+    await window.api.notes.openFolder()
+    await refresh()
+  }
+
   // A Notion export can produce far more notes than the plain-markdown import
   // above, so this deliberately doesn't open every imported note as a tab —
   // it just refreshes the sidebar (folders included) and reports a summary.
@@ -573,6 +701,14 @@ export default function MainLayout() {
     if (!note.external) return
     await window.api.notes.removeExternal(note.path)
     closeTab(note.id)
+    await refresh()
+  }
+
+  // Unlink a whole registered folder; close any tabs showing notes from it.
+  const handleRemoveLinkedFolder = async (rootPath: string): Promise<void> => {
+    const affected = notes.filter((n) => n.externalRoot === rootPath)
+    await window.api.notes.removeExternal(rootPath)
+    affected.forEach((n) => closeTab(n.id))
     await refresh()
   }
 
@@ -603,6 +739,7 @@ export default function MainLayout() {
     handleCreateInSelectedFolder,
     handleCreateSticky,
     handleImport,
+    handleOpenFolder,
     setNotionGuideOpen,
     closeTab,
     toggleSidebar,
@@ -617,6 +754,7 @@ export default function MainLayout() {
     handleCreateInSelectedFolder,
     handleCreateSticky,
     handleImport,
+    handleOpenFolder,
     setNotionGuideOpen,
     closeTab,
     toggleSidebar,
@@ -639,6 +777,9 @@ export default function MainLayout() {
           break
         case 'import-markdown':
           h.handleImport()
+          break
+        case 'open-folder':
+          h.handleOpenFolder()
           break
         case 'import-notion':
           h.setNotionGuideOpen(true)
@@ -689,33 +830,97 @@ export default function MainLayout() {
     }
   }, [])
 
+  const splitTab = splitTabId ? tabs.find((tab) => tab.id === splitTabId) ?? null : null
+
+  // Tabs that render a built-in view instead of a note editor.
+  const renderSpecialTab = (tab: Tab): React.ReactNode | null => {
+    if (tab.id === TRASH_TAB_ID) {
+      return (
+        <TrashView
+          trash={trash}
+          onRestore={(entry) => void handleRestoreTrash(entry)}
+          onPurge={(entry) => setConfirm({ kind: 'purge', entry })}
+          onEmpty={() => setConfirm({ kind: 'empty-trash' })}
+        />
+      )
+    }
+    if (tab.id === HOME_TAB_ID) {
+      return (
+        <HomeView
+          notes={notes}
+          recentIds={recentIds}
+          onOpenNote={openNoteTab}
+          onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
+        />
+      )
+    }
+    return null
+  }
+
+  const renderSplitPane = (tab: Tab): React.ReactNode => (
+    <main className="editor-pane split-pane">
+      <div style={{ minHeight: '100%' }}>
+        {renderSpecialTab(tab) ?? (
+          <NoteEditor
+            path={tab.path}
+            onSaved={handleNoteSaved}
+            onEditorReady={(editor) => registerEditor(tab.id, editor)}
+            onCloseSplit={() => setSplitTabId(null)}
+          />
+        )}
+      </div>
+    </main>
+  )
+
   return (
-    <div className="app-shell">
+    <div className={zenMode ? 'app-shell zen' : 'app-shell'}>
       {!zenMode && (
         <TabBar
           tabs={tabs}
           activeTabId={activeTabId}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
-          onSelect={setActiveTabId}
+          onSelect={selectTab}
           onClose={closeTab}
           onTogglePin={toggleTabPin}
           onCloseOthers={closeOtherTabs}
           onCloseRight={closeTabsToRight}
           onCloseAll={closeAllTabs}
           onNewNote={() => void handleCreateInSelectedFolder()}
+          onTabDragStart={setDraggingTabId}
+          onTabDragEnd={() => {
+            setDraggingTabId(null)
+            setDropSide(null)
+          }}
+          splitTabId={splitTabId}
+          splitSide={splitSide}
+          onSplit={openSplit}
+          onCloseSplit={() => setSplitTabId(null)}
+          onCloseSplitView={closeSplitView}
+          onReverseSplit={reverseSplit}
+          onFocusSplitHalf={focusSplitHalf}
           agentAvailable={aiAgentEnabled}
           agentPanelOpen={agentPanelOpen}
           onToggleAgentPanel={toggleAgentPanel}
           onOpenSettings={() => setSettingsOpen(true)}
         />
       )}
-      <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
+      {/* The agent stays mounted while closed so it can animate shut (and keep
+          its conversation); the class drives the width transition. */}
+      <div
+        className={[
+          'app-body',
+          sidebarCollapsed ? 'sidebar-collapsed' : '',
+          aiAgentEnabled && !agentPanelOpen ? 'agent-closed' : ''
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
         {!zenMode && (
           <Sidebar
             notes={notes}
             folders={folders}
-            recentIds={recentIds}
+            trashCount={trash.length}
             activeNoteId={activeTabId}
             selectedFolder={selectedFolder}
             collapsed={sidebarCollapsed}
@@ -737,39 +942,88 @@ export default function MainLayout() {
             onMoveFolder={handleMoveFolder}
             onCreateSticky={handleCreateSticky}
             onImport={handleImport}
+            onOpenFolder={() => void handleOpenFolder()}
+            onRemoveLinkedFolder={(path) => void handleRemoveLinkedFolder(path)}
             onImportNotion={() => setNotionGuideOpen(true)}
             onSearch={() => setSearchOpen(true)}
+            onOpenTrash={openTrashTab}
+            onOpenHome={openHomeTab}
           />
         )}
-        <main className="editor-pane">
-          {tabs.length === 0 && (
-            <div className="empty-state">
-              <button
-                className="empty-state-btn"
-                onClick={() => void handleCreateInSelectedFolder()}
-              >
-                <Plus size={18} />
-                <span>New note</span>
-              </button>
-              <p className="empty-state-hint">⌘T for a new note · ⌘K to search</p>
+        <div className="editor-area">
+          {/* The split pane renders before the primary when docked left. */}
+          {splitTab && splitSide === 'left' && renderSplitPane(splitTab)}
+
+          <main className="editor-pane">
+            {/* All tabs closed: Home takes over rather than an empty state. */}
+            {tabs.length === 0 && (
+              <HomeView
+                notes={notes}
+                recentIds={recentIds}
+                onOpenNote={openNoteTab}
+                onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
+              />
+            )}
+            {/* The split tab is mounted in its own pane, so skip it here — one
+                note must never have two live editors. */}
+            {tabs
+              .filter((tab) => tab.id !== splitTabId)
+              .map((tab) => (
+                <div
+                  key={tab.id}
+                  // minHeight, not height: a sticky child only stays stuck within
+                  // its parent's box, so this must grow with the note's content.
+                  style={{
+                    display: tab.id === activeTabId ? 'block' : 'none',
+                    minHeight: '100%'
+                  }}
+                >
+                  {renderSpecialTab(tab) ?? (
+                    <NoteEditor
+                      path={tab.path}
+                      onSaved={handleNoteSaved}
+                      onEditorReady={(editor) => registerEditor(tab.id, editor)}
+                    />
+                  )}
+                </div>
+              ))}
+          </main>
+
+          {splitTab && splitSide === 'right' && renderSplitPane(splitTab)}
+
+          {/* Drop targets appear only while a tab is being dragged. */}
+          {draggingTabId && tabs.length > 1 && (
+            <div className="split-dropzones">
+              {(['left', 'right'] as const).map((side) => (
+                <div
+                  key={side}
+                  className={
+                    dropSide === side ? `split-dropzone ${side} over` : `split-dropzone ${side}`
+                  }
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'move'
+                    setDropSide(side)
+                  }}
+                  onDragLeave={() => setDropSide((s) => (s === side ? null : s))}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const id = e.dataTransfer.getData('text/plain') || draggingTabId
+                    if (id) openSplit(id, side)
+                    setDropSide(null)
+                    setDraggingTabId(null)
+                  }}
+                >
+                  <span className="split-dropzone-hint">Split {side}</span>
+                </div>
+              ))}
             </div>
           )}
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              style={{ display: tab.id === activeTabId ? 'block' : 'none', height: '100%' }}
-            >
-              <NoteEditor
-                path={tab.path}
-                onSaved={handleNoteSaved}
-                onEditorReady={(editor) => registerEditor(tab.id, editor)}
-              />
-            </div>
-          ))}
-        </main>
-        {!zenMode && aiAgentEnabled && agentPanelOpen && (
+        </div>
+        {!zenMode && aiAgentEnabled && (
           <AgentPanel
             note={tabs.find((tab) => tab.id === activeTabId) ?? null}
+            splitNote={splitTab}
             notes={notes}
             getMarkdown={getAgentMarkdown}
             applyMarkdown={applyAgentMarkdown}
@@ -798,13 +1052,25 @@ export default function MainLayout() {
       )}
       {confirm && (
         <ConfirmDialog
-          title={confirm.kind === 'note' ? 'Delete note?' : 'Delete folder?'}
+          title={
+            confirm.kind === 'note'
+              ? 'Delete note?'
+              : confirm.kind === 'folder'
+                ? 'Delete folder?'
+                : confirm.kind === 'purge'
+                  ? 'Delete forever?'
+                  : 'Empty trash?'
+          }
           message={
             confirm.kind === 'note'
-              ? `“${confirm.note.title || 'Untitled'}” will be moved to the trash. You can undo this right after.`
-              : `“${folderName(confirm.path)}” and everything inside it will be moved to the trash. You can undo this right after.`
+              ? `“${confirm.note.title || 'Untitled'}” will be moved to the trash.`
+              : confirm.kind === 'folder'
+                ? `“${folderName(confirm.path)}” and everything inside it will be moved to the trash.`
+                : confirm.kind === 'purge'
+                  ? `“${confirm.entry.title || 'Untitled'}” will be permanently deleted. This cannot be undone.`
+                  : 'Everything in the trash will be permanently deleted. This cannot be undone.'
           }
-          confirmLabel="Delete"
+          confirmLabel={confirm.kind === 'note' || confirm.kind === 'folder' ? 'Delete' : 'Delete forever'}
           danger
           onConfirm={performDelete}
           onCancel={() => setConfirm(null)}

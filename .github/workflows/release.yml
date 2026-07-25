@@ -4,8 +4,16 @@ name: Release
 #   1. Bump "version" in package.json to X.Y.Z
 #   2. Move the CHANGELOG.md [Unreleased] entries under a new [X.Y.Z] - YYYY-MM-DD heading
 #   3. Commit, then: git tag vX.Y.Z && git push origin vX.Y.Z
-# This workflow builds the unsigned macOS DMG/ZIP and attaches them to a
-# GitHub Release named after the tag, with notes pulled from CHANGELOG.md.
+# This workflow builds signed and notarized macOS DMG/ZIP artifacts for Apple
+# Silicon and Intel, then attaches them to a GitHub Release named after the
+# tag, with notes pulled from CHANGELOG.md.
+#
+# Required repository or environment secrets:
+#   MAC_CSC_LINK          Base64-encoded Developer ID Application .p12
+#   MAC_CSC_KEY_PASSWORD  Password used when exporting the .p12
+#   APPLE_API_KEY_P8      Base64-encoded App Store Connect API .p8
+#   APPLE_API_KEY_ID      App Store Connect API key ID
+#   APPLE_API_ISSUER      App Store Connect API issuer ID
 
 on:
   push:
@@ -14,6 +22,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -34,6 +46,45 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Check signing secrets
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=()
+          for name in \
+            MAC_CSC_LINK \
+            MAC_CSC_KEY_PASSWORD \
+            APPLE_API_KEY_P8 \
+            APPLE_API_KEY_ID \
+            APPLE_API_ISSUER
+          do
+            if [[ -z "${!name}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing required release secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      # electron-builder expects APPLE_API_KEY to be a path to the .p8 file,
+      # so reconstruct it only in the ephemeral runner filesystem.
+      - name: Prepare Apple notarization key
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          printf '%s' "$APPLE_API_KEY_P8" \
+            | base64 --decode \
+            > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+
       - name: Extract changelog section for this tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -49,14 +100,32 @@ jobs:
           echo "--- release notes ---"
           cat release_notes.md
 
-      - name: Build and publish DMG/ZIP
+      - name: Build, sign, notarize, and publish arm64/x64 DMG/ZIP
         run: npm run release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Apple Developer account in CI: skip the signing-identity
-          # search entirely. electron-builder still ad-hoc signs the app
-          # so it can launch on Apple Silicon.
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ runner.temp }}/AuthKey.p8
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+      - name: Verify signed and notarized applications
+        shell: bash
+        run: |
+          found=0
+          while IFS= read -r -d '' app; do
+            found=1
+            echo "Verifying $app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+            xcrun stapler validate "$app"
+          done < <(find dist -type d -name 'Noteato.app' -print0)
+
+          if [[ "$found" -eq 0 ]]; then
+            echo "::error::No packaged Noteato.app bundles found"
+            exit 1
+          fi
 
       - name: Attach changelog to release notes
         run: gh release edit "${{ github.ref_name }}" --notes-file release_notes.md --draft=false

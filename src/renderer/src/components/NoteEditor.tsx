@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BlockNoteView } from '@blocknote/mantine'
 import {
   SideMenu,
@@ -16,15 +16,18 @@ import {
   IconArrowsMaximize as UnfoldHorizontal,
   IconArrowsMinimize as FoldHorizontal,
   IconBell as Bell,
-  IconCode as Code,
   IconFilePlus as FilePlus,
-  IconFileText as FileText
+  IconFileText as FileText,
+  IconPin as Pin,
+  IconPinnedFilled as PinnedFilled,
+  IconX as X
 } from '@tabler/icons-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
+import { ensureTitleBlock, titleFromMarkdown } from '../titleBlock'
 import { formatReminderAt } from '../reminderPresets'
 import {
   createNoteatoEditor,
@@ -39,11 +42,14 @@ import SelectionAiPopup from './SelectionAiPopup'
 import BlockDragMenu, { stripIds } from './BlockDragMenu'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
+import TableOfContents from './TableOfContents'
 
 interface Props {
   path: string
   onSaved: (note: Note) => void
   onEditorReady?: (editor: NoteatoEditor | null) => void
+  /** Present only for the split pane — renders a control to close the split. */
+  onCloseSplit?: () => void
 }
 
 interface AiPopupState {
@@ -66,21 +72,6 @@ const TEXT_BLOCK_TYPES = new Set([
   'toggleListItem',
   'codeBlock'
 ])
-
-// Plain text of a block's inline content (mention chips contribute their title).
-function inlineContentText(content: unknown): string {
-  if (!Array.isArray(content)) return ''
-  return content
-    .map((item: Record<string, unknown>) => {
-      if (item?.type === 'text') return String(item.text ?? '')
-      if (item?.type === 'link') return inlineContentText(item.content)
-      if (item?.type === 'noteLink') {
-        return String((item.props as Record<string, unknown> | undefined)?.title ?? '')
-      }
-      return ''
-    })
-    .join('')
-}
 
 function isEmptyTextBlock(block: NoteatoBlock): boolean {
   const { content, children } = block as unknown as { content?: unknown; children?: unknown[] }
@@ -171,14 +162,11 @@ function slashMenuItems(
   return filterSuggestionItems([...getDefaultReactSlashMenuItems(editor), newPage], query)
 }
 
-export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
+export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
-  const [title, setTitle] = useState('')
   const [fullWidth, setFullWidth] = useState(false)
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | 'loading'>('loading')
-  const [markdownMode, setMarkdownMode] = useState(false)
-  const [markdownText, setMarkdownText] = useState('')
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
   const [reminderPopover, setReminderPopover] = useState<{ x: number; y: number } | null>(null)
@@ -187,10 +175,11 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   const [findFocusTick, setFindFocusTick] = useState(0)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const rootRef = useRef<HTMLDivElement>(null)
-  const pendingTitleCaret = useRef<number | null>(null)
-  const titleRef = useRef<HTMLInputElement>(null)
   const reminderBtnRef = useRef<HTMLButtonElement>(null)
   const aiStreamingRef = useRef(false)
+  // True while an on-disk change is being applied to the editor — those
+  // programmatic block swaps must not trigger a save of their own.
+  const applyingExternalRef = useRef(false)
   const onEditorReadyRef = useRef(onEditorReady)
   onEditorReadyRef.current = onEditorReady
 
@@ -203,19 +192,23 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   useEffect(() => {
     let cancelled = false
     setInitialBlocks('loading')
-    setMarkdownMode(false)
 
     window.api.notes.read(path).then(async (loaded) => {
       if (cancelled) return
       setNote(loaded)
-      setTitle(loaded.title)
       setFullWidth(loaded.fullWidth)
 
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
         ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
         : scratch.document
-      if (!cancelled) setInitialBlocks(blocks)
+      // The first block is the title; notes from before the title lived in the
+      // body (or created empty) get their stored title prepended as an H1.
+      // Externally linked files are shown exactly as they are on disk — no
+      // title block is ever injected into someone else's markdown.
+      if (!cancelled) {
+        setInitialBlocks(loaded.external ? blocks : ensureTitleBlock(blocks, loaded.title))
+      }
     })
 
     return () => {
@@ -330,14 +323,11 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     return items
   }
 
-  const save = async (
-    markdown: string,
-    nextTitle: string,
-    nextFullWidth: boolean
-  ): Promise<Note | undefined> => {
+  // The title is the body's leading `# …` line.
+  const save = async (markdown: string, nextFullWidth: boolean): Promise<Note | undefined> => {
     if (!note) return undefined
     const saved = await window.api.notes.save(note.path, {
-      title: nextTitle,
+      title: titleFromMarkdown(markdown) || 'Untitled',
       body: markdown,
       tags: note.tags,
       fullWidth: nextFullWidth
@@ -348,17 +338,16 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   }
 
   const currentMarkdown = async (): Promise<string> => {
-    if (markdownMode) return markdownText
     return editor ? editor.blocksToMarkdownLossy(editor.document) : ''
   }
 
-  const persist = async (nextTitle: string, nextFullWidth: boolean): Promise<Note | undefined> => {
-    return save(await currentMarkdown(), nextTitle, nextFullWidth)
+  const persist = async (nextFullWidth: boolean): Promise<Note | undefined> => {
+    return save(await currentMarkdown(), nextFullWidth)
   }
 
-  const scheduleSave = (nextTitle = title): void => {
+  const scheduleSave = (): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => persist(nextTitle, fullWidth), SAVE_DEBOUNCE_MS)
+    saveTimer.current = setTimeout(() => persist(fullWidth), SAVE_DEBOUNCE_MS)
   }
 
   // A second renderer (sidebar mode) can open the same Markdown note. Flush
@@ -368,12 +357,12 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     const flushOnWindowBlur = (): void => {
       if (!rootRef.current || rootRef.current.offsetParent === null) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
-      void persist(title, fullWidth)
+      void persist(fullWidth)
     }
     window.addEventListener('blur', flushOnWindowBlur)
     return () => window.removeEventListener('blur', flushOnWindowBlur)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, fullWidth, editor, note])
+  }, [fullWidth, editor, note])
 
   const handleAiStreamingChange = (streaming: boolean): void => {
     aiStreamingRef.current = streaming
@@ -384,17 +373,49 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     }
   }
 
-  const handleMarkdownChange = (value: string): void => {
-    setMarkdownText(value)
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => save(value, title, fullWidth), SAVE_DEBOUNCE_MS)
-  }
-
   const toggleFullWidth = (): void => {
     const next = !fullWidth
     setFullWidth(next)
-    persist(title, next)
+    persist(next)
   }
+
+  // Externally linked notes always reflect the latest on-disk content: when
+  // the file watcher reports a change, swap in the new blocks — unless local
+  // edits are pending (an armed debounce means this editor is the source of
+  // truth right now and will overwrite shortly anyway).
+  useEffect(() => {
+    if (!editor || !note?.external) return
+    const { id, path: notePath } = note
+    return window.api.notes.subscribeChanged((change) => {
+      if (change.kind !== 'upsert' || change.note.id !== id) return
+      if (saveTimer.current) return
+      void (async () => {
+        let latest: Note
+        try {
+          latest = await window.api.notes.read(notePath)
+        } catch {
+          return
+        }
+        const current = await editor.blocksToMarkdownLossy(editor.document)
+        if (latest.body.trim() === current.trim()) {
+          setNote((prev) => (prev ? { ...prev, updatedAt: latest.updatedAt } : prev))
+          return
+        }
+        const scratch = createNoteatoEditor()
+        const blocks = latest.body.trim()
+          ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(latest.body))
+          : scratch.document
+        applyingExternalRef.current = true
+        try {
+          editor.replaceBlocks(editor.document, blocks)
+        } finally {
+          applyingExternalRef.current = false
+        }
+        setNote(latest)
+      })()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, note?.id, note?.external])
 
   // Live-clears the bell icon if this note's reminder fires while its tab is open.
   useEffect(() => {
@@ -415,7 +436,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current)
       saveTimer.current = undefined
-      const flushed = await persist(title, fullWidth)
+      const flushed = await persist(fullWidth)
       if (flushed) base = flushed
     }
     let result
@@ -431,47 +452,35 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     setReminderPopover(null)
   }
 
-  const toggleMarkdownMode = async (): Promise<void> => {
-    if (!editor) return
-    if (!markdownMode) {
-      setMarkdownText(await editor.blocksToMarkdownLossy(editor.document))
-      setMarkdownMode(true)
-    } else {
-      // Re-parse the edited markdown back into blocks for the rich editor.
-      const parsed = await editor.tryParseMarkdownToBlocks(markdownText)
-      const blocks = parsed.length ? linkifyBlocks(parsed) : [{ type: 'paragraph' as const }]
-      editor.replaceBlocks(editor.document, blocks)
-      setMarkdownMode(false)
-      save(markdownText, title, fullWidth)
+  // Same flush-first dance as the reminder: a pending autosave may be about to
+  // rename the file, so pin against the post-flush path.
+  const handleTogglePin = async (): Promise<void> => {
+    if (!note) return
+    let base = note
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = undefined
+      const flushed = await persist(fullWidth)
+      if (flushed) base = flushed
     }
+    let result
+    try {
+      result = await window.api.notes.setPinned(base.path, !base.pinned)
+    } catch {
+      return
+    }
+    if (!result) return
+    const updated = { ...base, pinned: result.pinned }
+    setNote(updated)
+    onSaved(updated)
   }
+
 
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [])
-
-  const focusTitleAtEnd = (): void => {
-    const input = titleRef.current
-    if (input) {
-      input.focus()
-      input.setSelectionRange(input.value.length, input.value.length)
-    }
-  }
-
-  // After a first line bounces into the title, land the caret at the seam
-  // between the old title and the pulled-up text (once React commits it).
-  useLayoutEffect(() => {
-    if (pendingTitleCaret.current === null) return
-    const caret = pendingTitleCaret.current
-    pendingTitleCaret.current = null
-    const input = titleRef.current
-    if (input) {
-      input.focus()
-      input.setSelectionRange(caret, caret)
-    }
-  }, [title])
 
   // Dragging a heading takes its whole section along: select from the heading
   // through every following sibling until the next heading or divider, so
@@ -549,60 +558,11 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
     return true
   }
 
-  // Backspace at the start of the first (paragraph) block bounces the line
-  // into the title: its text is appended to the title, the block is removed,
-  // and the caret sits at the seam — the inverse of Enter in the title.
-  const bounceFirstLineIntoTitle = (firstBlock: NoteatoBlock): void => {
-    if (!editor) return
-    const { children } = firstBlock as unknown as { children?: unknown[] }
-    if (children && children.length > 0) {
-      // Nested children would be deleted along with the block — just move the
-      // caret up instead.
-      focusTitleAtEnd()
-      return
-    }
-    const text = inlineContentText((firstBlock as unknown as { content?: unknown }).content)
-    if (editor.document.length > 1) {
-      editor.removeBlocks([firstBlock])
-    } else if (text) {
-      editor.replaceBlocks([firstBlock], [{ type: 'paragraph' }])
-    }
-    if (text) {
-      const next = title + text
-      pendingTitleCaret.current = title.length
-      setTitle(next)
-      scheduleSave(next)
-    } else {
-      focusTitleAtEnd()
-    }
-  }
-
-  // Arrow-up from the top line of the first block, or backspace at the very
-  // start of it, moves the caret into the title — mirroring how Enter/down
-  // in the title drops into the content.
+  // Custom backspace/delete behavior for formatted blocks (the title H1 is a
+  // normal block now, so there is no special-casing for the first line).
   const handleEditorKeyDown = (event: React.KeyboardEvent): void => {
     if (!editor) return
     if (!(event.target as HTMLElement).closest?.('.bn-editor')) return
-
-    if (event.key === 'ArrowUp') {
-      try {
-        const firstBlock = editor.document[0]
-        const cursorBlock = editor.getTextCursorPosition().block
-        if (
-          !firstBlock ||
-          cursorBlock.id !== firstBlock.id ||
-          !editor.prosemirrorView.endOfTextblock('up')
-        ) {
-          return
-        }
-      } catch {
-        return
-      }
-      event.preventDefault()
-      event.stopPropagation()
-      focusTitleAtEnd()
-      return
-    }
 
     if (event.key === 'Backspace') {
       try {
@@ -640,15 +600,6 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
             return
           }
         }
-
-        // First block of the note: bounce the line into the title (works for
-        // formatted blocks too — the title is plain text either way).
-        const firstBlock = editor.document[0]
-        if (!firstBlock || cursor.block.id !== firstBlock.id) return
-        if (firstBlock.type !== 'paragraph' && !isFormatted) return
-        event.preventDefault()
-        event.stopPropagation()
-        bounceFirstLineIntoTitle(firstBlock)
       } catch {
         return
       }
@@ -707,11 +658,12 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
   return (
     <div
       ref={rootRef}
-      className={fullWidth ? 'note-editor full-width' : 'note-editor'}
+      className="note-editor-shell"
       onKeyDownCapture={handleEditorKeyDown}
       onKeyDown={handleEditorKeyDownBubble}
       onDragStartCapture={handleDragStartCapture}
     >
+      {/* Spans the card and stays put while the note scrolls beneath it. */}
       <div className="note-editor-toolbar">
         <div className="note-breadcrumb" title={note.path}>
           {folderSegments.map((seg, i) => (
@@ -723,7 +675,14 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
           <span className="breadcrumb-file">{fileLabel}</span>
         </div>
         <div className="toolbar-actions">
-          {!markdownMode && <DictationPanel editor={editor} />}
+          <DictationPanel editor={editor} />
+          <button
+            className={note.pinned ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
+            onClick={() => void handleTogglePin()}
+            title={note.pinned ? 'Unpin note' : 'Pin note'}
+          >
+            {note.pinned ? <PinnedFilled size={15} /> : <Pin size={15} />}
+          </button>
           <button
             ref={reminderBtnRef}
             className={reminderAt ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
@@ -746,93 +705,59 @@ export default function NoteEditor({ path, onSaved, onEditorReady }: Props) {
           >
             {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
           </button>
-          <button
-            className={markdownMode ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
-            onClick={toggleMarkdownMode}
-            title={markdownMode ? 'Switch to rich editor' : 'Edit as plain markdown'}
-          >
-            <Code size={15} />
-          </button>
+          {onCloseSplit && (
+            <button className="icon-toggle-btn" onClick={onCloseSplit} title="Close split view">
+              <X size={15} />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="note-editor-header">
-        <input
-          ref={titleRef}
-          className="note-title-input"
-          value={title}
-          placeholder="Untitled"
-          onChange={(e) => {
-            setTitle(e.target.value)
-            scheduleSave(e.target.value)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              if (!markdownMode) editor.focus()
-            } else if (e.key === 'ArrowDown' && !markdownMode) {
-              e.preventDefault()
-              const firstBlock = editor.document[0]
-              editor.focus()
-              if (firstBlock) editor.setTextCursorPosition(firstBlock.id, 'start')
-            }
-          }}
-        />
-      </div>
+      <TableOfContents editor={editor} />
 
-      {findOpen && !markdownMode && (
-        <FindReplaceBar
-          editor={editor}
-          focusTick={findFocusTick}
-          onClose={() => setFindOpen(false)}
-        />
-      )}
-
-      {markdownMode ? (
-        <textarea
-          className="note-markdown-textarea"
-          value={markdownText}
-          spellCheck={false}
-          placeholder="# Write markdown…"
-          onChange={(e) => handleMarkdownChange(e.target.value)}
-        />
-      ) : (
-        <>
-          <BlockNoteView
+      <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
+        {findOpen && (
+          <FindReplaceBar
             editor={editor}
-            onChange={() => {
-              if (!aiStreamingRef.current) scheduleSave()
-            }}
-            theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
-            formattingToolbar={false}
-            sideMenu={false}
-            slashMenu={false}
-          >
-            <SelectionAiToolbar editor={editor} aiActions={aiSelectionActions} onOpen={setAiPopup} />
-            <SuggestionMenuController
-              triggerCharacter="/"
-              getItems={async (query) => slashMenuItems(editor, note, query)}
-            />
-            <SuggestionMenuController
-              triggerCharacter="@"
-              getItems={(query) => noteLinkItems(editor, note.id, query)}
-            />
-            <SideMenuController
-              sideMenu={(props) => <SideMenu {...props} dragHandleMenu={BlockDragMenu} />}
-            />
-          </BlockNoteView>
-          {aiPopup && (
-            <SelectionAiPopup
-              editor={editor}
-              blocks={aiPopup.blocks}
-              position={aiPopup.position}
-              onError={setAiError}
-              onStreamingChange={handleAiStreamingChange}
-              onClose={() => setAiPopup(null)}
-            />
-          )}
-        </>
-      )}
+            focusTick={findFocusTick}
+            onClose={() => setFindOpen(false)}
+          />
+        )}
+
+        <BlockNoteView
+          editor={editor}
+          onChange={() => {
+            if (!aiStreamingRef.current && !applyingExternalRef.current) scheduleSave()
+          }}
+          theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
+          formattingToolbar={false}
+          sideMenu={false}
+          slashMenu={false}
+        >
+          <SelectionAiToolbar editor={editor} aiActions={aiSelectionActions} onOpen={setAiPopup} />
+          <SuggestionMenuController
+            triggerCharacter="/"
+            getItems={async (query) => slashMenuItems(editor, note, query)}
+          />
+          <SuggestionMenuController
+            triggerCharacter="@"
+            getItems={(query) => noteLinkItems(editor, note.id, query)}
+          />
+          <SideMenuController
+            sideMenu={(props) => <SideMenu {...props} dragHandleMenu={BlockDragMenu} />}
+          />
+        </BlockNoteView>
+        {aiPopup && (
+          <SelectionAiPopup
+            editor={editor}
+            blocks={aiPopup.blocks}
+            position={aiPopup.position}
+            onError={setAiError}
+            onStreamingChange={handleAiStreamingChange}
+            onClose={() => setAiPopup(null)}
+          />
+        )}
+      </div>
       {aiError && <div className="ai-error-toast">{aiError}</div>}
       {ctxMenu && (
         <ContextMenu

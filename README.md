@@ -4,7 +4,7 @@
 
 <h1 align="center">Noteato</h1>
 
-<p align="center">A minimal, block-based note taking app for Apple Silicon Macs. Markdown, folders, search, dictation, sticky notes, reminders, and optional AI — all local, nothing behind an account.</p>
+<p align="center">A minimal, block-based note taking app for Mac. Markdown, folders, search, dictation, sticky notes, reminders, and optional AI — all local, nothing behind an account.</p>
 
 <p align="center">
   <a href="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml"><img src="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
@@ -80,7 +80,10 @@ No telemetry, no accounts, no auto-updater phoning home. It's an Electron app, s
 
 ## Install
 
-Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noat/releases/latest), open it, and drag **Noteato.app** into **Applications**. Apple Silicon (M-series) only — there is no Intel build.
+Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noat/releases/latest), open it, and drag **Noteato.app** into **Applications**:
+
+- `arm64` is for Apple Silicon Macs (M1 and newer).
+- `x64` is for Intel Macs.
 
 ### About the Gatekeeper warning
 
@@ -113,8 +116,10 @@ Requires Node 20+.
 git clone https://github.com/shashankbhat2/noat.git
 cd noat
 npm install
-npm run dev        # run in development
-npm run build:mac  # produce a local, unsigned .dmg in dist/
+npm run dev              # run in development
+npm run build:mac        # build unsigned arm64 and x64 DMG/ZIP artifacts
+npm run build:mac:arm64  # build only for Apple Silicon
+npm run build:mac:intel  # build only for Intel Macs
 ```
 
 ## Releasing (maintainers)
@@ -126,7 +131,7 @@ npm run build:mac  # produce a local, unsigned .dmg in dist/
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-4. The [release workflow](.github/workflows/release.yml) builds the DMG/ZIP on a macOS runner and attaches them to a GitHub Release named after the tag, with the matching `CHANGELOG.md` section as the release notes.
+4. The [release workflow](.github/workflows/release.yml) builds arm64 and x64 DMG/ZIP artifacts on a macOS runner and attaches them to a GitHub Release named after the tag, with the matching `CHANGELOG.md` section as the release notes.
 
 ## License
 

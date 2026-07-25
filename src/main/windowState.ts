@@ -1,6 +1,6 @@
-import { join } from 'path'
-import { app, type BrowserWindow } from 'electron'
-import { JsonStore } from './jsonStore'
+import type { BrowserWindow } from 'electron'
+import type Database from 'better-sqlite3'
+import { SqlKvStore } from './db'
 
 export interface WindowState {
   width: number
@@ -12,13 +12,13 @@ export interface WindowState {
 
 const DEFAULTS: WindowState = { width: 1100, height: 720, isMaximized: false }
 
-export function createWindowStateStore(): JsonStore<WindowState> {
-  return new JsonStore<WindowState>(join(app.getPath('userData'), 'window-state.json'), DEFAULTS)
+export function createWindowStateStore(db: Database.Database): SqlKvStore<WindowState> {
+  return new SqlKvStore<WindowState>(db, 'window-state', DEFAULTS)
 }
 
 /** Persists bounds while restored, and just the maximized flag while maximized,
  * so the "restore" size isn't clobbered by the full-screen bounds. */
-export function trackWindowState(win: BrowserWindow, store: JsonStore<WindowState>): void {
+export function trackWindowState(win: BrowserWindow, store: SqlKvStore<WindowState>): void {
   let saveTimer: ReturnType<typeof setTimeout> | undefined
 
   const saveBounds = (): void => {

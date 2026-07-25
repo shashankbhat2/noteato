@@ -1,21 +1,31 @@
 import { BrowserWindow, Notification } from 'electron'
-import type { NoteSummary } from '../shared/types'
+import type { NoteSummary, ScratchChange, ScratchNote } from '../shared/types'
 import type { NoteStore } from './storage'
+import type { ScratchStore } from './scratchStore'
 
 // setTimeout's delay is a signed 32-bit int under the hood; anything longer
 // silently fires immediately in Node. Cap and re-arm for far-future reminders.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1
 
+type ReminderTarget =
+  | { kind: 'library'; note: NoteSummary }
+  | { kind: 'scratch'; note: ScratchNote }
+
 export class ReminderScheduler {
   private timers = new Map<string, NodeJS.Timeout>()
-  // Reminders that fired before the renderer was ready to receive them (e.g.
-  // the reminder time passed while the app was closed) — delivered on markReady().
+  // Library reminders that fired before the renderer was ready to receive them
+  // (e.g. the reminder time passed while the app was closed) — delivered on
+  // markReady(). Scratch notes need no catch-up: the sidebar reads the DB
+  // fresh every time it lists.
   private pendingFired: NoteSummary[] = []
   private ready = false
 
   constructor(
     private noteStore: NoteStore,
-    private getWindow: () => BrowserWindow | null
+    private scratchStore: ScratchStore,
+    private getWindow: () => BrowserWindow | null,
+    private openScratch: (note: ScratchNote) => void,
+    private broadcastScratch: (change: ScratchChange) => void
   ) {}
 
   // Full rescan — used after operations that can shift many notes/paths at
@@ -25,7 +35,10 @@ export class ReminderScheduler {
     for (const timer of this.timers.values()) clearTimeout(timer)
     this.timers.clear()
     for (const note of this.noteStore.list()) {
-      if (note.reminderAt) this.schedule(note)
+      if (note.reminderAt) this.schedule({ kind: 'library', note })
+    }
+    for (const note of this.scratchStore.list()) {
+      if (note.reminderAt) this.schedule({ kind: 'scratch', note })
     }
   }
 
@@ -34,7 +47,12 @@ export class ReminderScheduler {
   // full list() rescan on the autosave hot path.
   reschedule(note: NoteSummary): void {
     this.unschedule(note.id)
-    if (note.reminderAt) this.schedule(note)
+    if (note.reminderAt) this.schedule({ kind: 'library', note })
+  }
+
+  rescheduleScratch(note: ScratchNote): void {
+    this.unschedule(note.id)
+    if (note.reminderAt) this.schedule({ kind: 'scratch', note })
   }
 
   unschedule(id: string): void {
@@ -51,23 +69,27 @@ export class ReminderScheduler {
     return this.pendingFired.splice(0)
   }
 
-  private schedule(note: NoteSummary): void {
-    this.armTimer(note, new Date(note.reminderAt!).getTime() - Date.now())
+  private schedule(target: ReminderTarget): void {
+    this.armTimer(target, new Date(target.note.reminderAt!).getTime() - Date.now())
   }
 
-  private armTimer(note: NoteSummary, remaining: number): void {
+  private armTimer(target: ReminderTarget, remaining: number): void {
     const delay = Math.min(Math.max(remaining, 0), MAX_TIMEOUT_MS)
     const timer = setTimeout(() => {
-      const stillRemaining = new Date(note.reminderAt!).getTime() - Date.now()
-      if (stillRemaining > 0) this.armTimer(note, stillRemaining)
-      else this.fire(note)
+      const stillRemaining = new Date(target.note.reminderAt!).getTime() - Date.now()
+      if (stillRemaining > 0) this.armTimer(target, stillRemaining)
+      else this.fire(target)
     }, delay)
-    this.timers.set(note.id, timer)
+    this.timers.set(target.note.id, timer)
   }
 
-  private fire(note: NoteSummary): void {
-    this.timers.delete(note.id)
+  private fire(target: ReminderTarget): void {
+    this.timers.delete(target.note.id)
+    if (target.kind === 'scratch') this.fireScratch(target.note)
+    else this.fireLibrary(target.note)
+  }
 
+  private fireLibrary(note: NoteSummary): void {
     let cleared: NoteSummary | null
     try {
       cleared = this.noteStore.setReminder(note.path, null)
@@ -97,6 +119,22 @@ export class ReminderScheduler {
     } else {
       this.pendingFired.push(cleared)
     }
+  }
+
+  private fireScratch(note: ScratchNote): void {
+    const cleared = this.scratchStore.setReminder(note.id, null)
+    if (!cleared) return
+
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title: cleared.title || 'Untitled',
+        body: 'Reminder'
+      })
+      notification.on('click', () => this.openScratch(cleared))
+      notification.show()
+    }
+
+    this.broadcastScratch({ kind: 'upsert', note: cleared })
   }
 
   private openNote(note: NoteSummary): void {

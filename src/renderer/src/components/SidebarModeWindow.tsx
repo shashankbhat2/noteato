@@ -4,18 +4,18 @@ import {
   IconChevronLeft as ChevronLeft,
   IconClock as Clock,
   IconFileText as FileText,
-  IconFolder as Folder,
   IconNotes as Notes,
   IconPin as Pin,
   IconPinned as Pinned,
   IconPlus as Plus,
   IconSearch as Search,
   IconSettings as SettingsIcon,
+  IconTrash as Trash,
   IconX as X
 } from '@tabler/icons-react'
-import type { Note, NoteSummary, SidebarModeState } from '../../../shared/types'
+import type { ScratchNote, SidebarModeState } from '../../../shared/types'
 import noteatoIcon from '../../../../build/icon.png'
-import SidebarModeEditor from './SidebarModeEditor'
+import ScratchEditor from './ScratchEditor'
 import SidebarSettingsPopover from './SidebarSettingsPopover'
 
 type SidebarTab = 'notes' | 'reminders'
@@ -42,15 +42,23 @@ function formatReminderTime(iso: string): string {
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-function noteMatches(note: NoteSummary, query: string): boolean {
+function noteMatches(note: ScratchNote, query: string): boolean {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
-  return `${note.title} ${note.folder} ${note.excerpt}`.toLowerCase().includes(needle)
+  return `${note.title} ${note.excerpt}`.toLowerCase().includes(needle)
 }
 
-function NoteRow({ note, onOpen }: { note: NoteSummary; onOpen: () => void }) {
+function NoteRow({
+  note,
+  onOpen,
+  onDelete
+}: {
+  note: ScratchNote
+  onOpen: () => void
+  onDelete: () => void
+}) {
   return (
-    <button className="sidebar-note-row" onClick={onOpen}>
+    <div className="sidebar-note-row" role="button" tabIndex={0} onClick={onOpen}>
       <span className="sidebar-note-glyph">
         <FileText size={14} />
       </span>
@@ -63,13 +71,23 @@ function NoteRow({ note, onOpen }: { note: NoteSummary; onOpen: () => void }) {
           <Bell size={11} />
         </span>
       )}
-    </button>
+      <button
+        className="sidebar-note-delete"
+        title="Delete note"
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+      >
+        <Trash size={12} />
+      </button>
+    </div>
   )
 }
 
 export default function SidebarModeWindow() {
   const [tab, setTab] = useState<SidebarTab>(readInitialTab)
-  const [notes, setNotes] = useState<NoteSummary[]>([])
+  const [notes, setNotes] = useState<ScratchNote[]>([])
   const [query, setQuery] = useState('')
   const [activeId, setActiveId] = useState<string | null>(
     () => localStorage.getItem(ACTIVE_NOTE_STORAGE_KEY) || null
@@ -85,25 +103,22 @@ export default function SidebarModeWindow() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
-    const list = await window.api.notes.list()
+    const list = await window.api.scratch.list()
     setNotes(list)
     setLoading(false)
+  }, [])
+
+  const openNote = useCallback((id: string): void => {
+    setActiveId(id)
+    activeIdRef.current = id
+    localStorage.setItem(ACTIVE_NOTE_STORAGE_KEY, id)
   }, [])
 
   useEffect(() => {
     void refresh()
     void window.api.sidebar.getState().then(setWindowState)
     const unsubscribeState = window.api.sidebar.subscribeState(setWindowState)
-    const unsubscribeReminder = window.api.reminders.subscribeFired((fired) => {
-      setNotes((current) =>
-        current.map((note) => (note.id === fired.id ? { ...note, reminderAt: null } : note))
-      )
-    })
-    const unsubscribeNotes = window.api.notes.subscribeChanged((change) => {
-      if (change.kind === 'refresh') {
-        void refresh()
-        return
-      }
+    const unsubscribeNotes = window.api.scratch.subscribeChanged((change) => {
       if (change.kind === 'remove') {
         setNotes((current) => current.filter((note) => note.id !== change.id))
         if (activeIdRef.current === change.id) {
@@ -122,15 +137,21 @@ export default function SidebarModeWindow() {
         setEditorRevision((revision) => revision + 1)
       }
     })
+    // A scratch-note reminder notification was clicked — land on that note.
+    const unsubscribeOpen = window.api.scratch.subscribeOpen((id) => {
+      setTab('notes')
+      localStorage.setItem(TAB_STORAGE_KEY, 'notes')
+      openNote(id)
+    })
     const refreshOnFocus = (): void => void refresh()
     window.addEventListener('focus', refreshOnFocus)
     return () => {
       unsubscribeState()
-      unsubscribeReminder()
       unsubscribeNotes()
+      unsubscribeOpen()
       window.removeEventListener('focus', refreshOnFocus)
     }
-  }, [refresh])
+  }, [refresh, openNote])
 
   const filteredNotes = useMemo(
     () => notes.filter((note) => noteMatches(note, query)),
@@ -143,21 +164,6 @@ export default function SidebarModeWindow() {
     .sort((a, b) => a.reminderAt!.localeCompare(b.reminderAt!))
   const activeNote = activeId ? notes.find((note) => note.id === activeId) ?? null : null
 
-  const groupedNotes = useMemo(() => {
-    const groups = new Map<string, NoteSummary[]>()
-    for (const note of unpinnedNotes) {
-      const label = note.folder || 'Loose notes'
-      const group = groups.get(label) ?? []
-      group.push(note)
-      groups.set(label, group)
-    }
-    return [...groups.entries()].sort(([a], [b]) => {
-      if (a === 'Loose notes') return -1
-      if (b === 'Loose notes') return 1
-      return a.localeCompare(b)
-    })
-  }, [unpinnedNotes])
-
   const chooseTab = (next: SidebarTab): void => {
     setTab(next)
     setQuery('')
@@ -167,12 +173,6 @@ export default function SidebarModeWindow() {
     localStorage.removeItem(ACTIVE_NOTE_STORAGE_KEY)
   }
 
-  const openNote = (id: string): void => {
-    setActiveId(id)
-    activeIdRef.current = id
-    localStorage.setItem(ACTIVE_NOTE_STORAGE_KEY, id)
-  }
-
   const closeEditor = (): void => {
     setActiveId(null)
     activeIdRef.current = null
@@ -180,14 +180,20 @@ export default function SidebarModeWindow() {
   }
 
   const createNote = async (): Promise<void> => {
-    const created = await window.api.notes.create('Untitled')
+    const created = await window.api.scratch.create()
     setNotes((current) => [created, ...current])
     setTab('notes')
     localStorage.setItem(TAB_STORAGE_KEY, 'notes')
     openNote(created.id)
   }
 
-  const handleSaved = useCallback((saved: Note): void => {
+  const deleteNote = async (id: string): Promise<void> => {
+    await window.api.scratch.delete(id)
+    setNotes((current) => current.filter((note) => note.id !== id))
+    if (activeIdRef.current === id) closeEditor()
+  }
+
+  const handleSaved = useCallback((saved: ScratchNote): void => {
     setNotes((current) => {
       const next = current.filter((note) => note.id !== saved.id)
       next.unshift(saved)
@@ -258,7 +264,7 @@ export default function SidebarModeWindow() {
               </span>
             )}
           </div>
-          <SidebarModeEditor
+          <ScratchEditor
             key={`${activeNote.id}:${editorRevision}`}
             note={activeNote}
             onSaved={handleSaved}
@@ -299,21 +305,31 @@ export default function SidebarModeWindow() {
                         <Pinned size={11} />
                       </div>
                       {pinnedNotes.map((note) => (
-                        <NoteRow key={note.id} note={note} onOpen={() => openNote(note.id)} />
+                        <NoteRow
+                          key={note.id}
+                          note={note}
+                          onOpen={() => openNote(note.id)}
+                          onDelete={() => void deleteNote(note.id)}
+                        />
                       ))}
                     </section>
                   )}
-                  {groupedNotes.map(([folder, group]) => (
-                    <section className="sidebar-mode-section" key={folder}>
+                  {unpinnedNotes.length > 0 && (
+                    <section className="sidebar-mode-section">
                       <div className="sidebar-section-label">
-                        <span>{folder}</span>
-                        <Folder size={11} />
+                        <span>Notes</span>
+                        <Notes size={11} />
                       </div>
-                      {group.map((note) => (
-                        <NoteRow key={note.id} note={note} onOpen={() => openNote(note.id)} />
+                      {unpinnedNotes.map((note) => (
+                        <NoteRow
+                          key={note.id}
+                          note={note}
+                          onOpen={() => openNote(note.id)}
+                          onDelete={() => void deleteNote(note.id)}
+                        />
                       ))}
                     </section>
-                  ))}
+                  )}
                 </div>
               )
             ) : reminders.length === 0 ? (

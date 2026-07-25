@@ -18,6 +18,13 @@ export interface NoteSummary extends NoteMeta {
   excerpt: string
   /** True when the note is linked from outside the managed notes directory. */
   external?: boolean
+  /**
+   * For external notes: the registered opened-files entry (file or folder
+   * path) this note surfaced from. Removing that entry unlinks the note.
+   */
+  externalRoot?: string
+  /** True when the note was found by walking a linked folder (no own entry). */
+  fromFolder?: boolean
 }
 
 export interface Note extends NoteSummary {
@@ -29,6 +36,12 @@ export interface DeletedEntry {
   trashName: string
   originalPath: string
   isFolder: boolean
+}
+
+/** A trashed item as shown in the sidebar's Trash section. */
+export interface TrashEntry extends DeletedEntry {
+  title: string
+  deletedAt: string
 }
 
 export interface NotionImportResult {
@@ -45,6 +58,31 @@ export interface SearchResult {
   snippet: string
 }
 
+/**
+ * A quick capture note stored in the app's SQLite database — the store behind
+ * the quick-note window and the sidebar-mode edge window. Separate from the
+ * markdown library on purpose: scratch notes never touch the notes folder.
+ */
+export interface ScratchNote {
+  id: string
+  title: string
+  body: string
+  pinned: boolean
+  reminderAt: string | null
+  createdAt: string
+  updatedAt: string
+  excerpt: string
+}
+
+export interface ScratchSaveOptions {
+  title: string
+  body: string
+}
+
+export type ScratchChange =
+  | { kind: 'upsert'; note: ScratchNote }
+  | { kind: 'remove'; id: string }
+
 export interface StickyNoteData {
   id: string
   x: number
@@ -59,8 +97,14 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontChoice = 'system' | 'serif' | 'mono' | 'rounded'
 export type AccentChoice = 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
 export type AiProvider = 'none' | 'anthropic' | 'openai'
+export type SyncPreference = 'none' | 'icloud' | 'noteatoPro'
 
 export interface Settings {
+  onboardingCompleted: boolean
+  userName: string
+  licenseKey: string
+  /** A future sync product the user expressed interest in during onboarding. */
+  syncPreference: SyncPreference
   deepgramApiKey: string
   notesDir: string | null
   theme: ThemeMode
@@ -73,6 +117,8 @@ export interface Settings {
   openaiApiKey: string
   aiSelectionActions: boolean
   aiAgentEnabled: boolean
+  /** Show the assistant chat on the Home view. */
+  homeAssistantEnabled: boolean
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
   /** Make the compact notes/reminders edge window available from the menu bar. */

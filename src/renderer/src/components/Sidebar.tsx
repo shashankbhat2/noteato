@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconBell as Bell,
+  IconBrandNotion as NotionIcon,
   IconChevronDown as ChevronDown,
   IconChevronRight as ChevronRight,
-  IconFolderPlus as FolderPlus,
-  IconNote as StickyNote,
+  IconDiamond as ObsidianIcon,
+  IconFileTypeDocx as DocxIcon,
+  IconFileTypeHtml as HtmlIcon,
+  IconHome as Home,
+  IconMarkdown as MarkdownIcon,
+  IconNotebook as OneNoteIcon,
   IconPin as Pin,
   IconPlus as Plus,
   IconSearch as Search,
   IconTrash as Trash2,
-  IconUpload as Upload,
   IconX as X
 } from '@tabler/icons-react'
 import type { NoteSummary } from '../../../shared/types'
@@ -19,12 +23,20 @@ import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
 
 const EXPANDED_KEY = 'noteato:expandedFolders'
+const SECTIONS_KEY = 'noteato:sidebarSections'
+
+type SectionId = 'pinned' | 'notes' | 'import'
+
+const DEFAULT_SECTIONS: Record<SectionId, boolean> = {
+  pinned: true,
+  notes: true,
+  import: false
+}
 
 interface Props {
   notes: NoteSummary[]
   folders: string[]
-  /** Most-recently-viewed note ids, newest first (see MainLayout). */
-  recentIds: string[]
+  trashCount: number
   activeNoteId: string | null
   selectedFolder: string | null
   collapsed: boolean
@@ -43,8 +55,12 @@ interface Props {
   onMoveFolder: (path: string, targetParent: string) => void
   onCreateSticky: () => void
   onImport: () => void
+  onOpenFolder: () => void
+  onRemoveLinkedFolder: (rootPath: string) => void
   onImportNotion: () => void
   onSearch: () => void
+  onOpenTrash: () => void
+  onOpenHome: () => void
 }
 
 interface DragPayload {
@@ -58,10 +74,23 @@ type Editing =
   | { mode: 'rename-note'; note: NoteSummary; initial: string }
   | null
 
+/**
+ * Height-animated disclosure. The content stays mounted so it can animate in
+ * both directions — the grid-rows 0fr→1fr trick gets a real height transition
+ * without measuring anything in JS.
+ */
+function Collapsible({ open, children }: { open: boolean; children: React.ReactNode }) {
+  return (
+    <div className={open ? 'collapsible open' : 'collapsible'} aria-hidden={!open}>
+      <div className="collapsible-inner">{children}</div>
+    </div>
+  )
+}
+
 export default function Sidebar({
   notes,
   folders,
-  recentIds,
+  trashCount,
   activeNoteId,
   selectedFolder,
   collapsed,
@@ -80,8 +109,12 @@ export default function Sidebar({
   onMoveFolder,
   onCreateSticky,
   onImport,
+  onOpenFolder,
+  onRemoveLinkedFolder,
   onImportNotion,
-  onSearch
+  onSearch,
+  onOpenTrash,
+  onOpenHome
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try {
@@ -90,6 +123,22 @@ export default function Sidebar({
       return new Set<string>()
     }
   })
+  // Collapsible top-level sections (Pinned Notes / Your Notes / Import / Trash).
+  const [sections, setSections] = useState<Record<SectionId, boolean>>(() => {
+    try {
+      return { ...DEFAULT_SECTIONS, ...JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? '{}') }
+    } catch {
+      return { ...DEFAULT_SECTIONS }
+    }
+  })
+  const toggleSection = (id: SectionId): void => {
+    setSections((prev) => {
+      const next = { ...prev, [id]: !prev[id] }
+      localStorage.setItem(SECTIONS_KEY, JSON.stringify(next))
+      return next
+    })
+  }
+  const newSplitRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [reminderPopover, setReminderPopover] = useState<{
     note: NoteSummary
@@ -126,15 +175,6 @@ export default function Sidebar({
         .filter((n) => n.pinned)
         .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
     [notes]
-  )
-  // Pinned notes are already surfaced at the top, so Recent skips them.
-  const recent = useMemo(
-    () =>
-      recentIds
-        .map((id) => notes.find((n) => n.id === id))
-        .filter((n): n is NoteSummary => Boolean(n && !n.pinned))
-        .slice(0, 5),
-    [recentIds, notes]
   )
   const folderPaths = useMemo(() => folders.slice().sort((a, b) => a.localeCompare(b)), [folders])
 
@@ -265,7 +305,14 @@ export default function Sidebar({
           { label: 'Remind me', submenu: remindMeSubmenu(note, x, y) },
           { label: 'Rename title', onClick: () => startRenameNote(note) },
           { separator: true, label: '' },
-          { label: 'Remove from Noteato', onClick: () => onRemoveNote(note) }
+          // A folder-sourced note has no link of its own — offer to unlink
+          // the whole folder instead.
+          note.fromFolder && note.externalRoot
+            ? {
+                label: 'Remove folder from Noteato',
+                onClick: () => onRemoveLinkedFolder(note.externalRoot!)
+              }
+            : { label: 'Remove from Noteato', onClick: () => onRemoveNote(note) }
         ]
       : [
           { label: note.pinned ? 'Unpin' : 'Pin', onClick: () => onTogglePin(note) },
@@ -312,7 +359,7 @@ export default function Sidebar({
   const renderNote = (
     note: NoteSummary,
     depth: number,
-    section: 'pinned' | 'recent' | 'tree' = 'tree'
+    section: 'pinned' | 'tree' = 'tree'
   ): React.ReactNode => {
     const isRenaming = editing?.mode === 'rename-note' && editing.note.id === note.id
     if (isRenaming) {
@@ -333,9 +380,9 @@ export default function Sidebar({
         </li>
       )
     }
-    // A note can appear in several sections (Recent, Pinned, its folder) —
-    // the active state shows in exactly one: Pinned wins for pinned notes,
-    // the folder tree otherwise. Recent is a shortcut list, never active.
+    // A note can appear in several sections (Pinned, its folder) — the active
+    // state shows in exactly one: Pinned wins for pinned notes, the folder
+    // tree otherwise.
     const isActive =
       note.id === activeNoteId &&
       (section === 'pinned' || (section === 'tree' && !note.pinned))
@@ -389,17 +436,21 @@ export default function Sidebar({
         >
           <Pin size={13} />
         </button>
-        <button
-          className={note.external ? 'row-icon-btn' : 'row-icon-btn danger'}
-          title={note.external ? 'Remove from Noteato' : 'Delete'}
-          onClick={(e) => {
-            e.stopPropagation()
-            if (note.external) onRemoveNote(note)
-            else onDeleteNote(note)
-          }}
-        >
-          {note.external ? <X size={13} /> : <Trash2 size={13} />}
-        </button>
+        {/* Folder-sourced notes have no link of their own; unlink via the
+            folder's context menu instead. */}
+        {!(note.external && note.fromFolder) && (
+          <button
+            className={note.external ? 'row-icon-btn' : 'row-icon-btn danger'}
+            title={note.external ? 'Remove from Noteato' : 'Delete'}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (note.external) onRemoveNote(note)
+              else onDeleteNote(note)
+            }}
+          >
+            {note.external ? <X size={13} /> : <Trash2 size={13} />}
+          </button>
+        )}
       </div>
     </li>
     )
@@ -448,8 +499,8 @@ export default function Sidebar({
           }}
           onContextMenu={(e) => openFolderMenu(e, node.path)}
         >
-          <span className="folder-chevron">
-            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span className={isOpen ? 'folder-chevron open' : 'folder-chevron'}>
+            <ChevronRight size={13} />
           </span>
           {isEditingThis ? (
             <input
@@ -468,14 +519,14 @@ export default function Sidebar({
             <span className="folder-name">{node.name}</span>
           )}
         </div>
-        {isOpen && (
+        <Collapsible open={isOpen}>
           <ul className="tree-children">
             {node.folders.map((child) => renderFolder(child, depth + 1))}
             {editing?.mode === 'new-folder' && editing.parent === node.path &&
               renderNewFolderInput(depth + 1)}
             {node.notes.map((note) => renderNote(note, depth + 1))}
           </ul>
-        )}
+        </Collapsible>
       </li>
     )
   }
@@ -483,6 +534,9 @@ export default function Sidebar({
   const renderLinkedFolder = (group: (typeof linkedFolders)[number]): React.ReactNode => {
     const key = `linked:${group.path}`
     const isOpen = expanded.has(key)
+    // The registered root behind this group (folder link, or the files' own
+    // links when they were opened individually).
+    const folderRoot = group.notes.find((n) => n.fromFolder && n.externalRoot)?.externalRoot
     return (
       // Linked folders live outside the notes dir — not a valid drop target,
       // and hovering one shouldn't highlight the root either.
@@ -491,17 +545,32 @@ export default function Sidebar({
           className="folder-row linked"
           title={group.path}
           onClick={() => toggle(key)}
+          onContextMenu={(e) => {
+            if (!folderRoot) return
+            e.preventDefault()
+            e.stopPropagation()
+            setMenu({
+              x: e.clientX,
+              y: e.clientY,
+              items: [
+                {
+                  label: 'Remove folder from Noteato',
+                  onClick: () => onRemoveLinkedFolder(folderRoot)
+                }
+              ]
+            })
+          }}
         >
-          <span className="folder-chevron">
-            {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span className={isOpen ? 'folder-chevron open' : 'folder-chevron'}>
+            <ChevronRight size={13} />
           </span>
           <span className="folder-name">{group.name}</span>
         </div>
-        {isOpen && (
+        <Collapsible open={isOpen}>
           <ul className="tree-children">
             {group.notes.map((note) => renderNote(note, 1))}
           </ul>
-        )}
+        </Collapsible>
       </li>
     )
   }
@@ -528,43 +597,82 @@ export default function Sidebar({
     </li>
   )
 
+  const sectionHeader = (id: SectionId, label: string, extra?: React.ReactNode): React.ReactNode => (
+    <div
+      className="sidebar-section-header"
+      role="button"
+      tabIndex={0}
+      onClick={() => toggleSection(id)}
+    >
+      <span className={sections[id] ? 'section-chevron open' : 'section-chevron'}>
+        <ChevronRight size={12} />
+      </span>
+      <span className="section-title">{label}</span>
+      {extra && (
+        <span className="section-extra" onClick={(e) => e.stopPropagation()}>
+          {extra}
+        </span>
+      )}
+    </div>
+  )
+
+  const importOptions: {
+    label: string
+    icon: React.ReactNode
+    onClick?: () => void
+    soon?: boolean
+  }[] = [
+    { label: 'Markdown files', icon: <MarkdownIcon size={15} />, onClick: onImport },
+    { label: 'Notion export', icon: <NotionIcon size={15} />, onClick: onImportNotion },
+    { label: 'Obsidian vault', icon: <ObsidianIcon size={15} />, soon: true },
+    { label: 'HTML', icon: <HtmlIcon size={15} />, soon: true },
+    { label: 'OneNote', icon: <OneNoteIcon size={15} />, soon: true },
+    { label: 'Word (.docx)', icon: <DocxIcon size={15} />, soon: true }
+  ]
+
   return (
     <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
-      <div className="sidebar-actions">
+      <button className="sidebar-search" onClick={onSearch}>
+        <Search size={14} />
+        <span>Search notes</span>
+        <kbd>{window.electron.process.platform === 'darwin' ? '⌘K' : 'Ctrl+K'}</kbd>
+      </button>
+
+      {/* Split button: the body creates a note in the selected folder, the
+          caret opens the rarer create/link actions. */}
+      <div className="sidebar-new-split" ref={newSplitRef}>
         <button
-          className="sidebar-icon-btn"
+          className="sidebar-new-note"
+          data-tip={selectedFolder ? `New note in ${selectedFolder}` : undefined}
           onClick={() => onCreateNote(selectedFolder ?? '')}
-          title={selectedFolder ? `New note in ${selectedFolder}` : 'New note'}
         >
-          <Plus size={17} />
-        </button>
-        <button className="sidebar-icon-btn" onClick={() => startNewFolder('')} title="New folder">
-          <FolderPlus size={16} />
-        </button>
-        <button className="sidebar-icon-btn" onClick={onSearch} title="Search notes (⌘K)">
-          <Search size={15} />
-        </button>
-        <button className="sidebar-icon-btn" onClick={onCreateSticky} title="New sticky note">
-          <StickyNote size={16} />
+          <Plus size={16} />
+          <span>New note</span>
         </button>
         <button
-          className="sidebar-icon-btn"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
+          className="sidebar-new-more"
+          aria-label="More create options"
+          onClick={() => {
+            const rect = newSplitRef.current?.getBoundingClientRect()
             setMenu({
-              x: rect.left,
-              y: rect.bottom + 4,
+              x: rect ? rect.left : 12,
+              y: rect ? rect.bottom + 4 : 80,
               items: [
-                { label: 'From Markdown…', onClick: onImport },
-                { label: 'From Notion…', onClick: onImportNotion }
+                { label: 'New folder', onClick: () => startNewFolder('') },
+                { label: 'New sticky note', onClick: onCreateSticky },
+                { label: 'Open folder…', onClick: onOpenFolder }
               ]
             })
           }}
-          title="Import notes"
         >
-          <Upload size={15} />
+          <ChevronDown size={14} />
         </button>
       </div>
+
+      <button className="sidebar-home-row" onClick={onOpenHome}>
+        <Home size={15} />
+        <span>Home</span>
+      </button>
 
       <div
         className={dragOver === '' ? 'sidebar-scroll drop-root' : 'sidebar-scroll'}
@@ -578,31 +686,55 @@ export default function Sidebar({
         onDragLeave={() => setDragOver((p) => (p === '' ? null : p))}
         onDrop={(e) => dropInto(e, '')}
       >
-        {recent.length > 0 && (
-          <>
-            <div className="sidebar-section-label">Recent</div>
-            <ul className="note-list">{recent.map((note) => renderNote(note, 0, 'recent'))}</ul>
-          </>
-        )}
-
         {pinned.length > 0 && (
-          <>
-            <div className="sidebar-section-label">Pinned</div>
-            <ul className="note-list">{pinned.map((note) => renderNote(note, 0, 'pinned'))}</ul>
-          </>
+          <section className="sidebar-section">
+            {sectionHeader('pinned', 'Pinned Notes')}
+            <Collapsible open={sections.pinned}>
+              <ul className="note-list">{pinned.map((note) => renderNote(note, 0, 'pinned'))}</ul>
+            </Collapsible>
+          </section>
         )}
 
-        {linkedFolders.length > 0 && (
-          <>
-            <ul className="note-list">{linkedFolders.map(renderLinkedFolder)}</ul>
-          </>
-        )}
+        <section className="sidebar-section">
+          {sectionHeader('notes', 'Your Notes')}
+          <Collapsible open={sections.notes}>
+            {linkedFolders.length > 0 && (
+              <ul className="note-list">{linkedFolders.map(renderLinkedFolder)}</ul>
+            )}
+            <ul className="note-list tree-root">
+              {tree.folders.map((child) => renderFolder(child, 0))}
+              {editing?.mode === 'new-folder' && editing.parent === '' && renderNewFolderInput(0)}
+              {tree.notes.map((note) => renderNote(note, 0))}
+            </ul>
+          </Collapsible>
+        </section>
 
-        <ul className="note-list tree-root">
-          {tree.folders.map((child) => renderFolder(child, 0))}
-          {editing?.mode === 'new-folder' && editing.parent === '' && renderNewFolderInput(0)}
-          {tree.notes.map((note) => renderNote(note, 0))}
-        </ul>
+        <section className="sidebar-section">
+          {sectionHeader('import', 'Import')}
+          <Collapsible open={sections.import}>
+            <ul className="note-list">
+              {importOptions.map((option) => (
+                <li key={option.label}>
+                  <button
+                    className="sidebar-row-btn"
+                    disabled={option.soon}
+                    onClick={option.onClick}
+                  >
+                    <span className="sidebar-row-icon">{option.icon}</span>
+                    <span className="sidebar-row-label">{option.label}</span>
+                    {option.soon && <span className="soon-badge">Coming soon</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Collapsible>
+        </section>
+
+        <button className="sidebar-trash-row" onClick={onOpenTrash}>
+          <Trash2 size={14} />
+          <span>Trash</span>
+          {trashCount > 0 && <span className="sidebar-trash-count">{trashCount}</span>}
+        </button>
       </div>
 
       {menu && (
