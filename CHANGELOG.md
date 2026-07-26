@@ -2,6 +2,13 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-26
+
+### Fixed
+
+- Restored unsigned macOS DMG and ZIP releases while Apple Developer signing credentials are unavailable.
+- Pinned Python 3.12 for native dependency builds on GitHub's current macOS runner.
+
 ## [1.0.0] - 2026-07-26
 
 ### Added
