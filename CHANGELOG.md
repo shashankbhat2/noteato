@@ -2,6 +2,12 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-07-26
+
+### Fixed
+
+- Disabled mandatory code signing, hardened runtime, and notarization while publishing unsigned builds.
+
 ## [1.0.2] - 2026-07-26
 
 ### Fixed

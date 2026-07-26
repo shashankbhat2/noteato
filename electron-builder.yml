@@ -15,8 +15,6 @@ afterPack: scripts/afterPack.cjs
 electronLanguages:
   - en
 artifactName: '${productName}-${version}-${arch}.${ext}'
-# Never allow a release build to silently fall back to an unsigned app.
-forceCodeSigning: true
 # Register with the OS as an editor for markdown files (enables Finder
 # "Open With" / double-click via Launch Services on macOS).
 fileAssociations:
@@ -35,11 +33,9 @@ mac:
   target:
     - dmg
     - zip
-  hardenedRuntime: true
+  # No Apple Developer account: publish unsigned builds for now.
+  hardenedRuntime: false
   gatekeeperAssess: false
-  notarize: true
-  entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     NSMicrophoneUsageDescription: Noteato uses your microphone for dictation.
 npmRebuild: false

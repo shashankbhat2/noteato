@@ -7,3 +7,4 @@ dist
 build/icon.iconset
 release_notes.md
 .github/workflows/release-signed.yml.disabled
+electron-builder.signed.yml.disabled
