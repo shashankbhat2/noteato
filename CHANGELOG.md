@@ -2,6 +2,12 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-07-26
+
+### Fixed
+
+- Use Python 3.11 when compiling native dependencies because `node-gyp` 9 requires the `distutils` module removed in Python 3.12.
+
 ## [1.0.1] - 2026-07-26
 
 ### Fixed

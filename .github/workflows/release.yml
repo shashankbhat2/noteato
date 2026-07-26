@@ -28,11 +28,11 @@ jobs:
           node-version: 20
           cache: npm
 
-      # node-gyp 9 still imports distutils, which Python 3.14 removed.
+      # node-gyp 9 still imports distutils, which Python 3.12 removed.
       - name: Setup Python for native dependencies
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: npm ci
