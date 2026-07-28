@@ -2,6 +2,18 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-07-29
+
+### Added
+
+- Tags on notes, stored in the Markdown frontmatter so they stay readable outside Noteato. The editor's tag bar completes against every tag already in the library, and a Tags section in the sidebar lists them by frequency — picking one replaces the folder tree with a flat list of that tag's notes. Tags on linked files are read-only.
+- Copy path and Reveal in Finder in the sidebar and tab context menus.
+- Add to split view in the sidebar context menu, which opens a note beside the current one whether or not it is already a tab.
+
+### Fixed
+
+- The title heading is restored automatically when a slash command, markdown shortcut, or backspace demotes it, keeping the caret and the text that was already typed.
+
 ## [1.0.4] - 2026-07-29
 
 ### Changed
