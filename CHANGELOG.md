@@ -6,7 +6,7 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ### Changed
 
-- New app icon.
+- New app icon, and a matching menu bar icon.
 
 ## [1.0.3] - 2026-07-26
 
