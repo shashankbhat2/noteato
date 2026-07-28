@@ -16,6 +16,9 @@ import ContextMenu, { type MenuItem } from './ContextMenu'
 
 const DOUBLE_CLICK_MS = 400
 
+const REVEAL_LABEL =
+  window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
+
 interface Props {
   tabs: Tab[]
   activeTabId: string | null
@@ -27,10 +30,15 @@ interface Props {
   onCloseOthers: (id: string) => void
   onCloseRight: (id: string) => void
   onCloseAll: () => void
+  /* Resolved by note id, not Tab.path — that one can go stale after a rename. */
+  onCopyPath: (id: string) => void
+  onRevealInFinder: (id: string) => void
   onNewNote: () => void
   /** Dragging a tab onto the editor area opens it in a split — see MainLayout. */
   onTabDragStart: (id: string) => void
   onTabDragEnd: () => void
+  /** Dropping a tab inside the strip reorders it. `targetId` null = the end. */
+  onMoveTab: (draggedId: string, targetId: string | null, side: 'before' | 'after') => void
   splitTabId: string | null
   splitSide: 'left' | 'right'
   onSplit: (id: string, side: 'left' | 'right') => void
@@ -55,9 +63,12 @@ export default function TabBar({
   onCloseOthers,
   onCloseRight,
   onCloseAll,
+  onCopyPath,
+  onRevealInFinder,
   onNewNote,
   onTabDragStart,
   onTabDragEnd,
+  onMoveTab,
   splitTabId,
   splitSide,
   onSplit,
@@ -71,7 +82,64 @@ export default function TabBar({
   onOpenSettings
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  // Reordering state. The dragged id is tracked locally too because
+  // dataTransfer's payload is unreadable during dragover — only on drop.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    id: string | null
+    side: 'before' | 'after'
+  } | null>(null)
   const activeIdx = tabs.findIndex((t) => t.id === activeTabId)
+
+  const endDrag = (): void => {
+    setDraggingId(null)
+    setDropTarget(null)
+    onTabDragEnd()
+  }
+
+  const beginDrag = (e: React.DragEvent, id: string): void => {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', id)
+    setDraggingId(id)
+    onTabDragStart(id)
+  }
+
+  // Which half of the hovered element the pointer is on decides whether the
+  // dragged tab lands before or after it.
+  const sideOf = (e: React.DragEvent<HTMLElement>): 'before' | 'after' => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    return e.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+  }
+
+  const dragOverTarget = (e: React.DragEvent<HTMLElement>, id: string | null): void => {
+    if (!draggingId) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'move'
+    const side = id === null ? 'after' : sideOf(e)
+    setDropTarget((prev) => (prev?.id === id && prev.side === side ? prev : { id, side }))
+  }
+
+  const dropOnTarget = (e: React.DragEvent<HTMLElement>, id: string | null): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const dragged = e.dataTransfer.getData('text/plain') || draggingId
+    const side = dropTarget?.id === id ? dropTarget.side : id === null ? 'after' : sideOf(e)
+    if (dragged) onMoveTab(dragged, id, side)
+    endDrag()
+  }
+
+  /** Insertion-line class for a drop target, or '' when it isn't the one. */
+  const dropClass = (id: string): string => {
+    if (!dropTarget || !draggingId) return ''
+    // A drop past the last tab draws its line on that tab's trailing edge,
+    // where the tab will actually land — not out at the strip's far end.
+    if (dropTarget.id === null) {
+      return id === lastStripId && id !== draggingId ? ' drop-after' : ''
+    }
+    if (dropTarget.id !== id || id === draggingId) return ''
+    return dropTarget.side === 'before' ? ' drop-before' : ' drop-after'
+  }
 
   const openTabMenu = (e: React.MouseEvent, tab: Tab): void => {
     e.preventDefault()
@@ -94,6 +162,14 @@ export default function TabBar({
                     { label: 'Split left', onClick: () => onSplit(tab.id, 'left') },
                     { label: 'Split right', onClick: () => onSplit(tab.id, 'right') }
                   ])
+            ]
+          : []),
+        // Home and Trash are views, not files — they have no path to act on.
+        ...(tab.path
+          ? [
+              { separator: true, label: '' },
+              { label: 'Copy path', onClick: () => onCopyPath(tab.id) },
+              { label: REVEAL_LABEL, onClick: () => onRevealInFinder(tab.id) }
             ]
           : []),
         { separator: true, label: '' },
@@ -129,14 +205,16 @@ export default function TabBar({
   const renderTab = (tab: Tab): React.ReactNode => (
     <div
       key={tab.id}
-      className={tab.id === activeTabId ? 'tab active' : 'tab'}
+      className={
+        (tab.id === activeTabId ? 'tab active' : 'tab') +
+        (tab.id === draggingId ? ' dragging' : '') +
+        dropClass(tab.id)
+      }
       draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/plain', tab.id)
-        onTabDragStart(tab.id)
-      }}
-      onDragEnd={onTabDragEnd}
+      onDragStart={(e) => beginDrag(e, tab.id)}
+      onDragEnd={endDrag}
+      onDragOver={(e) => dragOverTarget(e, tab.id)}
+      onDrop={(e) => dropOnTarget(e, tab.id)}
       onClick={() => onSelect(tab.id)}
       onContextMenu={(e) => openTabMenu(e, tab)}
     >
@@ -166,6 +244,17 @@ export default function TabBar({
     return splitSide === 'left' ? [split, primary] : [primary, split]
   })()
 
+  // Id of the strip's trailing element — the combined tab when the split sits
+  // last, otherwise the last tab itself.
+  const lastStripId = ((): string | null => {
+    const last = tabs[tabs.length - 1]
+    if (!last) return null
+    if (splitPair && (last.id === splitPair[0].id || last.id === splitPair[1].id)) {
+      return splitPair[0].id
+    }
+    return last.id
+  })()
+
   const openSplitMenu = (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -188,8 +277,32 @@ export default function TabBar({
     })
   }
 
+  // The pair renders as one tab, so a drop on it lands outside the pair. Its
+  // members are contiguous in `tabs` but in an order the visual one doesn't
+  // necessarily match (splitSide decides that), so resolve the edge against
+  // the array rather than against `pair`.
+  const dropOnSplit = (e: React.DragEvent<HTMLElement>, pair: [Tab, Tab]): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const dragged = e.dataTransfer.getData('text/plain') || draggingId
+    if (!dragged) {
+      endDrag()
+      return
+    }
+    const side = dropTarget?.id === pair[0].id ? dropTarget.side : sideOf(e)
+    const inPair = (t: Tab): boolean => t.id === pair[0].id || t.id === pair[1].id
+    const edge = side === 'before' ? tabs.find(inPair) : [...tabs].reverse().find(inPair)
+    if (edge) onMoveTab(dragged, edge.id, side)
+    endDrag()
+  }
+
   const renderSplitTab = (pair: [Tab, Tab]): React.ReactNode => (
-    <div className="tab tab-split" key={`split-${pair[0].id}-${pair[1].id}`}>
+    <div
+      className={`tab tab-split${dropClass(pair[0].id)}`}
+      key={`split-${pair[0].id}-${pair[1].id}`}
+      onDragOver={(e) => dragOverTarget(e, pair[0].id)}
+      onDrop={(e) => dropOnSplit(e, pair)}
+    >
       {pair.map((tab, index) => (
         <div key={tab.id} className="tab-split-cell">
           {index > 0 && <span className="tab-split-divider" />}
@@ -269,7 +382,17 @@ export default function TabBar({
           </button>
         </div>
       </div>
-      <div className="tab-strip">
+      {/* Dropping past the last tab (on the strip's own padding or the "+"
+          button) moves the dragged tab to the end of its group. */}
+      <div
+        className={draggingId ? 'tab-strip reordering' : 'tab-strip'}
+        onDragOver={(e) => dragOverTarget(e, null)}
+        onDrop={(e) => dropOnTarget(e, null)}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+          setDropTarget(null)
+        }}
+      >
         {renderStrip()}
         <button className="tab-new" onClick={onNewNote} title="New note">
           <Plus size={15} />

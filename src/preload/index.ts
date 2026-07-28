@@ -72,6 +72,9 @@ const api = {
       return () => ipcRenderer.removeListener('notes:external-open', listener)
     },
     getDir: () => ipcRenderer.invoke('notes:getDir'),
+    copyPath: (path: string): Promise<string> => ipcRenderer.invoke('notes:copyPath', path),
+    revealInFinder: (path: string): Promise<void> =>
+      ipcRenderer.invoke('notes:revealInFinder', path),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import'),
     openFolder: (): Promise<NoteSummary[]> => ipcRenderer.invoke('notes:openFolder'),

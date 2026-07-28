@@ -195,6 +195,15 @@ export class NoteStore {
     return notePath
   }
 
+  /**
+   * Absolute on-disk location of a note, for the OS-level actions (copy path,
+   * reveal in Finder). Managed notes resolve under the notes dir; linked files
+   * must still be registered, so this can't be used to probe the filesystem.
+   */
+  absolutePath(notePath: string): string {
+    return this.resolveNotePath(notePath)
+  }
+
   private walkNotes(dir: string, prefix: string, out: string[]): void {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name.startsWith('.')) continue

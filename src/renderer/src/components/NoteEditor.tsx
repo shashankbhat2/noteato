@@ -27,7 +27,7 @@ import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
-import { ensureTitleBlock, titleFromMarkdown } from '../titleBlock'
+import { ensureTitleBlock, enforceTitleBlock, titleFromMarkdown } from '../titleBlock'
 import { formatReminderAt } from '../reminderPresets'
 import {
   createNoteatoEditor,
@@ -43,6 +43,7 @@ import BlockDragMenu, { stripIds } from './BlockDragMenu'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
 import TableOfContents from './TableOfContents'
+import TagBar from './TagBar'
 
 interface Props {
   path: string
@@ -166,6 +167,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [fullWidth, setFullWidth] = useState(false)
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | 'loading'>('loading')
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
@@ -174,6 +176,10 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Tags change through their own save; a body autosave scheduled before that
+  // must not write the pre-edit list back, so saves read the tags from here
+  // rather than from whichever `note` their closure captured.
+  const tagsRef = useRef<string[]>([])
   const rootRef = useRef<HTMLDivElement>(null)
   const reminderBtnRef = useRef<HTMLButtonElement>(null)
   const aiStreamingRef = useRef(false)
@@ -197,6 +203,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
       if (cancelled) return
       setNote(loaded)
       setFullWidth(loaded.fullWidth)
+      tagsRef.current = loaded.tags
 
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
@@ -329,10 +336,11 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
     const saved = await window.api.notes.save(note.path, {
       title: titleFromMarkdown(markdown) || 'Untitled',
       body: markdown,
-      tags: note.tags,
+      tags: tagsRef.current,
       fullWidth: nextFullWidth
     })
     setNote(saved)
+    tagsRef.current = saved.tags
     onSaved(saved)
     return saved
   }
@@ -348,6 +356,20 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
   const scheduleSave = (): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => persist(fullWidth), SAVE_DEBOUNCE_MS)
+  }
+
+  // Re-assert "first block is the title H1" after a change settles. Deferred to
+  // a microtask so the fix-up transaction never dispatches from inside the one
+  // that triggered it; the flag collapses the burst of changes a single edit
+  // can produce into one pass.
+  const titleFixQueued = useRef(false)
+  const scheduleTitleFix = (): void => {
+    if (titleFixQueued.current) return
+    titleFixQueued.current = true
+    queueMicrotask(() => {
+      titleFixQueued.current = false
+      if (editor) enforceTitleBlock(editor)
+    })
   }
 
   // A second renderer (sidebar mode) can open the same Markdown note. Flush
@@ -475,6 +497,37 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
     onSaved(updated)
   }
 
+
+  // Tags already in use across the library, offered as completions. Refreshed
+  // whenever the tag bar could be about to be used (note switch, tag edit).
+  const refreshTagSuggestions = async (): Promise<void> => {
+    const all = await window.api.notes.list()
+    const seen = new Map<string, string>()
+    for (const summary of all) {
+      for (const tag of summary.tags) {
+        if (!seen.has(tag.toLowerCase())) seen.set(tag.toLowerCase(), tag)
+      }
+    }
+    setTagSuggestions([...seen.values()].sort((a, b) => a.localeCompare(b)))
+  }
+
+  useEffect(() => {
+    void refreshTagSuggestions()
+  }, [path])
+
+  // Tags ride along with a normal save, so this uses the same flush-first dance
+  // as pin/reminder: a pending autosave may be about to rename the file.
+  const handleSetTags = async (tags: string[]): Promise<void> => {
+    if (!note) return
+    tagsRef.current = tags
+    setNote((prev) => (prev ? { ...prev, tags } : prev))
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = undefined
+    }
+    await persist(fullWidth)
+    void refreshTagSuggestions()
+  }
 
   useEffect(() => {
     return () => {
@@ -724,10 +777,24 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
           />
         )}
 
+        {/* Sits inside the note card so it lines up with the title below it.
+            Linked files keep their frontmatter untouched, so their tags (if the
+            owning tool wrote any) are shown but not editable here. */}
+        <TagBar
+          tags={note.tags}
+          suggestions={tagSuggestions}
+          readOnly={note.external}
+          onChange={(tags) => void handleSetTags(tags)}
+        />
+
         <BlockNoteView
           editor={editor}
           onChange={() => {
-            if (!aiStreamingRef.current && !applyingExternalRef.current) scheduleSave()
+            if (applyingExternalRef.current) return
+            // Linked files are shown exactly as they are on disk — a title
+            // heading is never forced into someone else's markdown.
+            if (!note.external) scheduleTitleFix()
+            if (!aiStreamingRef.current) scheduleSave()
           }}
           theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
           formattingToolbar={false}

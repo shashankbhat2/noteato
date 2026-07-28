@@ -1,4 +1,4 @@
-import type { NoteatoBlock } from './noteLink'
+import type { NoteatoBlock, NoteatoEditor } from './noteLink'
 
 // The note's title is its first block: a level-1 heading. These helpers keep
 // the "first H1 = title" convention in one place for every editor surface.
@@ -53,4 +53,54 @@ export function ensureTitleBlock(blocks: NoteatoBlock[], fallbackTitle: string):
       text && text !== 'Untitled' ? [{ type: 'text', text, styles: {} }] : []
   } as unknown as NoteatoBlock
   return [heading, ...blocks]
+}
+
+// Blocks whose inline content can simply be re-typed as the title heading. A
+// first block of any other kind (image, table, code, divider…) keeps its own
+// type and gets an empty H1 inserted above it instead — retyping those would
+// lose their content.
+const TITLE_CONVERTIBLE_TYPES = new Set([
+  'paragraph',
+  'heading',
+  'quote',
+  'bulletListItem',
+  'numberedListItem',
+  'checkListItem',
+  'toggleListItem'
+])
+
+/**
+ * Keep the live document's first block a single level-1 heading — the note's
+ * title. The title is a normal block, so anything can demote it (the slash
+ * menu, a markdown shortcut, backspacing it away, pasting an image on top);
+ * this snaps it back after every change so every note has exactly one H1 in
+ * the title slot. A convertible first block is retyped in place, which keeps
+ * its text and the caret; anything else gets an empty title above it.
+ *
+ * Returns true when the document was changed.
+ */
+export function enforceTitleBlock(editor: NoteatoEditor): boolean {
+  try {
+    const first = editor.document[0] as NoteatoBlock | undefined
+    if (!first || isTitleBlock(first)) return false
+
+    if (TITLE_CONVERTIBLE_TYPES.has(first.type)) {
+      editor.updateBlock(first, { type: 'heading', props: { level: 1 } } as Parameters<
+        NoteatoEditor['updateBlock']
+      >[1])
+    } else {
+      editor.insertBlocks(
+        [{ type: 'heading', props: { level: 1 }, content: [] }] as Parameters<
+          NoteatoEditor['insertBlocks']
+        >[0],
+        first,
+        'before'
+      )
+    }
+    return true
+  } catch {
+    // Editor torn down, or the document was mid-transaction — the next change
+    // re-runs this.
+    return false
+  }
 }

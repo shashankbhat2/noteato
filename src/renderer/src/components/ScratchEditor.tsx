@@ -19,7 +19,7 @@ import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
-import { ensureTitleBlock, titleFromMarkdown } from '../titleBlock'
+import { ensureTitleBlock, enforceTitleBlock, titleFromMarkdown } from '../titleBlock'
 import {
   createNoteatoEditor,
   type NoteatoBlock,
@@ -117,6 +117,20 @@ export default function ScratchEditor({ note: summary, onSaved }: Props) {
   const scheduleSave = (): void => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => void persistRef.current(), SAVE_DEBOUNCE_MS)
+  }
+
+  // Re-assert "first block is the title H1" once the change has settled — see
+  // enforceTitleBlock. Deferred so the fix-up never dispatches from inside the
+  // transaction that triggered it.
+  const titleFixQueued = useRef(false)
+  const handleChange = (): void => {
+    scheduleSave()
+    if (titleFixQueued.current) return
+    titleFixQueued.current = true
+    queueMicrotask(() => {
+      titleFixQueued.current = false
+      if (editorRef.current) enforceTitleBlock(editorRef.current)
+    })
   }
 
   useEffect(() => {
@@ -232,7 +246,7 @@ export default function ScratchEditor({ note: summary, onSaved }: Props) {
       <div className="sidebar-editor-canvas">
         <BlockNoteView
           editor={editor}
-          onChange={scheduleSave}
+          onChange={handleChange}
           theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
           formattingToolbar={false}
           sideMenu={false}

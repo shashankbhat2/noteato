@@ -767,6 +767,13 @@ button {
      only the tabs and the "+" button below opt back out of it. */
 }
 
+/* While a tab is being dragged, the empty space has to be a drop target for
+   "move to the end", which a window-drag region can't reliably be. The region
+   comes back the moment the drag finishes. */
+.tab-strip.reordering {
+  -webkit-app-region: no-drag;
+}
+
 .tab {
   display: flex;
   align-items: center;
@@ -803,6 +810,41 @@ button {
   background: var(--accent-active);
   border-bottom-color: transparent;
   border-radius: var(--radius-sm);
+}
+
+/* --- Reordering by drag ---------------------------------------------------
+   The tab being dragged fades out in place; the tab it would land next to
+   grows an insertion line on that edge. The line is drawn just outside the
+   tab so it reads as a gap marker rather than a border, which the 2px strip
+   gap leaves room for. */
+
+.tab.dragging {
+  opacity: 0.4;
+}
+
+.tab.drop-before,
+.tab.drop-after {
+  position: relative;
+}
+
+.tab.drop-before::before,
+.tab.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.tab.drop-before::before {
+  left: -2px;
+}
+
+.tab.drop-after::after {
+  right: -2px;
 }
 
 .tab-pin-icon {
@@ -1148,6 +1190,53 @@ button {
   background: var(--bg-tertiary);
   color: var(--text-muted);
   font-size: 9px;
+}
+
+.tag-row.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tag-row.active .sidebar-row-icon {
+  color: inherit;
+}
+
+.tag-count {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-row.active .tag-count {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* Reminder that the note list below is filtered; click to drop the filter. */
+.tag-filter-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 10px 6px;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tag-filter-clear span {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-filter-clear:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .sidebar-trash-row {
@@ -1544,6 +1633,90 @@ button {
    extend into since nothing here clips overflow. */
 .note-editor .bn-editor {
   padding-inline: 2px;
+}
+
+/* --- Note tags -------------------------------------------------------------
+   A metadata strip at the top of the note card, aligned with the title block
+   below it (it lives inside .note-editor, so it inherits that alignment). */
+
+.note-tags-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  margin-bottom: 10px;
+  padding-inline: 2px;
+}
+
+.note-tags-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.note-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 2px 6px 2px 9px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-tag-remove {
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  padding: 1px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.note-tag-remove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.note-tag-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.note-tag-add:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.note-tag-input {
+  width: 130px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  outline: none;
 }
 
 /* BlockNote hardcodes Inter on .bn-default-styles, which otherwise wins over

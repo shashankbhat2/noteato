@@ -55,6 +55,8 @@ interface NoteatoApi {
     takeExternalOpens: () => Promise<Note[]>
     subscribeExternalOpen: (callback: (note: Note) => void) => () => void
     getDir: () => Promise<string>
+    copyPath: (path: string) => Promise<string>
+    revealInFinder: (path: string) => Promise<void>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
     openFolder: () => Promise<NoteSummary[]>

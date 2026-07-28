@@ -478,6 +478,110 @@ export default function MainLayout() {
     })
   }
 
+  // A tab's stored path is its bootstrap value and can lag behind a rename, so
+  // OS-level actions resolve the note's current path by id — refreshing once if
+  // the local list is the stale one.
+  const notePathOf = async (id: string): Promise<string | null> => {
+    const known = notes.find((n) => n.id === id)
+    if (known) return known.path
+    return (await refresh()).find((n) => n.id === id)?.path ?? null
+  }
+
+  // The main process rejects paths it can no longer resolve (a linked file
+  // unlinked or deleted since the list was built) — nothing useful to report.
+  const copyNotePath = async (id: string): Promise<void> => {
+    const path = await notePathOf(id)
+    if (path) await window.api.notes.copyPath(path).catch(() => {})
+  }
+
+  const revealNote = async (id: string): Promise<void> => {
+    const path = await notePathOf(id)
+    if (path) await window.api.notes.revealInFinder(path).catch(() => {})
+  }
+
+  /**
+   * Split the currently focused tab with another note, opening it first if it
+   * isn't already a tab. `openSplit` can't do this — it needs the target to
+   * already be in `tabs`, and a freshly-set state isn't readable yet — so the
+   * tab is inserted and the split is set up in one pass.
+   */
+  const addNoteToSplit = (note: OpenTarget): void => {
+    const partnerId =
+      activeTabId && activeTabId !== note.id
+        ? activeTabId
+        : tabs.find((t) => t.id !== note.id)?.id ?? null
+    // Nothing to split against — just open it normally.
+    if (!partnerId) {
+      openNoteTab(note)
+      return
+    }
+    setTabs((prev) => {
+      const entry = prev.find((t) => t.id === note.id) ?? {
+        id: note.id,
+        path: note.path,
+        title: note.title
+      }
+      const rest = prev.filter((t) => t.id !== note.id)
+      const anchor = rest.findIndex((t) => t.id === partnerId)
+      if (anchor === -1) return prev
+      // Sit the pair next to each other in the strip, ordered to match the panes.
+      const next = [...rest]
+      next.splice(anchor + 1, 0, entry)
+      return next
+    })
+    setSplitTabId(note.id)
+    setSplitSide('right')
+    setActiveTabId(partnerId)
+  }
+
+  /**
+   * Reorder the strip by dropping a tab onto another one (or onto the empty
+   * space after the last, where `targetId` is null).
+   *
+   * Two invariants the strip already relies on are preserved here: pinned tabs
+   * lead the strip, so a drag reorders within its own group rather than across
+   * it; and the two halves of a split stay adjacent, since they render as one
+   * combined tab — a drop aimed between them snaps to the nearer outside edge.
+   */
+  const moveTab = (draggedId: string, targetId: string | null, side: 'before' | 'after'): void => {
+    if (draggedId === targetId) return
+    setTabs((prev) => {
+      const moved = prev.find((t) => t.id === draggedId)
+      if (!moved) return prev
+      const rest = prev.filter((t) => t.id !== draggedId)
+      // Where the unpinned group starts once the dragged tab is out of the way.
+      const pinCount = rest.filter((t) => t.pinned).length
+
+      let index: number
+      if (targetId === null) {
+        index = moved.pinned ? pinCount : rest.length
+      } else {
+        const target = rest.findIndex((t) => t.id === targetId)
+        if (target === -1) return prev
+        index = side === 'before' ? target : target + 1
+      }
+
+      if (splitTabId && activeTabId && splitTabId !== activeTabId && draggedId !== splitTabId && draggedId !== activeTabId) {
+        const a = rest.findIndex((t) => t.id === splitTabId)
+        const b = rest.findIndex((t) => t.id === activeTabId)
+        if (a !== -1 && b !== -1) {
+          const lo = Math.min(a, b)
+          const hi = Math.max(a, b)
+          // Landing strictly inside the pair's span would split the combined tab.
+          if (index > lo && index <= hi) index = index - lo <= hi + 1 - index ? lo : hi + 1
+        }
+      }
+
+      const lower = moved.pinned ? 0 : pinCount
+      const upper = moved.pinned ? pinCount : rest.length
+      index = Math.min(Math.max(index, lower), upper)
+
+      const next = [...rest]
+      next.splice(index, 0, moved)
+      return next
+    })
+  }
+
   // --- Tab context-menu actions (Chrome-style; pinned tabs survive bulk closes)
 
   const toggleTabPin = (id: string): void => {
@@ -724,7 +828,8 @@ export default function MainLayout() {
         folder: saved.folder,
         excerpt: saved.excerpt,
         updatedAt: saved.updatedAt,
-        reminderAt: saved.reminderAt
+        reminderAt: saved.reminderAt,
+        tags: saved.tags
       }
       return next
     })
@@ -886,6 +991,9 @@ export default function MainLayout() {
           onCloseOthers={closeOtherTabs}
           onCloseRight={closeTabsToRight}
           onCloseAll={closeAllTabs}
+          onMoveTab={moveTab}
+          onCopyPath={(id) => void copyNotePath(id)}
+          onRevealInFinder={(id) => void revealNote(id)}
           onNewNote={() => void handleCreateInSelectedFolder()}
           onTabDragStart={setDraggingTabId}
           onTabDragEnd={() => {
@@ -937,6 +1045,8 @@ export default function MainLayout() {
             onRemoveNote={(note) => void handleRemoveExternal(note)}
             onRenameNote={(note, title) => void handleRenameNote(note, title)}
             onTogglePin={handleTogglePin}
+            onAddToSplit={addNoteToSplit}
+            canSplit={tabs.length > 0}
             onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
             onMoveNote={handleMoveNote}
             onMoveFolder={handleMoveFolder}

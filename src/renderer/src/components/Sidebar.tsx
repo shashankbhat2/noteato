@@ -13,6 +13,7 @@ import {
   IconPin as Pin,
   IconPlus as Plus,
   IconSearch as Search,
+  IconTag as Tag,
   IconTrash as Trash2,
   IconX as X
 } from '@tabler/icons-react'
@@ -25,13 +26,17 @@ import ReminderPopover from './ReminderPopover'
 const EXPANDED_KEY = 'noteato:expandedFolders'
 const SECTIONS_KEY = 'noteato:sidebarSections'
 
-type SectionId = 'pinned' | 'notes' | 'import'
+type SectionId = 'pinned' | 'tags' | 'notes' | 'import'
 
 const DEFAULT_SECTIONS: Record<SectionId, boolean> = {
   pinned: true,
+  tags: false,
   notes: true,
   import: false
 }
+
+const REVEAL_LABEL =
+  window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
 
 interface Props {
   notes: NoteSummary[]
@@ -50,6 +55,10 @@ interface Props {
   onRemoveNote: (note: NoteSummary) => void
   onRenameNote: (note: NoteSummary, title: string) => void
   onTogglePin: (note: NoteSummary) => void
+  /** Open the note beside the one already showing (split view). */
+  onAddToSplit: (note: NoteSummary) => void
+  /** False when there's no other open note to split against. */
+  canSplit: boolean
   onSetReminder: (note: NoteSummary, reminderAt: string | null) => void
   onMoveNote: (path: string, targetFolder: string) => void
   onMoveFolder: (path: string, targetParent: string) => void
@@ -104,6 +113,8 @@ export default function Sidebar({
   onRemoveNote,
   onRenameNote,
   onTogglePin,
+  onAddToSplit,
+  canSplit,
   onSetReminder,
   onMoveNote,
   onMoveFolder,
@@ -148,6 +159,9 @@ export default function Sidebar({
   const [editing, setEditing] = useState<Editing>(null)
   const [editValue, setEditValue] = useState('')
   const [dragOver, setDragOver] = useState<string | null>(null)
+  // While a tag is selected, "Your Notes" shows a flat list of its notes
+  // instead of the folder tree.
+  const [activeTag, setActiveTag] = useState<string | null>(null)
 
   const tree = useMemo(
     () => buildTree(notes.filter((note) => !note.external), folders),
@@ -177,6 +191,33 @@ export default function Sidebar({
     [notes]
   )
   const folderPaths = useMemo(() => folders.slice().sort((a, b) => a.localeCompare(b)), [folders])
+  // Tags are matched case-insensitively but displayed with the spelling of the
+  // first note that used them.
+  const tagCounts = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>()
+    for (const note of notes) {
+      for (const tag of note.tags) {
+        const key = tag.toLowerCase()
+        const entry = counts.get(key)
+        if (entry) entry.count += 1
+        else counts.set(key, { label: tag, count: 1 })
+      }
+    }
+    return [...counts.entries()]
+      .map(([key, value]) => ({ key, ...value }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+  }, [notes])
+  const taggedNotes = useMemo(() => {
+    if (!activeTag) return []
+    return notes
+      .filter((note) => note.tags.some((tag) => tag.toLowerCase() === activeTag))
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+  }, [notes, activeTag])
+
+  // A tag that disappeared (last note untagged or deleted) can't stay selected.
+  useEffect(() => {
+    if (activeTag && !tagCounts.some((t) => t.key === activeTag)) setActiveTag(null)
+  }, [tagCounts, activeTag])
 
   const persistExpanded = (next: Set<string>): void => {
     setExpanded(next)
@@ -294,6 +335,23 @@ export default function Sidebar({
     return items
   }
 
+  // Actions every note has, wherever it lives on disk.
+  const fileMenuItems = (note: NoteSummary): MenuItem[] => [
+    ...(canSplit
+      ? [{ label: 'Add to split view', onClick: () => onAddToSplit(note) }]
+      : []),
+    // A linked file can be unlinked (or gone) between the list and the click —
+    // the main process rejects those, and there's nothing useful to report.
+    {
+      label: 'Copy path',
+      onClick: () => void window.api.notes.copyPath(note.path).catch(() => {})
+    },
+    {
+      label: REVEAL_LABEL,
+      onClick: () => void window.api.notes.revealInFinder(note.path).catch(() => {})
+    }
+  ]
+
   const openNoteMenu = (e: React.MouseEvent, note: NoteSummary): void => {
     e.preventDefault()
     e.stopPropagation()
@@ -304,6 +362,8 @@ export default function Sidebar({
           { label: note.pinned ? 'Unpin' : 'Pin', onClick: () => onTogglePin(note) },
           { label: 'Remind me', submenu: remindMeSubmenu(note, x, y) },
           { label: 'Rename title', onClick: () => startRenameNote(note) },
+          { separator: true, label: '' },
+          ...fileMenuItems(note),
           { separator: true, label: '' },
           // A folder-sourced note has no link of its own — offer to unlink
           // the whole folder instead.
@@ -319,6 +379,8 @@ export default function Sidebar({
           { label: 'Remind me', submenu: remindMeSubmenu(note, x, y) },
           { label: 'Rename', onClick: () => startRenameNote(note) },
           { label: 'Move to', submenu: moveNoteSubmenu(note) },
+          { separator: true, label: '' },
+          ...fileMenuItems(note),
           { separator: true, label: '' },
           { label: 'Delete', danger: true, onClick: () => onDeleteNote(note) }
         ]
@@ -695,17 +757,60 @@ export default function Sidebar({
           </section>
         )}
 
+        {tagCounts.length > 0 && (
+          <section className="sidebar-section">
+            {sectionHeader('tags', 'Tags')}
+            <Collapsible open={sections.tags}>
+              <ul className="note-list">
+                {tagCounts.map((tag) => (
+                  <li key={tag.key}>
+                    <button
+                      className={
+                        activeTag === tag.key ? 'sidebar-row-btn tag-row active' : 'sidebar-row-btn tag-row'
+                      }
+                      onClick={() => setActiveTag((prev) => (prev === tag.key ? null : tag.key))}
+                    >
+                      <span className="sidebar-row-icon">
+                        <Tag size={14} />
+                      </span>
+                      <span className="sidebar-row-label">{tag.label}</span>
+                      <span className="tag-count">{tag.count}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Collapsible>
+          </section>
+        )}
+
         <section className="sidebar-section">
-          {sectionHeader('notes', 'Your Notes')}
+          {sectionHeader('notes', activeTag ? 'Tagged Notes' : 'Your Notes')}
           <Collapsible open={sections.notes}>
-            {linkedFolders.length > 0 && (
-              <ul className="note-list">{linkedFolders.map(renderLinkedFolder)}</ul>
+            {activeTag ? (
+              <>
+                <button className="tag-filter-clear" onClick={() => setActiveTag(null)}>
+                  <Tag size={12} />
+                  <span>
+                    {tagCounts.find((t) => t.key === activeTag)?.label ?? activeTag}
+                  </span>
+                  <X size={12} />
+                </button>
+                <ul className="note-list">{taggedNotes.map((note) => renderNote(note, 0))}</ul>
+              </>
+            ) : (
+              <>
+                {linkedFolders.length > 0 && (
+                  <ul className="note-list">{linkedFolders.map(renderLinkedFolder)}</ul>
+                )}
+                <ul className="note-list tree-root">
+                  {tree.folders.map((child) => renderFolder(child, 0))}
+                  {editing?.mode === 'new-folder' &&
+                    editing.parent === '' &&
+                    renderNewFolderInput(0)}
+                  {tree.notes.map((note) => renderNote(note, 0))}
+                </ul>
+              </>
             )}
-            <ul className="note-list tree-root">
-              {tree.folders.map((child) => renderFolder(child, 0))}
-              {editing?.mode === 'new-folder' && editing.parent === '' && renderNewFolderInput(0)}
-              {tree.notes.map((note) => renderNote(note, 0))}
-            </ul>
           </Collapsible>
         </section>
 

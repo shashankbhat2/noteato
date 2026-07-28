@@ -1,6 +1,16 @@
 import { join } from 'path'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
-import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  session,
+  shell
+} from 'electron'
 import type {
   AiCompleteRequest,
   Note,
@@ -413,6 +423,14 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('notes:search', (_e, query: string) => noteStore.search(query))
   ipcMain.handle('notes:getDir', () => noteStore.getNotesDir())
+  ipcMain.handle('notes:copyPath', (_e, path: string) => {
+    const full = noteStore.absolutePath(path)
+    clipboard.writeText(full)
+    return full
+  })
+  ipcMain.handle('notes:revealInFinder', (_e, path: string) => {
+    shell.showItemInFolder(noteStore.absolutePath(path))
+  })
   ipcMain.handle('notes:listTrash', () => noteStore.listTrash())
   ipcMain.handle('notes:purgeTrash', (_e, trashName: string) => noteStore.purgeTrash(trashName))
   ipcMain.handle('notes:emptyTrash', () => noteStore.emptyTrash())
