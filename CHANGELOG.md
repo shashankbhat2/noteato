@@ -2,6 +2,12 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-07-29
+
+### Changed
+
+- New app icon.
+
 ## [1.0.3] - 2026-07-26
 
 ### Fixed
