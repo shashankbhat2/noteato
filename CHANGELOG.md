@@ -2,6 +2,37 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-29
+
+### Added
+
+- Up to three panes side by side, each holding any view — a note, Home, Trash, or the assistant. Drag the seam between two panes to resize just that pair; the combined tab's Arrange Split View menu closes a named pane, separates them, or reverses the order.
+- The assistant is a tab now rather than a fixed rail, so it can sit in either half of a split, take a pane of its own, or be closed like anything else. It reads the note in the focused pane as its subject and a second note pane as read-only context.
+- Search by tag: `#tag` (or `tag:tag`) filters results, several terms narrow rather than widen, and typing `#` lists the tags in the library. Plain text matches tags too, so `launch` finds notes tagged *launch* without knowing the syntax. Results show their tags, and clicking one filters by it.
+- The tab strip's `+` opens a chooser — search your notes, or create one named after whatever you typed — instead of dropping straight into an empty "Untitled".
+- Import is a modal listing every source, opened from the sidebar rather than living as a permanent shelf in the note tree.
+- Home, Assistant, Settings, Import and Trash are grouped as one list at the top of the sidebar. The keyboard shortcut sheet floats in the working area's bottom-left corner.
+- The current frontier models — Claude Fable 5, Opus 5 and Sonnet 5 — in the assistant's picker, which previously offered only the cheap tier, so the hardest questions got the weakest model. Auto still picks a cheap model. Settings' inline-AI picker keeps the cheap tier as its default and groups the rest under "More capable".
+
+### Changed
+
+- Light and dark themes are neutral greyscale rather than warm beige. The note is white (and in dark, a clearly lighter grey than the window behind it), so panes read apart from the chrome at a glance.
+- Tabs and panes are one continuous surface: no card gutters, radii or shadows, with the focused tab carrying the pane's colour and running straight into it. Panes are divided by a hairline seam instead of a gap.
+- The tab strip is shorter and quieter — its own row height, smaller type, narrower tabs.
+- Dictation moved out of the note's toolbar to the bottom-right of the note itself, where it stays put as the note scrolls.
+- The selection toolbar follows the app's own menu conventions instead of the editor library's defaults.
+- A narrow pane pulls in its gutters and brings headings down to a readable size, so three panes stay writable.
+- Modals sit above every other layer and blur the app behind them.
+
+### Fixed
+
+- A note could hang on "Loading…" forever after being moved into split view. Editing a title renames the file on disk, but the tab kept its original path, so remounting the editor read a file that no longer existed — and nothing caught the rejection. Tabs now follow renames, and a read that does fail shows the error with a way to retry.
+- A note open in its own pane could also be made the tab strip's note, mounting two live editors for one file and listing it twice in the split tab.
+- The tag row sat far below the note's title; the title is the first block and no longer carries a heading's lead-in spacing.
+- Tag completions are a themed popover with keyboard navigation, replacing the browser's native datalist.
+- Menu highlights are concentric with their menu, and a submenu is no longer clipped by its parent item.
+- The split view's arrange caret sits inside the tab rather than on its corner and is centred in its own hover target, and long note titles are shortened in menus.
+
 ## [1.0.5] - 2026-07-29
 
 ### Added
@@ -256,7 +287,8 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/shashankbhat2/noteato/compare/v1.0.5...v1.1.0
 [0.8.0]: https://github.com/shashankbhat2/noteato/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/shashankbhat2/noteato/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/shashankbhat2/noteato/compare/v0.7.1...v0.7.2
