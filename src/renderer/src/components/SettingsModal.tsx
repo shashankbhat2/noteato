@@ -15,7 +15,7 @@ import type { AiProvider, Settings } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
 import { ACCENT_OPTIONS } from '../accents'
-import { CHEAP_AI_MODELS } from '../ai/models'
+import { AI_MODELS, CHEAP_AI_MODELS } from '../ai/models'
 import {
   QUICK_NOTE_ACCELERATOR,
   SIDEBAR_MODE_ACCELERATOR,
@@ -372,8 +372,15 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
   const renderAi = (s: Settings): React.ReactNode => {
     const provider = s.aiProvider
     const cheapModels = provider === 'none' ? [] : CHEAP_AI_MODELS[provider]
+    // The cheap tier stays the default — these actions fire on a selection, so
+    // the frontier models are offered but not stumbled into.
+    const capableModels =
+      provider === 'none' ? [] : AI_MODELS[provider].filter((m) => !m.cheap)
     const modelValue = s.aiModel || cheapModels[0]?.id || ''
-    const hasCustomModel = Boolean(s.aiModel) && !cheapModels.some((m) => m.id === s.aiModel)
+    const hasCustomModel =
+      Boolean(s.aiModel) &&
+      !cheapModels.some((m) => m.id === s.aiModel) &&
+      !capableModels.some((m) => m.id === s.aiModel)
     return (
       <>
         <Group label="Provider">
@@ -393,17 +400,29 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
 
           {provider !== 'none' && (
             <>
-              <Row label="Model" description="Fast, inexpensive models suited to note editing">
+              <Row
+                label="Model"
+                description="Fast models suit note editing; the rest cost more per action"
+              >
                 <select
                   className="settings-select"
                   value={modelValue}
                   onChange={(e) => setSettings({ ...s, aiModel: e.target.value })}
                 >
-                  {cheapModels.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
+                  <optgroup label="Fast and inexpensive">
+                    {cheapModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="More capable">
+                    {capableModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </optgroup>
                   {hasCustomModel && <option value={s.aiModel}>{s.aiModel} (custom)</option>}
                 </select>
               </Row>

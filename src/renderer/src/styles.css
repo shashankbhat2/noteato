@@ -5388,8 +5388,11 @@ body:has(.quick-note-shell) {
 .tab-split-menu {
   display: grid;
   place-items: center;
-  width: 20px;
+  width: 22px;
   margin: 4px 0 4px 2px;
+  /* The browser's default button padding is asymmetric against a fixed width
+     and pushes the caret off-centre inside its own hover target. */
+  padding: 0;
   border: none;
   border-radius: 5px;
   background: transparent;
