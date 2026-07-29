@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import type { DeletedEntry, Note, NoteSummary, TrashEntry } from '../../../shared/types'
 import type { Tab } from '../tabs'
 import { useTheme } from '../theme'
@@ -14,18 +14,28 @@ import SettingsModal from './SettingsModal'
 import ConfirmDialog from './ConfirmDialog'
 import SearchModal from './SearchModal'
 import ImportNotionModal from './ImportNotionModal'
+import NewTabModal from './NewTabModal'
+import ImportModal from './ImportModal'
+import ShortcutsHelp from './ShortcutsHelp'
 
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
-const AGENT_PANEL_OPEN_KEY = 'noteato:agentPanelOpen'
 const OPEN_TABS_KEY = 'noteato:openTabs'
 // Sentinel tab id for the Trash view; never collides with note UUIDs and is
 // deliberately dropped on session restore (readStoredTabs resolves ids
 // against the note list).
 const TRASH_TAB_ID = '__trash__'
 const HOME_TAB_ID = '__home__'
+// The assistant is a view like any other, so it rides in a pane through the
+// same tab machinery rather than owning a rail of its own.
+const ASSISTANT_TAB_ID = '__assistant__'
 const RECENT_NOTES_KEY = 'noteato:recentNotes'
 const RECENT_NOTES_MAX = 8
+// Two notes and the assistant is the useful ceiling; past that the panes are
+// too narrow to write in.
+const MAX_PANES = 3
+// Narrowest a pane can be dragged, in px — below this the note body has no room.
+const PANE_MIN_PX = 220
 
 // Last session's open tabs, stored by note id (paths can go stale between
 // sessions — they're re-resolved against the current note list on restore).
@@ -64,6 +74,9 @@ interface OpenTarget {
   title: string
 }
 
+/** What a pane holds: a tab id, or null for the pane that hosts the tab strip. */
+type PaneSlot = string | null
+
 function folderName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1)
 }
@@ -75,10 +88,15 @@ export default function MainLayout() {
   const [trash, setTrash] = useState<TrashEntry[]>([])
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
-  // Split view: a second tab pinned open beside the primary pane. splitSide is
-  // which half it occupies, so a drop on the left can push the current note right.
-  const [splitTabId, setSplitTabId] = useState<string | null>(null)
-  const [splitSide, setSplitSide] = useState<'left' | 'right'>('right')
+  // The pane row. One pane hosts the tab strip and shows `activeTabId` (it also
+  // keeps every other tab mounted but hidden, which is what preserves an
+  // editor's history and scroll when you switch tabs); each entry in
+  // `extraPanes` is a further pane pinned to one specific tab. `primaryAt` is
+  // where the strip's pane sits among them, so a pane can be opened on either
+  // side without the others moving.
+  const [extraPanes, setExtraPanes] = useState<string[]>([])
+  const [primaryAt, setPrimaryAt] = useState(0)
+  const [paneRatios, setPaneRatios] = useState<number[]>([1])
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
@@ -92,6 +110,8 @@ export default function MainLayout() {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [newTabOpen, setNewTabOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
   const [undoState, setUndoState] = useState<(DeletedEntry & { label: string }) | null>(null)
   const [notionImportStatus, setNotionImportStatus] = useState<string | null>(null)
@@ -99,9 +119,24 @@ export default function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
   )
-  const [agentPanelOpen, setAgentPanelOpen] = useState(
-    () => localStorage.getItem(AGENT_PANEL_OPEN_KEY) !== 'false'
-  )
+  const editorAreaRef = useRef<HTMLDivElement>(null)
+
+  // The panes as they sit on screen, left→right.
+  const paneRow: PaneSlot[] = [
+    ...extraPanes.slice(0, primaryAt),
+    null,
+    ...extraPanes.slice(primaryAt)
+  ]
+  // The tab each pane is showing, in the same order — what the strip groups
+  // into one combined tab.
+  const paneTabIds = [
+    ...new Set(paneRow.map((slot) => slot ?? activeTabId).filter((id): id is string => id !== null))
+  ]
+  const ratios =
+    paneRatios.length === paneRow.length
+      ? paneRatios
+      : Array<number>(paneRow.length).fill(1 / paneRow.length)
+
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const notionStatusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Active BlockNote editors keyed by tab id, so menu Undo/Redo can reach the
@@ -152,12 +187,39 @@ export default function MainLayout() {
     })
   }
 
-  const toggleAgentPanel = (): void => {
-    setAgentPanelOpen((open) => {
-      const next = !open
-      localStorage.setItem(AGENT_PANEL_OPEN_KEY, String(next))
-      return next
-    })
+  /**
+   * Drag the seam between panes `index` and `index + 1`. Only that pair
+   * changes width — the panes beyond the seam stay exactly where they are,
+   * which is what makes repeated adjustments predictable.
+   */
+  const startPaneResize = (e: React.PointerEvent, index: number): void => {
+    e.preventDefault()
+    const area = editorAreaRef.current
+    if (!area) return
+    const widths = [...area.querySelectorAll('.editor-pane')].map(
+      (pane) => pane.getBoundingClientRect().width
+    )
+    const total = widths.reduce((sum, w) => sum + w, 0)
+    if (total === 0 || index + 1 >= widths.length) return
+    const startX = e.clientX
+    const pair = widths[index] + widths[index + 1]
+
+    const move = (ev: PointerEvent): void => {
+      const delta = ev.clientX - startX
+      const first = Math.min(pair - PANE_MIN_PX, Math.max(PANE_MIN_PX, widths[index] + delta))
+      const next = widths.map((w) => w / total)
+      next[index] = first / total
+      next[index + 1] = (pair - first) / total
+      setPaneRatios(next)
+    }
+    const stop = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      document.body.classList.remove('resizing-panes')
+    }
+    document.body.classList.add('resizing-panes')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
   }
 
   useEffect(() => {
@@ -194,14 +256,15 @@ export default function MainLayout() {
       // longer exist); fall back to the most recently updated note.
       const stored = readStoredTabs()
       const restored = (stored?.ids ?? [])
-        .map((id) => list.find((n) => n.id === id))
-        .filter((n): n is NoteSummary => Boolean(n))
-        .map((n) => ({
-          id: n.id,
-          path: n.path,
-          title: n.title,
-          pinned: stored?.pinnedIds.includes(n.id) || undefined
-        }))
+        .map((id) => {
+          // The assistant carries no file, so it can't be resolved against the
+          // note list the way every other restorable tab is.
+          if (id === ASSISTANT_TAB_ID) return { id, path: '', title: 'Assistant' }
+          const n = list.find((note) => note.id === id)
+          return n ? { id: n.id, path: n.path, title: n.title } : null
+        })
+        .filter((t): t is Tab => t !== null)
+        .map((t) => ({ ...t, pinned: stored?.pinnedIds.includes(t.id) || undefined }))
       if (restored.length > 0) {
         setTabs(restored)
         const active =
@@ -363,6 +426,12 @@ export default function MainLayout() {
       if (prev.some((t) => t.id === note.id)) return prev
       return [...prev, { id: note.id, path: note.path, title: note.title }]
     })
+    // Already showing in a pane of its own: focus that pane instead of also
+    // making it the strip's tab, which would mount the note twice.
+    if (extraPanes.includes(note.id)) {
+      focusPaneTab(note.id)
+      return
+    }
     setActiveTabId(note.id)
   }
 
@@ -383,6 +452,20 @@ export default function MainLayout() {
     setActiveTabId(HOME_TAB_ID)
   }
 
+  /**
+   * The assistant opens into the pane beside whatever is focused, which is
+   * where it used to live permanently — but from here it is an ordinary tab,
+   * so it can be moved to the other half, un-split into a full pane, or
+   * closed like anything else.
+   */
+  const toggleAssistantPane = (): void => {
+    if (tabs.some((t) => t.id === ASSISTANT_TAB_ID)) {
+      closeTab(ASSISTANT_TAB_ID)
+      return
+    }
+    addNoteToSplit({ id: ASSISTANT_TAB_ID, path: '', title: 'Assistant' })
+  }
+
   // Feeds the Home view's Recent cards; special tabs don't count.
   useEffect(() => {
     if (!activeTabId || activeTabId.startsWith('__')) return
@@ -396,86 +479,133 @@ export default function MainLayout() {
     })
   }, [activeTabId])
 
+  /** Commit a new row, resetting the widths only when the pane count changed. */
+  const setPaneRow = (row: PaneSlot[]): void => {
+    const at = row.indexOf(null)
+    setPrimaryAt(at === -1 ? 0 : at)
+    setExtraPanes(row.filter((slot): slot is string => slot !== null))
+    setPaneRatios((prev) =>
+      prev.length === row.length ? prev : Array<number>(row.length).fill(1 / row.length)
+    )
+  }
+
+  /**
+   * Keep the panes' tabs adjacent in the strip, in the order they appear on
+   * screen, so the group renders as one contiguous combined tab.
+   */
+  const regroupStrip = (row: PaneSlot[], activeId: string | null): void => {
+    const ids = row.map((slot) => slot ?? activeId).filter((id): id is string => id !== null)
+    if (ids.length < 2) return
+    setTabs((prev) => {
+      const members = ids
+        .map((id) => prev.find((t) => t.id === id))
+        .filter((t): t is Tab => t !== undefined)
+      if (members.length !== ids.length) return prev
+      const rest = prev.filter((t) => !ids.includes(t.id))
+      const firstAt = prev.findIndex((t) => ids.includes(t.id))
+      const insertAt = prev.slice(0, firstAt).filter((t) => !ids.includes(t.id)).length
+      return [...rest.slice(0, insertAt), ...members, ...rest.slice(insertAt)]
+    })
+  }
+
+  /**
+   * Put `id` in a pane at one end of the row. Over the cap, the pane furthest
+   * from that end gives way — never the one hosting the tab strip, which has
+   * nowhere else to go.
+   */
+  const withPane = (row: PaneSlot[], id: string, end: 'start' | 'end'): PaneSlot[] => {
+    const rest = row.filter((slot) => slot !== id)
+    const next = end === 'start' ? [id, ...rest] : [...rest, id]
+    while (next.length > MAX_PANES) {
+      const far = end === 'start' ? next.length - 1 : 0
+      next.splice(next[far] === null ? (end === 'start' ? far - 1 : 1) : far, 1)
+    }
+    return next
+  }
+
   const closeTab = (id: string): void => {
-    if (splitTabId === id) setSplitTabId(null)
+    const row = paneRow.filter((slot) => slot !== id)
+    if (row.length !== paneRow.length) setPaneRow(row)
     setTabs((prev) => {
       const idx = prev.findIndex((t) => t.id === id)
       const next = prev.filter((t) => t.id !== id)
       if (activeTabId === id) {
-        const fallback = next[idx - 1] ?? next[0] ?? null
+        // The strip's pane can't adopt a tab another pane is already showing.
+        const free = next.filter((t) => !extraPanes.includes(t.id))
+        const fallback = free[Math.min(idx, free.length - 1)] ?? free[0] ?? null
         setActiveTabId(fallback ? fallback.id : null)
       }
       return next
     })
   }
 
-  // Drop a dragged tab onto one half of the editor area to split there. The
-  // primary pane must not end up showing the same note, so it falls back to
-  // another open tab when the dropped tab was the active one.
   const selectTab = (id: string): void => {
-    if (id === splitTabId) setSplitTabId(null)
+    // A tab pinned into its own pane is focused there rather than pulled into
+    // the strip's pane, which would leave that pane empty.
+    if (extraPanes.includes(id)) {
+      focusPaneTab(id)
+      return
+    }
     setActiveTabId(id)
   }
 
-  // Clicking the other half of a split focuses it without disturbing the
-  // layout: the two notes swap roles, and the side flips to compensate so each
-  // stays exactly where it was on screen.
-  const focusSplitHalf = (id: string): void => {
-    if (id === activeTabId || id !== splitTabId || !activeTabId) return
-    setSplitTabId(activeTabId)
+  /**
+   * Focus the pane showing `id`. The strip moves to that pane and the tab it
+   * was showing takes over the one just vacated, so nothing shifts on screen.
+   */
+  const focusPaneTab = (id: string): void => {
+    if (id === activeTabId || !activeTabId) return
+    if (!extraPanes.includes(id)) {
+      setActiveTabId(id)
+      return
+    }
+    setPaneRow(paneRow.map((slot) => (slot === id ? null : slot === null ? activeTabId : slot)))
     setActiveTabId(id)
-    setSplitSide((side) => (side === 'left' ? 'right' : 'left'))
   }
 
-  const splitIdBySide = (side: 'left' | 'right'): string | null => {
-    if (!splitTabId || !activeTabId) return null
-    const leftId = splitSide === 'left' ? splitTabId : activeTabId
-    return side === 'left' ? leftId : leftId === splitTabId ? activeTabId : splitTabId
+  /** Close one pane and its tab; the remaining panes share out its width. */
+  const closePaneAt = (index: number): void => {
+    if (paneRow.length < 2 || index < 0 || index >= paneRow.length) return
+    const slot = paneRow[index]
+    const closingId = slot ?? activeTabId
+    if (!closingId) return
+    const row = paneRow.filter((_, i) => i !== index)
+    if (slot === null) {
+      // The strip's pane is the one closing, so a survivor has to take it over.
+      const heir = row[0]
+      setActiveTabId(heir ?? null)
+      setPaneRow(row.map((s) => (s === heir ? null : s)))
+    } else {
+      setPaneRow(row)
+    }
+    setTabs((prev) => prev.filter((tab) => tab.id !== closingId))
   }
 
-  /** Close one half of the split; the survivor takes over the whole area. */
-  const closeSplitView = (side: 'left' | 'right'): void => {
-    const targetId = splitIdBySide(side)
-    const keepId = splitIdBySide(side === 'left' ? 'right' : 'left')
-    if (!targetId || !keepId) return
-    setSplitTabId(null)
-    setActiveTabId(keepId)
-    setTabs((prev) => prev.filter((tab) => tab.id !== targetId))
+  /** Collapse back to a single pane; the other tabs stay open in the strip. */
+  const separatePanes = (): void => setPaneRow([null])
+
+  /** Mirror the row without changing which pane is focused. */
+  const reversePanes = (): void => {
+    const row = [...paneRow].reverse()
+    setPaneRow(row)
+    setPaneRatios((prev) => [...prev].reverse())
+    regroupStrip(row, activeTabId)
   }
 
-  /** Swap the two panes without changing which note is focused. */
-  const reverseSplit = (): void => {
-    setSplitSide((side) => (side === 'left' ? 'right' : 'left'))
-    setTabs((prev) => {
-      if (!splitTabId || !activeTabId) return prev
-      const a = prev.findIndex((t) => t.id === splitTabId)
-      const b = prev.findIndex((t) => t.id === activeTabId)
-      if (a === -1 || b === -1) return prev
-      const next = [...prev]
-      ;[next[a], next[b]] = [next[b], next[a]]
-      return next
-    })
-  }
-
+  /** Drop a dragged tab onto one edge of the editor area to open a pane there. */
   const openSplit = (id: string, side: 'left' | 'right'): void => {
     if (tabs.length < 2) return
-    const partnerId = activeTabId === id ? tabs.find((t) => t.id !== id)?.id ?? null : activeTabId
-    if (!partnerId) return
-    setSplitTabId(id)
-    setSplitSide(side)
-    setActiveTabId(partnerId)
-    // Sit the pair next to each other in the strip, ordered to match the panes,
-    // so the tab group renders as one contiguous container.
-    setTabs((prev) => {
-      const moved = prev.find((t) => t.id === id)
-      if (!moved) return prev
-      const rest = prev.filter((t) => t.id !== id)
-      const anchor = rest.findIndex((t) => t.id === partnerId)
-      if (anchor === -1) return prev
-      const next = [...rest]
-      next.splice(side === 'left' ? anchor : anchor + 1, 0, moved)
-      return next
-    })
+    let active = activeTabId
+    if (active === id) {
+      // The strip's pane has to move to some other tab, since `id` is leaving
+      // it for a pane of its own.
+      active = tabs.find((t) => t.id !== id && !extraPanes.includes(t.id))?.id ?? null
+      if (!active) return
+      setActiveTabId(active)
+    }
+    const row = withPane(paneRow, id, side === 'left' ? 'start' : 'end')
+    setPaneRow(row)
+    regroupStrip(row, active)
   }
 
   // A tab's stored path is its bootstrap value and can lag behind a rename, so
@@ -500,38 +630,30 @@ export default function MainLayout() {
   }
 
   /**
-   * Split the currently focused tab with another note, opening it first if it
-   * isn't already a tab. `openSplit` can't do this — it needs the target to
-   * already be in `tabs`, and a freshly-set state isn't readable yet — so the
-   * tab is inserted and the split is set up in one pass.
+   * Open a note in a pane of its own on the right, adding the tab first if it
+   * isn't open yet. `openSplit` can't do this — it needs the target to already
+   * be in `tabs`, and freshly-set state isn't readable yet — so the tab is
+   * inserted and the pane is opened in one pass.
    */
   const addNoteToSplit = (note: OpenTarget): void => {
     const partnerId =
       activeTabId && activeTabId !== note.id
         ? activeTabId
-        : tabs.find((t) => t.id !== note.id)?.id ?? null
-    // Nothing to split against — just open it normally.
+        : tabs.find((t) => t.id !== note.id && !extraPanes.includes(t.id))?.id ?? null
+    // Nothing to sit beside — just open it normally.
     if (!partnerId) {
       openNoteTab(note)
       return
     }
-    setTabs((prev) => {
-      const entry = prev.find((t) => t.id === note.id) ?? {
-        id: note.id,
-        path: note.path,
-        title: note.title
-      }
-      const rest = prev.filter((t) => t.id !== note.id)
-      const anchor = rest.findIndex((t) => t.id === partnerId)
-      if (anchor === -1) return prev
-      // Sit the pair next to each other in the strip, ordered to match the panes.
-      const next = [...rest]
-      next.splice(anchor + 1, 0, entry)
-      return next
-    })
-    setSplitTabId(note.id)
-    setSplitSide('right')
+    setTabs((prev) =>
+      prev.some((t) => t.id === note.id)
+        ? prev
+        : [...prev, { id: note.id, path: note.path, title: note.title }]
+    )
+    const row = withPane(paneRow, note.id, 'end')
+    setPaneRow(row)
     setActiveTabId(partnerId)
+    regroupStrip(row, partnerId)
   }
 
   /**
@@ -561,13 +683,13 @@ export default function MainLayout() {
         index = side === 'before' ? target : target + 1
       }
 
-      if (splitTabId && activeTabId && splitTabId !== activeTabId && draggedId !== splitTabId && draggedId !== activeTabId) {
-        const a = rest.findIndex((t) => t.id === splitTabId)
-        const b = rest.findIndex((t) => t.id === activeTabId)
-        if (a !== -1 && b !== -1) {
-          const lo = Math.min(a, b)
-          const hi = Math.max(a, b)
-          // Landing strictly inside the pair's span would split the combined tab.
+      // The panes' tabs render as one combined tab, so a drop landing strictly
+      // inside their span would tear it apart — snap to the nearer outside edge.
+      if (paneTabIds.length > 1 && !paneTabIds.includes(draggedId)) {
+        const spots = paneTabIds.map((id) => rest.findIndex((t) => t.id === id))
+        if (spots.every((i) => i !== -1)) {
+          const lo = Math.min(...spots)
+          const hi = Math.max(...spots)
           if (index > lo && index <= hi) index = index - lo <= hi + 1 - index ? lo : hi + 1
         }
       }
@@ -612,14 +734,17 @@ export default function MainLayout() {
     }
   }
 
-  const handleCreate = async (folder = ''): Promise<void> => {
-    const note = await window.api.notes.create('Untitled', folder)
+  const handleCreate = async (folder = '', title = 'Untitled'): Promise<void> => {
+    const note = await window.api.notes.create(title, folder)
     await refresh()
     openNoteTab(note)
   }
 
-  const handleCreateInSelectedFolder = (): Promise<void> =>
-    handleCreate(selectedFolder && folders.includes(selectedFolder) ? selectedFolder : '')
+  const handleCreateInSelectedFolder = (title?: string): Promise<void> =>
+    handleCreate(
+      selectedFolder && folders.includes(selectedFolder) ? selectedFolder : '',
+      title || 'Untitled'
+    )
 
   const handleCreateFolder = async (parent: string, name: string): Promise<void> => {
     const safe = name.replace(/[/\\]/g, '').trim()
@@ -833,10 +958,14 @@ export default function MainLayout() {
       }
       return next
     })
-    // Tab.path intentionally stays pinned to its bootstrap value — NoteEditor only
-    // uses it to load initial content and tracks the current (possibly renamed)
-    // path itself. Updating it here would re-trigger that load effect mid-edit.
-    setTabs((prev) => prev.map((t) => (t.id === saved.id ? { ...t, title: saved.title } : t)))
+    // Editing a title renames the file, so the tab has to follow it. A tab that
+    // kept its bootstrap path would load the wrong (gone) file the next time its
+    // editor is mounted from scratch — which is exactly what moving a tab into
+    // split view does. NoteEditor ignores a path change that just reflects the
+    // rename of the note it is already showing, so this can't disturb an edit.
+    setTabs((prev) =>
+      prev.map((t) => (t.id === saved.id ? { ...t, title: saved.title, path: saved.path } : t))
+    )
   }
 
   const latest = useRef({
@@ -935,10 +1064,40 @@ export default function MainLayout() {
     }
   }, [])
 
-  const splitTab = splitTabId ? tabs.find((tab) => tab.id === splitTabId) ?? null : null
+  const assistantOpen = tabs.some((tab) => tab.id === ASSISTANT_TAB_ID)
+
+  /**
+   * The notes the assistant is working on: whatever else is on screen. The
+   * focused pane's note is the subject, and a second note pane rides along as
+   * read-only context. With nothing beside it there is no subject — better
+   * than guessing at a note the user can't see.
+   */
+  const assistantContext = (): { note: Tab | null; splitNote: Tab | null } => {
+    const others = paneTabIds
+      .filter((id) => id !== ASSISTANT_TAB_ID && !id.startsWith('__'))
+      .map((id) => tabs.find((tab) => tab.id === id))
+      .filter((tab): tab is Tab => tab !== undefined)
+    // Whichever of them is focused leads; otherwise take them left to right.
+    const lead = others.find((tab) => tab.id === activeTabId) ?? others[0] ?? null
+    return { note: lead, splitNote: others.find((tab) => tab.id !== lead?.id) ?? null }
+  }
 
   // Tabs that render a built-in view instead of a note editor.
   const renderSpecialTab = (tab: Tab): React.ReactNode | null => {
+    if (tab.id === ASSISTANT_TAB_ID) {
+      const { note, splitNote } = assistantContext()
+      return (
+        <AgentPanel
+          note={note}
+          splitNote={splitNote}
+          notes={notes}
+          getMarkdown={getAgentMarkdown}
+          applyMarkdown={applyAgentMarkdown}
+          createNote={handleAgentCreateNote}
+          onOpenNote={openNoteTab}
+        />
+      )
+    }
     if (tab.id === TRASH_TAB_ID) {
       return (
         <TrashView
@@ -962,20 +1121,41 @@ export default function MainLayout() {
     return null
   }
 
-  const renderSplitPane = (tab: Tab): React.ReactNode => (
-    <main className="editor-pane split-pane">
-      <div style={{ minHeight: '100%' }}>
-        {renderSpecialTab(tab) ?? (
-          <NoteEditor
-            path={tab.path}
-            onSaved={handleNoteSaved}
-            onEditorReady={(editor) => registerEditor(tab.id, editor)}
-            onCloseSplit={() => setSplitTabId(null)}
-          />
-        )}
-      </div>
-    </main>
-  )
+  /**
+   * The assistant manages its own scrolling and needs a bounded height, unlike
+   * a note, which grows the pane and lets the pane scroll.
+   */
+  const paneClass = (id: string | null, extra = ''): string =>
+    `editor-pane${extra ? ` ${extra}` : ''}${id === ASSISTANT_TAB_ID ? ' fills-pane' : ''}`
+
+  // A note's shell has to span the pane even when the note is short, so the
+  // dictation button docks to the pane's bottom rather than to the end of the
+  // text. A flex column is what makes `flex: 1` on the shell resolve — a
+  // percentage height can't, since the wrapper's own height is auto.
+  const paneBodyStyle = (id: string): React.CSSProperties =>
+    id === ASSISTANT_TAB_ID
+      ? { height: '100%' }
+      : { display: 'flex', flexDirection: 'column', minHeight: '100%' }
+
+  /** A pane pinned to one tab. The pane hosting the tab strip is rendered inline. */
+  const renderPinnedPane = (id: string, index: number, flex: number): React.ReactNode => {
+    const tab = tabs.find((t) => t.id === id)
+    if (!tab) return null
+    return (
+      <main className={paneClass(tab.id, 'split-pane')} style={{ flex: `${flex} 1 0%` }}>
+        <div style={paneBodyStyle(tab.id)}>
+          {renderSpecialTab(tab) ?? (
+            <NoteEditor
+              path={tab.path}
+              onSaved={handleNoteSaved}
+              onEditorReady={(editor) => registerEditor(tab.id, editor)}
+              onCloseSplit={() => closePaneAt(index)}
+            />
+          )}
+        </div>
+      </main>
+    )
+  }
 
   return (
     <div className={zenMode ? 'app-shell zen' : 'app-shell'}>
@@ -994,36 +1174,21 @@ export default function MainLayout() {
           onMoveTab={moveTab}
           onCopyPath={(id) => void copyNotePath(id)}
           onRevealInFinder={(id) => void revealNote(id)}
-          onNewNote={() => void handleCreateInSelectedFolder()}
+          onNewNote={() => setNewTabOpen(true)}
           onTabDragStart={setDraggingTabId}
           onTabDragEnd={() => {
             setDraggingTabId(null)
             setDropSide(null)
           }}
-          splitTabId={splitTabId}
-          splitSide={splitSide}
+          paneTabIds={paneTabIds}
           onSplit={openSplit}
-          onCloseSplit={() => setSplitTabId(null)}
-          onCloseSplitView={closeSplitView}
-          onReverseSplit={reverseSplit}
-          onFocusSplitHalf={focusSplitHalf}
-          agentAvailable={aiAgentEnabled}
-          agentPanelOpen={agentPanelOpen}
-          onToggleAgentPanel={toggleAgentPanel}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onSeparatePanes={separatePanes}
+          onClosePane={closePaneAt}
+          onReversePanes={reversePanes}
+          onFocusPane={focusPaneTab}
         />
       )}
-      {/* The agent stays mounted while closed so it can animate shut (and keep
-          its conversation); the class drives the width transition. */}
-      <div
-        className={[
-          'app-body',
-          sidebarCollapsed ? 'sidebar-collapsed' : '',
-          aiAgentEnabled && !agentPanelOpen ? 'agent-closed' : ''
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
+      <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
         {!zenMode && (
           <Sidebar
             notes={notes}
@@ -1058,48 +1223,73 @@ export default function MainLayout() {
             onSearch={() => setSearchOpen(true)}
             onOpenTrash={openTrashTab}
             onOpenHome={openHomeTab}
+            onOpenAssistant={toggleAssistantPane}
+            assistantOpen={assistantOpen}
+            assistantAvailable={aiAgentEnabled}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenImport={() => setImportOpen(true)}
           />
         )}
-        <div className="editor-area">
-          {/* The split pane renders before the primary when docked left. */}
-          {splitTab && splitSide === 'left' && renderSplitPane(splitTab)}
-
-          <main className="editor-pane">
-            {/* All tabs closed: Home takes over rather than an empty state. */}
-            {tabs.length === 0 && (
-              <HomeView
-                notes={notes}
-                recentIds={recentIds}
-                onOpenNote={openNoteTab}
-                onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
-              />
-            )}
-            {/* The split tab is mounted in its own pane, so skip it here — one
-                note must never have two live editors. */}
-            {tabs
-              .filter((tab) => tab.id !== splitTabId)
-              .map((tab) => (
+        <div className="editor-area" ref={editorAreaRef}>
+          {/* Panes left to right, with a draggable seam between each pair. The
+              keys matter: they let a pane keep its editors when the row is
+              reordered or another pane opens beside it. */}
+          {paneRow.map((slot, index) => (
+            <Fragment key={slot ?? '__strip__'}>
+              {index > 0 && (
                 <div
-                  key={tab.id}
-                  // minHeight, not height: a sticky child only stays stuck within
-                  // its parent's box, so this must grow with the note's content.
-                  style={{
-                    display: tab.id === activeTabId ? 'block' : 'none',
-                    minHeight: '100%'
-                  }}
-                >
-                  {renderSpecialTab(tab) ?? (
-                    <NoteEditor
-                      path={tab.path}
-                      onSaved={handleNoteSaved}
-                      onEditorReady={(editor) => registerEditor(tab.id, editor)}
+                  className="pane-resizer"
+                  onPointerDown={(e) => startPaneResize(e, index - 1)}
+                />
+              )}
+              {slot !== null ? (
+                renderPinnedPane(slot, index, ratios[index])
+              ) : (
+                <main className={paneClass(activeTabId)} style={{ flex: `${ratios[index]} 1 0%` }}>
+                  {/* All tabs closed: Home takes over rather than an empty state. */}
+                  {tabs.length === 0 && (
+                    <HomeView
+                      notes={notes}
+                      recentIds={recentIds}
+                      onOpenNote={openNoteTab}
+                      onSetReminder={(note, reminderAt) =>
+                        void handleSetReminder(note, reminderAt)
+                      }
                     />
                   )}
-                </div>
-              ))}
-          </main>
+                  {/* Tabs pinned into their own pane are mounted there, so skip
+                      them here — one note must never have two live editors. */}
+                  {tabs
+                    .filter((tab) => !extraPanes.includes(tab.id))
+                    .map((tab) => (
+                      <div
+                        key={tab.id}
+                        // minHeight, not height: a sticky child only stays stuck
+                        // within its parent's box, so this must grow with the
+                        // note's content.
+                        style={
+                          tab.id === activeTabId ? paneBodyStyle(tab.id) : { display: 'none' }
+                        }
+                      >
+                        {renderSpecialTab(tab) ?? (
+                          <NoteEditor
+                            path={tab.path}
+                            onSaved={handleNoteSaved}
+                            onEditorReady={(editor) => registerEditor(tab.id, editor)}
+                          />
+                        )}
+                      </div>
+                    ))}
+                </main>
+              )}
+            </Fragment>
+          ))}
 
-          {splitTab && splitSide === 'right' && renderSplitPane(splitTab)}
+          {/* Floats over the working area's bottom-left corner, clear of the
+              dictation button at each pane's bottom-right. */}
+          <div className="editor-area-shortcuts">
+            <ShortcutsHelp />
+          </div>
 
           {/* Drop targets appear only while a tab is being dragged. */}
           {draggingTabId && tabs.length > 1 && (
@@ -1130,20 +1320,25 @@ export default function MainLayout() {
             </div>
           )}
         </div>
-        {!zenMode && aiAgentEnabled && (
-          <AgentPanel
-            note={tabs.find((tab) => tab.id === activeTabId) ?? null}
-            splitNote={splitTab}
-            notes={notes}
-            getMarkdown={getAgentMarkdown}
-            applyMarkdown={applyAgentMarkdown}
-            createNote={handleAgentCreateNote}
-            onOpenNote={openNoteTab}
-          />
-        )}
       </div>
       {settingsOpen && (
         <SettingsModal onClose={() => setSettingsOpen(false)} onNotesDirChanged={refresh} />
+      )}
+      {importOpen && (
+        <ImportModal
+          onImportMarkdown={() => void handleImport()}
+          onImportNotion={() => setNotionGuideOpen(true)}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
+      {newTabOpen && (
+        <NewTabModal
+          notes={notes}
+          recentIds={recentIds}
+          onOpen={openNoteTab}
+          onCreate={(title) => void handleCreateInSelectedFolder(title)}
+          onClose={() => setNewTabOpen(false)}
+        />
       )}
       {searchOpen && (
         <SearchModal

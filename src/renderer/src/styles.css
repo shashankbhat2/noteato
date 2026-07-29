@@ -11,7 +11,10 @@ body,
 
 :root {
   --titlebar-leading-w: 252px;
-  --tab-max-w: 180px;
+  --tab-max-w: 150px;
+  /* Tabs are navigation, not content — they get their own row height rather
+     than the taller one the sidebar rows share, so the strip stays quiet. */
+  --tab-h: 24px;
   /* Gutter between the floating panes, and the offset the tab strip needs to
      line up with the note card's left edge. */
   --pane-gap: 10px;
@@ -25,32 +28,33 @@ body,
   --dur-fast: 120ms;
   --dur: 220ms;
   --sidebar-expanded-w: var(--titlebar-leading-w);
-  --bg: #faf8f5;
-  --sidebar-bg: #f3f1ec;
-  --sidebar-hover: #ece9e2;
-  --bg-secondary: #f3f1ec;
-  --bg-tertiary: #ece9e2;
+  /* Neutral greyscale. The note card (and every floating surface) is pure
+     white; the window chrome behind it — tab bar, sidebar, pane gutters — is
+     grey, so the open tab reads as a sheet of paper laid on the desk. */
+  --bg: #ffffff;
+  --sidebar-bg: #ededed;
+  --sidebar-hover: #e5e5e5;
+  --bg-secondary: #f4f4f4;
+  --bg-tertiary: #e5e5e5;
   /* Regions vs objects.
      App chrome (sidebar, tab bar, panel seams) is borderless — it separates by
      tone and whitespace. Objects that float or take input (modals, menus,
      popovers, fields, buttons) keep a hairline over a --surface fill, and their
      internal dividers stay too. That split is what keeps the mix deliberate
-     rather than arbitrary. --rule is for content the user inserts (dividers).
-     Borders and shadows are warm-tinted, not neutral grey — the whole palette
-     is paper, and generic black shadows read as plastic against it. */
-  --border: #e5e1d7;
-  --border-strong: #d8d3c6;
-  --surface: #edeae3;
-  --surface-hover: #e5e1d8;
-  --rule: #e3e0d8;
-  --shadow-1: 0 1px 2px rgba(74, 60, 46, 0.05), 0 2px 8px rgba(74, 60, 46, 0.06);
-  --shadow-2: 0 12px 36px rgba(74, 60, 46, 0.16);
-  --shadow-inset: inset 0 1px 3px rgba(74, 60, 46, 0.13);
+     rather than arbitrary. --rule is for content the user inserts (dividers). */
+  --border: #e4e4e4;
+  --border-strong: #d5d5d5;
+  --surface: #e7e7e7;
+  --surface-hover: #dedede;
+  --rule: #e5e5e5;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.16);
+  --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.13);
   --radius-sm: 7px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --text: #2b2a27;
-  --text-muted: #938f84;
+  --text: #232323;
+  --text-muted: #8b8b8b;
   --accent: #a1523c;
   --accent-soft: rgba(161, 82, 60, 0.12);
   /* Selected-item wash — one value for the active tab and the active note. */
@@ -59,22 +63,26 @@ body,
   --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
 }
 
+/* Dark sits higher up the greyscale than a near-black would: the window is a
+   real grey, and the pane a clearly lighter one, so the two read apart at a
+   glance instead of merging into one dark field. Every step above them is
+   spaced to match. */
 :root[data-theme='dark'] {
-  --bg: #171614;
-  --sidebar-bg: #11100f;
-  --sidebar-hover: #1d1c19;
-  --bg-secondary: #1d1c19;
-  --bg-tertiary: #26241f;
-  --border: #302d27;
-  --border-strong: #3d3931;
-  --surface: #201e1b;
-  --surface-hover: #2b2925;
-  --rule: #322f29;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.26);
-  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --bg: #262626;
+  --sidebar-bg: #1a1a1a;
+  --sidebar-hover: #2f2f2f;
+  --bg-secondary: #2e2e2e;
+  --bg-tertiary: #383838;
+  --border: #3a3a3a;
+  --border-strong: #4c4c4c;
+  --surface: #2e2e2e;
+  --surface-hover: #383838;
+  --rule: #3f3f3f;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.55);
   --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.45);
-  --text: #e9e6df;
-  --text-muted: #8f8b81;
+  --text: #ededed;
+  --text-muted: #9d9d9d;
   --accent: #d98a70;
   --accent-soft: rgba(217, 138, 112, 0.16);
   --danger: #e0806c;
@@ -722,13 +730,16 @@ button {
 
 /* Tab bar — flat, underline-style, no chrome cards */
 
+/* The strip and the panes below it are one surface: the bar carries the chrome
+   colour, the focused tab carries the pane's, and the tab's square bottom runs
+   straight into the pane it belongs to. Nothing is separated by a gap. */
 .tab-bar {
   display: flex;
-  align-items: center;
-  height: calc(var(--row-h) + 14px);
+  align-items: stretch;
+  height: calc(var(--tab-h) + 12px);
   flex-shrink: 0;
-  padding: 7px 0;
-  background: transparent;
+  padding: 6px 0 0;
+  background: var(--sidebar-bg);
   -webkit-app-region: drag;
 }
 
@@ -760,8 +771,8 @@ button {
   flex: 1;
   overflow-x: auto;
   height: 100%;
-  /* Lines the first tab up with the left edge of the note card below. */
-  padding-left: var(--pane-gap);
+  /* The first tab starts at the pane's left edge — there is no gutter to clear. */
+  padding-left: 0;
   /* Left as a drag region (inherited from .tab-bar) so the empty space
      after the last tab is still draggable/double-click-to-maximize —
      only the tabs and the "+" button below opt back out of it. */
@@ -777,15 +788,15 @@ button {
 .tab {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 5px;
   max-width: var(--tab-max-w);
-  padding: 0 6px 0 12px;
+  padding: 0 6px 0 11px;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--text-muted);
   flex-shrink: 0;
-  border-radius: var(--radius-sm);
-  border-bottom: 2px solid transparent;
+  /* Top corners only: the bottom edge belongs to the pane. */
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   transition:
     color 0.12s ease,
     background-color 0.12s ease;
@@ -795,21 +806,14 @@ button {
 
 .tab:hover {
   color: var(--text);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
 }
 
+/* The focused tab is the pane, lifted up into the strip. */
+.tab.active,
 .tab.active:hover {
-  background: var(--accent-active);
-}
-
-/* Inset from the header's edges, so the wash reads as a pill rather than a
-   full-height block. The underline goes with it — a floating pill has nothing
-   left to attach to. */
-.tab.active {
   color: var(--text);
-  background: var(--accent-active);
-  border-bottom-color: transparent;
-  border-radius: var(--radius-sm);
+  background: var(--bg);
 }
 
 /* --- Reordering by drag ---------------------------------------------------
@@ -885,7 +889,7 @@ button {
 .tab-new {
   border: none;
   background: transparent;
-  width: 30px;
+  width: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1038,10 +1042,9 @@ button {
 .sidebar-new-split {
   display: flex;
   margin: 0 var(--sidebar-inset) 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-1);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -1592,14 +1595,16 @@ button {
   font-family: inherit;
 }
 
-/* Holds one editor card, or two side by side in split view. */
+/* Holds one pane, or two side by side. A pane is content-agnostic — a note,
+   Home, Trash and the assistant are all just tabs that can sit in either half.
+   The seam between them is the resizer, which also supplies the gap, so the
+   area itself has none of its own. */
 .editor-area {
   position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
-  gap: var(--pane-gap);
-  margin: 0 var(--pane-gap) var(--pane-gap);
+  background: var(--bg);
 }
 
 .editor-pane {
@@ -1608,12 +1613,66 @@ button {
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
+  /* Three panes make each one narrow, and a note has to answer to the width it
+     actually got rather than to the window's. */
+  container-type: inline-size;
+  container-name: pane;
+}
+
+
+/* A pane whose view scrolls internally (the assistant) rather than growing the
+   pane the way a note does. */
+.editor-pane.fills-pane {
+  overflow: hidden;
+}
+
+/* The draggable seam. It occupies exactly the gap the two cards used to be
+   separated by, so nothing moves when a split opens — the handle only becomes
+   visible once you reach for it. */
+/* A hairline between panes, widened into a grabbable strip that overhangs both
+   sides without taking any layout width of its own. */
+.pane-resizer {
+  position: relative;
+  /* At rest it is just a rule between two panes and must stay under anything
+     that floats over them; while it is being dragged it becomes what the
+     pointer is on, and then it outranks everything (see below). */
+  z-index: 1;
+  flex: 0 0 1px;
+  background: var(--border);
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+}
+
+.pane-resizer::after {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+  background: transparent;
+  transition: background-color var(--dur-fast) ease;
+}
+
+.pane-resizer:hover::after,
+body.resizing-panes .pane-resizer::after {
+  background: var(--border-strong);
+}
+
+body.resizing-panes .pane-resizer {
+  z-index: 200;
+}
+
+/* While dragging, the pointer belongs to the seam — not to the text under it. */
+body.resizing-panes {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.resizing-panes .editor-pane {
+  pointer-events: none;
 }
 
 .note-editor {
+  flex: 1 0 auto;
+  width: 100%;
   max-width: 860px;
   margin: 0 auto;
   padding: 20px 48px 112px;
@@ -1645,8 +1704,19 @@ button {
   align-items: center;
   gap: 6px;
   min-height: 24px;
-  margin-bottom: 10px;
   padding-inline: 2px;
+}
+
+/* The title is the first block, so BlockNote's heading lead-in padding — there
+   to separate a heading from the content above it — has nothing to separate
+   from and only opens a gap under the tag strip. */
+.note-editor
+  .bn-editor
+  > .bn-block-group
+  > .bn-block-outer:first-child
+  > .bn-block
+  > .bn-block-content[data-content-type='heading'] {
+  padding-top: 0;
 }
 
 .note-tags-icon {
@@ -1707,6 +1777,11 @@ button {
   border-color: var(--text-muted);
 }
 
+.note-tag-entry {
+  position: relative;
+  display: inline-flex;
+}
+
 .note-tag-input {
   width: 130px;
   border: 1px solid var(--accent);
@@ -1717,6 +1792,60 @@ button {
   font-family: inherit;
   font-size: 11.5px;
   outline: none;
+}
+
+/* Completions for the tag being typed. A floating object, so it follows the
+   menu conventions — hairline over --bg, not the borderless chrome treatment. */
+.note-tag-suggestions {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 5px);
+  left: 0;
+  min-width: 160px;
+  max-height: 232px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  animation: fade-in 0.1s ease;
+}
+
+.note-tag-suggestion {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 4px);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-tag-suggestion svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.note-tag-suggestion span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-tag-suggestion.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.note-tag-suggestion.active svg {
+  color: inherit;
 }
 
 /* BlockNote hardcodes Inter on .bn-default-styles, which otherwise wins over
@@ -1761,7 +1890,7 @@ button {
 
 :root[data-theme='dark'] .note-editor .bn-block-content[data-content-type='codeBlock'] {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  background-color: var(--prosemirror-highlight-bg, #1f2126);
+  background-color: var(--prosemirror-highlight-bg, #191b1f);
 }
 
 .note-editor .bn-block-content[data-content-type='codeBlock'] > pre {
@@ -1829,6 +1958,71 @@ button {
   .bn-block-group
   .bn-block-outer:not([data-prev-depth-changed])::before {
   border-left: none;
+}
+
+/* --- Selection toolbar -----------------------------------------------------
+   BlockNote ships this through Mantine, which gives it its own radius, shadow
+   and button metrics. Bring it onto the same conventions every other floating
+   object here follows: a hairline over --surface, the shared radius scale, and
+   accent-soft for what's currently on. */
+
+.bn-toolbar.bn-formatting-toolbar,
+.bn-toolbar.bn-link-toolbar {
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+}
+
+.bn-toolbar button {
+  height: 26px;
+  min-width: 26px;
+  padding: 0 5px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-family);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.bn-toolbar button:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+/* On — the same wash the sidebar and tab strip use for a current item. */
+.bn-toolbar button[data-selected='true'],
+.bn-toolbar button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.bn-toolbar button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Separates the type dropdown from the style buttons without a hard rule. */
+.bn-toolbar .bn-select {
+  margin-right: 2px;
+}
+
+.bn-tooltip {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+  font-family: var(--font-family);
+  font-size: 11.5px;
 }
 
 /* Drag-handle block menu (Notion-style vertical menu). */
@@ -1962,13 +2156,17 @@ button {
   min-height: calc(var(--row-h) + 12px);
   padding: 6px 20px;
   background: var(--bg);
-  /* Matches the card's rounded top so it doesn't square off the corners. */
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 
+/* Fills the pane, and lets the note body absorb the slack, so anything after
+   the body sits at the pane's bottom edge however short the note is. Sticky
+   alone can't do that — it only ever lifts an element up into view. */
 .note-editor-shell {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
   min-height: 100%;
 }
 
@@ -2047,8 +2245,40 @@ button {
   transform: scale(0.94);
 }
 
-/* Dictation is the first note option. It grows into a compact live-state badge
-   while recording without changing the toolbar height. */
+/* Dictation rides the bottom-right of the note card. It grows into a compact
+   live-state badge while recording without changing the button's height.
+
+   The dock is a zero-height sticky line at the end of the card's scroll
+   content, so the button hovers above the card's bottom edge wherever the note
+   is scrolled to, and adds no space of its own to the layout. */
+
+.note-dictation-dock {
+  position: sticky;
+  z-index: 6;
+  bottom: 18px;
+  /* Zero height so the line itself adds nothing to the note's layout; the
+     button hangs off it and is placed against the card's right edge. */
+  height: 0;
+  /* Only the button takes clicks — the rest of the line is note text. */
+  pointer-events: none;
+}
+
+.note-dictation-dock .dictation-panel {
+  position: absolute;
+  right: 20px;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.note-dictation-dock .dictation-bar {
+  box-shadow: var(--shadow-1);
+}
+
+/* Docked at the bottom, the error has to open upward. */
+.note-dictation-dock .dictation-panel-error {
+  top: auto;
+  bottom: 38px;
+}
 
 .dictation-panel {
   position: relative;
@@ -2141,6 +2371,14 @@ button {
   animation: fade-in-up 0.25s ease;
 }
 
+.empty-state-detail {
+  max-width: 380px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
 .empty-state-btn {
   display: flex;
   align-items: center;
@@ -2168,14 +2406,19 @@ button {
 
 /* Settings modal */
 
+/* A modal is the only thing being asked for while it's open, so it sits above
+   every other layer and pushes the app out of focus behind it — dimmed and
+   defocused rather than just dimmed. */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 500;
   animation: fade-in 0.12s ease;
 }
 
@@ -3186,45 +3429,16 @@ button {
 
 /* Agent panel */
 
-/* Floats as its own card beside the editor, same elevation.
-   Its width is half the window minus the sidebar column, which makes it match
-   the note exactly while the sidebar is open. Because that width doesn't
-   depend on whether the sidebar is actually showing, collapsing the sidebar
-   leaves the agent where it is and hands the freed column to the note, which
-   grows leftward. */
+/* The assistant is a pane's content, not a rail of its own — it fills whichever
+   half it was opened into, and the pane supplies the card (border, radius,
+   elevation) exactly as it does for a note. */
 .agent-panel {
-  width: calc(
-    (100vw - var(--sidebar-expanded-w) - (var(--pane-gap) * 3)) / 2
-  );
-  min-width: 280px;
-  max-width: 620px;
-  flex-shrink: 0;
-  opacity: 1;
+  height: 100%;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  margin: 0 var(--pane-gap) var(--pane-gap) 0;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
-  transition:
-    width var(--dur) var(--ease),
-    min-width var(--dur) var(--ease),
-    margin-right var(--dur) var(--ease),
-    opacity var(--dur-fast) linear;
-}
-
-/* Closed: collapses to nothing rather than unmounting, so it animates both
-   ways and the editor grows into the space it leaves. */
-.app-body.agent-closed .agent-panel {
-  width: 0;
-  min-width: 0;
-  margin-right: 0;
-  border-width: 0;
-  opacity: 0;
-  pointer-events: none;
 }
 
 
@@ -4440,10 +4654,10 @@ body:has(.quick-note-shell) {
   position: fixed;
   z-index: 120;
   min-width: 168px;
+  max-width: 280px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-2);
   padding: 4px;
   animation: fade-in 0.1s ease;
 }
@@ -4466,9 +4680,20 @@ body:has(.quick-note-shell) {
   font-size: 12.5px;
   color: var(--text);
   padding: 7px 10px;
-  border-radius: 5px;
+  /* Concentric with the container: the shared floating-object radius less the
+     4px it insets by, so the highlight's corners run parallel to the menu's. */
+  border-radius: calc(var(--radius-lg) - 4px);
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* Ellipsis goes on the label, never on the item: a submenu is rendered inside
+   its parent item and positioned outside that box, so clipping the item makes
+   the submenu disappear entirely. */
+.context-menu-item > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .context-menu-item:hover {
@@ -4580,6 +4805,209 @@ body:has(.quick-note-shell) {
   color: var(--accent);
   border-radius: 2px;
   padding: 0 1px;
+}
+
+/* Import — a modal because bringing notes in is an errand you do once, not a
+   shelf worth keeping open in the sidebar. */
+
+.import-modal {
+  width: 460px;
+  max-width: 92vw;
+  padding: 20px;
+}
+
+.import-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.import-modal-header h2 {
+  margin: 0 0 3px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.import-modal-header p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.import-sources {
+  display: grid;
+  gap: 4px;
+}
+
+.import-source {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+.import-source:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--bg-secondary);
+}
+
+.import-source:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.import-source-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.import-source:hover:not(:disabled) .import-source-icon {
+  color: var(--accent);
+}
+
+.import-source-text {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.import-source-text strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.import-source-text span {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* New tab — the same shell as search, with creating a note as the one action
+   that isn't a note you already have. */
+
+.new-tab-modal .search-results {
+  max-height: 46vh;
+  padding-top: 0;
+}
+
+.new-tab-create {
+  display: flex;
+  width: calc(100% - 12px);
+  align-items: center;
+  gap: 9px;
+  margin: 0 6px 6px;
+  padding: 9px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.new-tab-create svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.new-tab-create span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-tab-create:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.new-tab-create:hover svg {
+  color: inherit;
+}
+
+.new-tab-section {
+  padding: 6px 12px 4px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Tag completions for a `#…` term, offered above the results rather than
+   replacing them — the notes matched so far stay visible while you narrow. */
+.search-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 18px 12px;
+}
+
+.search-tag-row-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.search-tag-option,
+.search-result-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 200px;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.search-tag-option:hover,
+.search-result-tag:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.search-result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.search-result-tag.matched {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4909,20 +5337,22 @@ body:has(.quick-note-shell) {
 
 /* A split view collapses into one tab holding both notes, mirroring the panes
    on screen: left half is the left pane. */
+/* Several panes share one tab, so the whole group is the surface the panes
+   below it belong to — the halves are divided inside it, not separated. */
 .tab-split {
   display: flex;
   align-items: stretch;
   gap: 0;
   max-width: none;
-  padding: 0 2px 0 0;
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
-  outline-offset: -1px;
+  /* Enough trailing room that the caret sits inside the tab rather than on its
+     rounded corner. */
+  padding: 0 7px 0 0;
+  background: var(--bg);
   cursor: default;
 }
 
 .tab-split:hover {
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  background: var(--bg);
 }
 
 .tab-split-cell {
@@ -4934,7 +5364,7 @@ body:has(.quick-note-shell) {
   align-self: center;
   width: 1px;
   height: 15px;
-  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--border);
 }
 
 .tab-split-half {
@@ -4958,16 +5388,18 @@ body:has(.quick-note-shell) {
 .tab-split-menu {
   display: grid;
   place-items: center;
-  width: 22px;
+  width: 20px;
+  margin: 4px 0 4px 2px;
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: var(--accent);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .tab-split-menu:hover {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+  background: var(--bg-tertiary);
 }
 
 .agent-context-badge.split {
@@ -6003,5 +6435,94 @@ body.is-reordering * {
 
 .sidebar-home-row svg {
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
+/* Home, Assistant, Settings, Trash — the app's non-note destinations, grouped
+   so they read as one list rather than four one-off controls. */
+.sidebar-entries {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+}
+
+.sidebar-entries .sidebar-home-row span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-home-row.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.sidebar-home-row.active svg {
+  color: inherit;
+}
+
+/* Shortcut sheet, floated over the working area rather than parked in the
+   title bar. It opens upward, since it sits at the bottom. */
+.editor-area-shortcuts {
+  position: absolute;
+  /* Sits over the note, the panes and any popover — it's a global reference
+     sheet, so nothing should be able to bury it. */
+  z-index: 200;
+  left: 14px;
+  bottom: 14px;
+}
+
+.editor-area-shortcuts .shortcuts-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--shadow-1);
+}
+
+.editor-area-shortcuts .shortcuts-toggle-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.editor-area-shortcuts .shortcuts-popup {
+  top: auto;
+  right: auto;
+  bottom: 36px;
+  left: 0;
+  box-shadow: var(--shadow-2);
+}
+
+/* Narrow pane: pull in the gutters and bring the display-sized title down to
+   something that still reads as a title without breaking every other word. */
+@container pane (max-width: 560px) {
+  .note-editor {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .note-editor.full-width {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  /* BlockNote carries the heading level in the inner tag, not an attribute on
+     the block, and sizes the block itself — so match on what it contains.
+     Absolute units, since these replace a size rather than scale it, and
+     !important because BlockNote's own rule for this uses CSS nesting and
+     outranks anything reachable from here. */
+  .note-editor .bn-editor .bn-block-content:has(> h1) {
+    font-size: 2rem !important;
+  }
+
+  .note-editor .bn-editor .bn-block-content:has(> h2) {
+    font-size: 1.5rem !important;
+  }
+
+  .note-editor .bn-editor .bn-block-content:has(> h3) {
+    font-size: 1.25rem !important;
+  }
+}

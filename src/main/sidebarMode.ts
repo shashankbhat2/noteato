@@ -12,8 +12,8 @@ interface SidebarWindowState {
 const MIN_WIDTH = 340
 const MAX_WIDTH = 460
 const DEFAULT_WIDTH = 392
-const LIGHT_BG = '#f7f5f1'
-const DARK_BG = '#1b191d'
+const LIGHT_BG = '#ededed'
+const DARK_BG = '#1a1a1a'
 
 /**
  * Owns the compact edge window. Note content deliberately remains in NoteStore;

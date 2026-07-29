@@ -169,6 +169,8 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
   const [fullWidth, setFullWidth] = useState(false)
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | 'loading'>('loading')
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
   const [reminderPopover, setReminderPopover] = useState<{ x: number; y: number } | null>(null)
@@ -180,6 +182,9 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
   // must not write the pre-edit list back, so saves read the tags from here
   // rather than from whichever `note` their closure captured.
   const tagsRef = useRef<string[]>([])
+  // The path this pane is actually showing. Editing a title renames the file,
+  // so it drifts from the `path` prop the tab was opened with.
+  const livePathRef = useRef<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const reminderBtnRef = useRef<HTMLButtonElement>(null)
   const aiStreamingRef = useRef(false)
@@ -196,11 +201,19 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
   }, [aiError])
 
   useEffect(() => {
+    // A rename feeds the note's new path back down through this prop. That's
+    // the note already on screen — reloading it would throw away the caret and
+    // any edits made since the save for nothing.
+    if (livePathRef.current === path) return
+
     let cancelled = false
     setInitialBlocks('loading')
+    setLoadError(null)
 
-    window.api.notes.read(path).then(async (loaded) => {
+    const load = async (): Promise<void> => {
+      const loaded = await window.api.notes.read(path)
       if (cancelled) return
+      livePathRef.current = loaded.path
       setNote(loaded)
       setFullWidth(loaded.fullWidth)
       tagsRef.current = loaded.tags
@@ -216,12 +229,20 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
       if (!cancelled) {
         setInitialBlocks(loaded.external ? blocks : ensureTitleBlock(blocks, loaded.title))
       }
+    }
+
+    // Without this the pane would sit on "Loading…" forever — a read that
+    // rejects (moved or unlinked file) never resolves `initialBlocks`, and
+    // there'd be nothing on screen to say so or to try again from.
+    void load().catch((err: unknown) => {
+      if (cancelled) return
+      setLoadError(err instanceof Error ? err.message : String(err))
     })
 
     return () => {
       cancelled = true
     }
-  }, [path])
+  }, [path, loadAttempt])
 
   const editor = useMemo(() => {
     if (initialBlocks === 'loading') return undefined
@@ -339,6 +360,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
       tags: tagsRef.current,
       fullWidth: nextFullWidth
     })
+    livePathRef.current = saved.path
     setNote(saved)
     tagsRef.current = saved.tags
     onSaved(saved)
@@ -701,6 +723,24 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
     }
   }
 
+  if (loadError) {
+    return (
+      <div className="empty-state">
+        <span>This note couldn’t be opened.</span>
+        <span className="empty-state-detail">{loadError}</span>
+        <button
+          className="empty-state-btn"
+          onClick={() => {
+            livePathRef.current = null
+            setLoadAttempt((n) => n + 1)
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
   if (!editor || !note) return <div className="empty-state">Loading…</div>
 
   const segments = note.path.split('/')
@@ -728,7 +768,6 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
           <span className="breadcrumb-file">{fileLabel}</span>
         </div>
         <div className="toolbar-actions">
-          <DictationPanel editor={editor} />
           <button
             className={note.pinned ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
             onClick={() => void handleTogglePin()}
@@ -825,6 +864,15 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
           />
         )}
       </div>
+
+      {/* Dictation floats over the bottom-right of the note card it writes
+          into, rather than sitting in the toolbar with the note's actions.
+          A sibling of .note-editor so it tracks the card's edge, not the
+          centred text column. */}
+      <div className="note-dictation-dock">
+        <DictationPanel editor={editor} />
+      </div>
+
       {aiError && <div className="ai-error-toast">{aiError}</div>}
       {ctxMenu && (
         <ContextMenu

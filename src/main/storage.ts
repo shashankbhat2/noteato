@@ -71,6 +71,30 @@ function baseName(relPath: string): string {
   return i === -1 ? relPath : relPath.slice(i + 1)
 }
 
+/**
+ * Splits a search box query into tag filters and the leftover free text.
+ * `#launch` and `tag:launch` mean the same thing; everything else is text.
+ */
+export function parseSearchQuery(raw: string): { tags: string[]; text: string } {
+  const tags: string[] = []
+  const words: string[] = []
+  for (const token of raw.trim().split(/\s+/)) {
+    const match = /^(?:tag:|#)(.+)$/i.exec(token)
+    if (match) tags.push(tagKey(match[1]))
+    else if (token) words.push(token)
+  }
+  return { tags, text: words.join(' ') }
+}
+
+/**
+ * A tag term can't carry a space — it would split into two search tokens — so
+ * "note taking" has to be typed as `#note-taking`. Comparing both sides with
+ * separators dropped is what lets that find the tag it means.
+ */
+function tagKey(tag: string): string {
+  return tag.toLowerCase().replace(/[\s-]+/g, '')
+}
+
 function makeSnippet(body: string, idx: number, len: number): string {
   const start = Math.max(0, idx - 40)
   const end = Math.min(body.length, idx + len + 80)
@@ -771,22 +795,57 @@ export class NoteStore {
   // --- Full-text search ----------------------------------------------------
 
   search(query: string): SearchResult[] {
-    const q = query.trim().toLowerCase()
-    if (!q) return []
+    const { tags: wanted, text } = parseSearchQuery(query)
+    const q = text.toLowerCase()
+    if (!q && wanted.length === 0) return []
 
-    const scored: (SearchResult & { score: number })[] = []
+    const scored: (SearchResult & { score: number; updatedAt: string })[] = []
     for (const summary of this.list()) {
+      const noteTags = summary.tags.map((t) => t.toLowerCase())
+
+      // Every `#tag` term narrows the result set, so a note has to carry all of
+      // them. Prefix matching keeps a half-typed tag useful while it is typed.
+      const matched = new Set<string>()
+      const passesFilters = wanted.every((want) => {
+        const hit = noteTags.find((t) => tagKey(t).startsWith(want))
+        if (hit) matched.add(hit)
+        return hit !== undefined
+      })
+      if (!passesFilters) continue
+
+      const title = summary.title
+      const titleHit = q ? title.toLowerCase().includes(q) : false
+      // Free text matches tags too, so "launch" finds notes tagged "launch"
+      // without anyone having to know the `#` syntax exists.
+      const tagHits = q ? noteTags.filter((t) => t.includes(q)) : []
+      for (const t of tagHits) matched.add(t)
+
+      // Tag-only queries never need the file opened — the summary already
+      // carries everything the result row shows.
+      if (!q) {
+        scored.push({
+          id: summary.id,
+          path: summary.path,
+          title,
+          folder: summary.folder,
+          snippet: summary.excerpt,
+          tags: summary.tags,
+          matchedTags: [...matched],
+          score: 0,
+          updatedAt: summary.updatedAt
+        })
+        continue
+      }
+
       let body: string
       try {
         body = this.read(summary.path).body
       } catch {
         continue
       }
-      const title = summary.title
-      const titleHit = title.toLowerCase().includes(q)
       const hay = body.toLowerCase()
       const firstIdx = hay.indexOf(q)
-      if (!titleHit && firstIdx === -1) continue
+      if (!titleHit && tagHits.length === 0 && firstIdx === -1) continue
 
       let count = 0
       let from = 0
@@ -807,11 +866,16 @@ export class NoteStore {
         title,
         folder: summary.folder,
         snippet,
-        score: (titleHit ? 1000 : 0) + count
+        tags: summary.tags,
+        matchedTags: [...matched],
+        score: (titleHit ? 1000 : 0) + (tagHits.length > 0 ? 500 : 0) + count,
+        updatedAt: summary.updatedAt
       })
     }
 
-    scored.sort((a, b) => b.score - a.score)
-    return scored.slice(0, 50).map(({ score: _score, ...r }) => r)
+    scored.sort((a, b) => b.score - a.score || (a.updatedAt < b.updatedAt ? 1 : -1))
+    return scored
+      .slice(0, 50)
+      .map(({ score: _score, updatedAt: _updatedAt, ...r }) => r)
   }
 }

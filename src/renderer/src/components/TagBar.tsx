@@ -27,15 +27,18 @@ export function normalizeTag(raw: string): string {
 export default function TagBar({ tags, suggestions, onChange, readOnly }: Props) {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
+  // Which completion the arrow keys have landed on; -1 means "use what I typed".
+  const [highlighted, setHighlighted] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (adding) inputRef.current?.focus()
   }, [adding])
 
-  const commit = (): void => {
-    const tag = normalizeTag(draft)
+  const add = (raw: string): void => {
+    const tag = normalizeTag(raw)
     setDraft('')
+    setHighlighted(-1)
     setAdding(false)
     if (!tag) return
     // Tags are case-insensitively unique; the first spelling entered wins.
@@ -45,8 +48,13 @@ export default function TagBar({ tags, suggestions, onChange, readOnly }: Props)
 
   const remove = (tag: string): void => onChange(tags.filter((t) => t !== tag))
 
-  const unused = suggestions.filter(
-    (s) => !tags.some((t) => t.toLowerCase() === s.toLowerCase())
+  const unused = suggestions.filter((s) => !tags.some((t) => t.toLowerCase() === s.toLowerCase()))
+  // Completions for what's typed so far. An empty draft offers the whole
+  // library, which is how someone reuses a tag they can't quite remember.
+  const query = normalizeTag(draft).toLowerCase()
+  const matches = (query ? unused.filter((s) => s.toLowerCase().includes(query)) : unused).slice(
+    0,
+    8
   )
 
   // Nothing to show and nothing to add — stay out of the way entirely.
@@ -69,32 +77,59 @@ export default function TagBar({ tags, suggestions, onChange, readOnly }: Props)
       ))}
       {!readOnly &&
         (adding ? (
-          <>
+          <div className="note-tag-entry">
             <input
               ref={inputRef}
               className="note-tag-input"
-              list="noteato-tag-suggestions"
               placeholder="Tag name"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                setHighlighted(-1)
+              }}
+              // Suggestions commit on mousedown, before this fires.
+              onBlur={() => add(draft)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ',') {
                   e.preventDefault()
-                  commit()
+                  add(highlighted >= 0 ? matches[highlighted] : draft)
+                } else if (e.key === 'ArrowDown' && matches.length > 0) {
+                  e.preventDefault()
+                  setHighlighted((h) => (h + 1 >= matches.length ? -1 : h + 1))
+                } else if (e.key === 'ArrowUp' && matches.length > 0) {
+                  e.preventDefault()
+                  setHighlighted((h) => (h <= -1 ? matches.length - 1 : h - 1))
+                } else if (e.key === 'Tab' && matches.length > 0) {
+                  e.preventDefault()
+                  add(matches[Math.max(highlighted, 0)])
                 } else if (e.key === 'Escape') {
                   e.preventDefault()
                   setDraft('')
+                  setHighlighted(-1)
                   setAdding(false)
                 }
               }}
             />
-            <datalist id="noteato-tag-suggestions">
-              {unused.map((s) => (
-                <option key={s} value={s} />
-              ))}
-            </datalist>
-          </>
+            {matches.length > 0 && (
+              <div className="note-tag-suggestions">
+                {matches.map((s, i) => (
+                  <button
+                    key={s}
+                    className={i === highlighted ? 'note-tag-suggestion active' : 'note-tag-suggestion'}
+                    // Fires before the input's blur, so the pick isn't lost.
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      add(s)
+                    }}
+                    onMouseEnter={() => setHighlighted(i)}
+                  >
+                    <Tag size={11} />
+                    <span>{s}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ) : (
           <button className="note-tag-add" onClick={() => setAdding(true)}>
             <Plus size={11} />

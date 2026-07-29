@@ -7,12 +7,12 @@ function buildLightTheme(fontFamily: string): Theme {
     ...lightDefaultTheme,
     colors: {
       ...lightDefaultTheme.colors,
-      editor: { text: '#2b2a27', background: '#faf8f5' },
-      menu: { text: '#2b2a27', background: '#fdfcfa' },
-      hovered: { text: '#2b2a27', background: '#ece9e2' },
+      editor: { text: '#232323', background: '#ffffff' },
+      menu: { text: '#232323', background: '#ffffff' },
+      hovered: { text: '#232323', background: '#ededed' },
       selected: { text: 'var(--text)', background: 'var(--accent-soft)' },
-      border: '#e3e0d8',
-      sideMenu: '#b7b3a8'
+      border: '#e4e4e4',
+      sideMenu: '#b0b0b0'
     },
     borderRadius: 4,
     fontFamily
@@ -24,12 +24,12 @@ function buildDarkTheme(fontFamily: string): Theme {
     ...darkDefaultTheme,
     colors: {
       ...darkDefaultTheme.colors,
-      editor: { text: '#e9e6df', background: '#171614' },
-      menu: { text: '#e9e6df', background: '#1d1c19' },
-      hovered: { text: '#e9e6df', background: '#26241f' },
+      editor: { text: '#ededed', background: '#262626' },
+      menu: { text: '#ededed', background: '#2e2e2e' },
+      hovered: { text: '#ededed', background: '#383838' },
       selected: { text: 'var(--text)', background: 'var(--accent-soft)' },
-      border: '#322f29',
-      sideMenu: '#5a564c'
+      border: '#3f3f3f',
+      sideMenu: '#6e6e6e'
     },
     borderRadius: 4,
     fontFamily

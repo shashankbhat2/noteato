@@ -1,19 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconBell as Bell,
-  IconBrandNotion as NotionIcon,
   IconChevronDown as ChevronDown,
   IconChevronRight as ChevronRight,
-  IconDiamond as ObsidianIcon,
-  IconFileTypeDocx as DocxIcon,
-  IconFileTypeHtml as HtmlIcon,
   IconHome as Home,
-  IconMarkdown as MarkdownIcon,
-  IconNotebook as OneNoteIcon,
   IconPin as Pin,
   IconPlus as Plus,
   IconSearch as Search,
   IconTag as Tag,
+  IconDownload as Download,
+  IconSettings as Settings,
+  IconSparkles as Sparkles,
   IconTrash as Trash2,
   IconX as X
 } from '@tabler/icons-react'
@@ -70,6 +67,13 @@ interface Props {
   onSearch: () => void
   onOpenTrash: () => void
   onOpenHome: () => void
+  /** The assistant is a view you open, like Home — see MainLayout's pane row. */
+  onOpenAssistant: () => void
+  /** Import is an errand, not a shelf — it opens as a modal. */
+  onOpenImport: () => void
+  assistantOpen: boolean
+  assistantAvailable: boolean
+  onOpenSettings: () => void
 }
 
 interface DragPayload {
@@ -125,7 +129,12 @@ export default function Sidebar({
   onImportNotion,
   onSearch,
   onOpenTrash,
-  onOpenHome
+  onOpenHome,
+  onOpenAssistant,
+  onOpenImport,
+  assistantOpen,
+  assistantAvailable,
+  onOpenSettings
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try {
@@ -678,19 +687,6 @@ export default function Sidebar({
     </div>
   )
 
-  const importOptions: {
-    label: string
-    icon: React.ReactNode
-    onClick?: () => void
-    soon?: boolean
-  }[] = [
-    { label: 'Markdown files', icon: <MarkdownIcon size={15} />, onClick: onImport },
-    { label: 'Notion export', icon: <NotionIcon size={15} />, onClick: onImportNotion },
-    { label: 'Obsidian vault', icon: <ObsidianIcon size={15} />, soon: true },
-    { label: 'HTML', icon: <HtmlIcon size={15} />, soon: true },
-    { label: 'OneNote', icon: <OneNoteIcon size={15} />, soon: true },
-    { label: 'Word (.docx)', icon: <DocxIcon size={15} />, soon: true }
-  ]
 
   return (
     <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
@@ -731,10 +727,36 @@ export default function Sidebar({
         </button>
       </div>
 
-      <button className="sidebar-home-row" onClick={onOpenHome}>
-        <Home size={15} />
-        <span>Home</span>
-      </button>
+      {/* Entry points that aren't notes: they live together under Home rather
+          than scattered across the title bar and the foot of the tree. */}
+      <div className="sidebar-entries">
+        <button className="sidebar-home-row" onClick={onOpenHome}>
+          <Home size={15} />
+          <span>Home</span>
+        </button>
+        {assistantAvailable && (
+          <button
+            className={assistantOpen ? 'sidebar-home-row active' : 'sidebar-home-row'}
+            onClick={onOpenAssistant}
+          >
+            <Sparkles size={15} />
+            <span>Assistant</span>
+          </button>
+        )}
+        <button className="sidebar-home-row" onClick={onOpenSettings}>
+          <Settings size={15} />
+          <span>Settings</span>
+        </button>
+        <button className="sidebar-home-row" onClick={onOpenImport}>
+          <Download size={15} />
+          <span>Import</span>
+        </button>
+        <button className="sidebar-home-row" onClick={onOpenTrash}>
+          <Trash2 size={15} />
+          <span>Trash</span>
+          {trashCount > 0 && <span className="sidebar-trash-count">{trashCount}</span>}
+        </button>
+      </div>
 
       <div
         className={dragOver === '' ? 'sidebar-scroll drop-root' : 'sidebar-scroll'}
@@ -814,32 +836,7 @@ export default function Sidebar({
           </Collapsible>
         </section>
 
-        <section className="sidebar-section">
-          {sectionHeader('import', 'Import')}
-          <Collapsible open={sections.import}>
-            <ul className="note-list">
-              {importOptions.map((option) => (
-                <li key={option.label}>
-                  <button
-                    className="sidebar-row-btn"
-                    disabled={option.soon}
-                    onClick={option.onClick}
-                  >
-                    <span className="sidebar-row-icon">{option.icon}</span>
-                    <span className="sidebar-row-label">{option.label}</span>
-                    {option.soon && <span className="soon-badge">Coming soon</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </Collapsible>
-        </section>
 
-        <button className="sidebar-trash-row" onClick={onOpenTrash}>
-          <Trash2 size={14} />
-          <span>Trash</span>
-          {trashCount > 0 && <span className="sidebar-trash-count">{trashCount}</span>}
-        </button>
       </div>
 
       {menu && (

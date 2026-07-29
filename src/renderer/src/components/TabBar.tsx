@@ -6,18 +6,21 @@ import {
   IconLayoutSidebar as PanelLeft,
   IconPin as Pin,
   IconPlus as Plus,
-  IconSettings as Settings,
-  IconSparkles as Sparkles,
   IconX as X
 } from '@tabler/icons-react'
 import type { Tab } from '../tabs'
-import ShortcutsHelp from './ShortcutsHelp'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 
 const DOUBLE_CLICK_MS = 400
 
 const REVEAL_LABEL =
   window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
+
+/** Menu labels quote a note's title, and a title can be a whole sentence. */
+function shortTitle(title: string): string {
+  const name = title || 'Untitled'
+  return name.length > 26 ? `${name.slice(0, 25).trimEnd()}…` : name
+}
 
 interface Props {
   tabs: Tab[]
@@ -39,17 +42,13 @@ interface Props {
   onTabDragEnd: () => void
   /** Dropping a tab inside the strip reorders it. `targetId` null = the end. */
   onMoveTab: (draggedId: string, targetId: string | null, side: 'before' | 'after') => void
-  splitTabId: string | null
-  splitSide: 'left' | 'right'
+  /** The tab each pane is showing, left to right — one entry means no split. */
+  paneTabIds: string[]
   onSplit: (id: string, side: 'left' | 'right') => void
-  onCloseSplit: () => void
-  onCloseSplitView: (side: 'left' | 'right') => void
-  onReverseSplit: () => void
-  onFocusSplitHalf: (id: string) => void
-  agentAvailable: boolean
-  agentPanelOpen: boolean
-  onToggleAgentPanel: () => void
-  onOpenSettings: () => void
+  onSeparatePanes: () => void
+  onClosePane: (index: number) => void
+  onReversePanes: () => void
+  onFocusPane: (id: string) => void
 }
 
 export default function TabBar({
@@ -69,17 +68,12 @@ export default function TabBar({
   onTabDragStart,
   onTabDragEnd,
   onMoveTab,
-  splitTabId,
-  splitSide,
+  paneTabIds,
   onSplit,
-  onCloseSplit,
-  onCloseSplitView,
-  onReverseSplit,
-  onFocusSplitHalf,
-  agentAvailable,
-  agentPanelOpen,
-  onToggleAgentPanel,
-  onOpenSettings
+  onSeparatePanes,
+  onClosePane,
+  onReversePanes,
+  onFocusPane
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   // Reordering state. The dragged id is tracked locally too because
@@ -147,7 +141,7 @@ export default function TabBar({
     const idx = tabs.findIndex((t) => t.id === tab.id)
     const hasRight = tabs.slice(idx + 1).some((t) => !t.pinned)
     const hasOthers = tabs.some((t) => t.id !== tab.id && !t.pinned)
-    const isSplit = splitTabId === tab.id
+    const inPane = paneTabIds.length > 1 && paneTabIds.includes(tab.id)
     setMenu({
       x: e.clientX,
       y: e.clientY,
@@ -156,8 +150,8 @@ export default function TabBar({
         ...(tabs.length > 1
           ? [
               { separator: true, label: '' },
-              ...(isSplit
-                ? [{ label: 'Close split view', onClick: onCloseSplit }]
+              ...(inPane
+                ? [{ label: 'Close split view', onClick: onSeparatePanes }]
                 : [
                     { label: 'Split left', onClick: () => onSplit(tab.id, 'left') },
                     { label: 'Split right', onClick: () => onSplit(tab.id, 'right') }
@@ -228,30 +222,27 @@ export default function TabBar({
             onClose(tab.id)
           }}
         >
-          <X size={13} />
+          <X size={12} />
         </button>
       )}
     </div>
   )
 
-  // A split collapses its two notes into a single tab, ordered to match the
-  // panes on screen.
-  const splitPair = ((): [Tab, Tab] | null => {
-    if (!splitTabId) return null
-    const split = tabs.find((t) => t.id === splitTabId)
-    const primary = tabs.find((t) => t.id === activeTabId)
-    if (!split || !primary || split.id === primary.id) return null
-    return splitSide === 'left' ? [split, primary] : [primary, split]
+  // The panes collapse into a single tab, ordered to match what's on screen.
+  const paneTabs = ((): Tab[] => {
+    if (paneTabIds.length < 2) return []
+    const found = paneTabIds
+      .map((id) => tabs.find((t) => t.id === id))
+      .filter((t): t is Tab => t !== undefined)
+    return found.length === paneTabIds.length ? found : []
   })()
 
-  // Id of the strip's trailing element — the combined tab when the split sits
-  // last, otherwise the last tab itself.
+  // Id of the strip's trailing element — the combined tab when a pane's tab
+  // sits last, otherwise the last tab itself.
   const lastStripId = ((): string | null => {
     const last = tabs[tabs.length - 1]
     if (!last) return null
-    if (splitPair && (last.id === splitPair[0].id || last.id === splitPair[1].id)) {
-      return splitPair[0].id
-    }
+    if (paneTabs.some((t) => t.id === last.id)) return paneTabs[0].id
     return last.id
   })()
 
@@ -265,23 +256,27 @@ export default function TabBar({
         {
           label: 'Arrange Split View',
           submenu: [
-            { label: 'Separate views', onClick: onCloseSplit },
+            { label: 'Separate views', onClick: onSeparatePanes },
             { separator: true, label: '' },
-            { label: 'Close left view', onClick: () => onCloseSplitView('left') },
-            { label: 'Close right view', onClick: () => onCloseSplitView('right') },
+            // One entry per pane, named after what it holds, since with three
+            // panes "left" and "right" no longer say which one you mean.
+            ...paneTabs.map((tab, index) => ({
+              label: `Close “${shortTitle(tab.title)}”`,
+              onClick: () => onClosePane(index)
+            })),
             { separator: true, label: '' },
-            { label: 'Reverse views', onClick: onReverseSplit }
+            { label: 'Reverse views', onClick: onReversePanes }
           ]
         }
       ]
     })
   }
 
-  // The pair renders as one tab, so a drop on it lands outside the pair. Its
+  // The group renders as one tab, so a drop on it lands outside the group. Its
   // members are contiguous in `tabs` but in an order the visual one doesn't
-  // necessarily match (splitSide decides that), so resolve the edge against
-  // the array rather than against `pair`.
-  const dropOnSplit = (e: React.DragEvent<HTMLElement>, pair: [Tab, Tab]): void => {
+  // necessarily match (the pane order decides that), so resolve the edge
+  // against the array rather than against `group`.
+  const dropOnSplit = (e: React.DragEvent<HTMLElement>, group: Tab[]): void => {
     e.preventDefault()
     e.stopPropagation()
     const dragged = e.dataTransfer.getData('text/plain') || draggingId
@@ -289,27 +284,27 @@ export default function TabBar({
       endDrag()
       return
     }
-    const side = dropTarget?.id === pair[0].id ? dropTarget.side : sideOf(e)
-    const inPair = (t: Tab): boolean => t.id === pair[0].id || t.id === pair[1].id
-    const edge = side === 'before' ? tabs.find(inPair) : [...tabs].reverse().find(inPair)
+    const side = dropTarget?.id === group[0].id ? dropTarget.side : sideOf(e)
+    const inGroup = (t: Tab): boolean => group.some((m) => m.id === t.id)
+    const edge = side === 'before' ? tabs.find(inGroup) : [...tabs].reverse().find(inGroup)
     if (edge) onMoveTab(dragged, edge.id, side)
     endDrag()
   }
 
-  const renderSplitTab = (pair: [Tab, Tab]): React.ReactNode => (
+  const renderSplitTab = (group: Tab[]): React.ReactNode => (
     <div
-      className={`tab tab-split${dropClass(pair[0].id)}`}
-      key={`split-${pair[0].id}-${pair[1].id}`}
-      onDragOver={(e) => dragOverTarget(e, pair[0].id)}
-      onDrop={(e) => dropOnSplit(e, pair)}
+      className={`tab tab-split${dropClass(group[0].id)}`}
+      key={`split-${group.map((t) => t.id).join('-')}`}
+      onDragOver={(e) => dragOverTarget(e, group[0].id)}
+      onDrop={(e) => dropOnSplit(e, group)}
     >
-      {pair.map((tab, index) => (
+      {group.map((tab, index) => (
         <div key={tab.id} className="tab-split-cell">
           {index > 0 && <span className="tab-split-divider" />}
           <div
             className={tab.id === activeTabId ? 'tab-split-half focused' : 'tab-split-half'}
             title={tab.title || 'Untitled'}
-            onClick={() => onFocusSplitHalf(tab.id)}
+            onClick={() => onFocusPane(tab.id)}
             onContextMenu={openSplitMenu}
           >
             <span className="tab-title">{tab.title || 'Untitled'}</span>
@@ -321,26 +316,26 @@ export default function TabBar({
                 onClose(tab.id)
               }}
             >
-              <X size={13} />
+              <X size={12} />
             </button>
           </div>
         </div>
       ))}
       <button className="tab-split-menu" title="Arrange split view" onClick={openSplitMenu}>
-        <ChevronDown size={13} />
+        <ChevronDown size={12} />
       </button>
     </div>
   )
 
   const renderStrip = (): React.ReactNode[] => {
     const out: React.ReactNode[] = []
-    const consumed = new Set(splitPair ? [splitPair[0].id, splitPair[1].id] : [])
+    const consumed = new Set(paneTabs.map((t) => t.id))
     let splitPlaced = false
     for (const tab of tabs) {
       if (consumed.has(tab.id)) {
-        // The combined tab takes the position of whichever half comes first.
-        if (!splitPlaced && splitPair) {
-          out.push(renderSplitTab(splitPair))
+        // The combined tab takes the position of whichever member comes first.
+        if (!splitPlaced) {
+          out.push(renderSplitTab(paneTabs))
           splitPlaced = true
         }
         continue
@@ -395,22 +390,7 @@ export default function TabBar({
       >
         {renderStrip()}
         <button className="tab-new" onClick={onNewNote} title="New note">
-          <Plus size={15} />
-        </button>
-      </div>
-      <div className="tab-bar-actions">
-        {agentAvailable && (
-          <button
-            className={agentPanelOpen ? 'tab-bar-icon-btn active' : 'tab-bar-icon-btn'}
-            onClick={onToggleAgentPanel}
-            title={agentPanelOpen ? 'Hide agent panel' : 'Show agent panel'}
-          >
-            <Sparkles size={15} />
-          </button>
-        )}
-        <ShortcutsHelp />
-        <button className="tab-bar-icon-btn" onClick={onOpenSettings} title="Settings">
-          <Settings size={16} />
+          <Plus size={14} />
         </button>
       </div>
       {menu && (

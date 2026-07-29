@@ -144,8 +144,10 @@ function isSafeExternalUrl(rawUrl: string): boolean {
   }
 }
 
-const DARK_BG = '#171614'
-const LIGHT_BG = '#faf8f5'
+/* Matches --sidebar-bg, the window chrome the app shell paints, so the frame
+   the OS shows before the renderer boots is the same colour it lands on. */
+const DARK_BG = '#1a1a1a'
+const LIGHT_BG = '#ededed'
 const MIN_WIDTH = 350
 const MIN_HEIGHT = 250
 

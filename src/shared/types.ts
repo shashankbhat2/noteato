@@ -56,6 +56,10 @@ export interface SearchResult {
   title: string
   folder: string
   snippet: string
+  /** The note's own tags, so a result can show what it was tagged with. */
+  tags: string[]
+  /** Tags on this note that the query matched, lowercased. */
+  matchedTags: string[]
 }
 
 /**
