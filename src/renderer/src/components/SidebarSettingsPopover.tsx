@@ -4,12 +4,16 @@ import {
   IconKeyboard as Keyboard,
   IconSettings as SettingsIcon
 } from '@tabler/icons-react'
-import type { Settings } from '../../../shared/types'
-import {
-  QUICK_NOTE_ACCELERATOR,
-  SIDEBAR_MODE_ACCELERATOR,
-  shortcutDisplay
-} from '../../../shared/globalShortcuts'
+import type { ScreenEdge, Settings } from '../../../shared/types'
+import { SIDEBAR_MODE_ACCELERATOR, shortcutDisplay } from '../../../shared/globalShortcuts'
+
+/** Matches the steps offered in full settings. */
+const HOVER_DELAYS = [
+  { ms: 150, label: 'Instant' },
+  { ms: 400, label: 'Short' },
+  { ms: 800, label: 'Medium' },
+  { ms: 1500, label: 'Long' }
+]
 
 export default function SidebarSettingsPopover({ onClose }: { onClose: () => void }) {
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -55,21 +59,56 @@ export default function SidebarSettingsPopover({ onClose }: { onClose: () => voi
 
       <div className="sidebar-settings-row">
         <div>
-          <strong>Quick note shortcut</strong>
-          <span>{shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform)}</span>
+          <strong>Screen edge</strong>
+          <span>Where this panel sits</span>
+        </div>
+        <select
+          className="settings-select"
+          value={settings?.sidebarEdge ?? 'left'}
+          onChange={(e) => update({ sidebarEdge: e.target.value as ScreenEdge })}
+          disabled={!settings}
+        >
+          <option value="left">Left</option>
+          <option value="right">Right</option>
+        </select>
+      </div>
+
+      <div className="sidebar-settings-row">
+        <div>
+          <strong>Reveal on hover</strong>
+          <span>Rest the pointer on that edge</span>
         </div>
         <button
-          className={settings?.quickNoteShortcutEnabled ? 'settings-switch on' : 'settings-switch'}
-          onClick={() =>
-            update({ quickNoteShortcutEnabled: !settings?.quickNoteShortcutEnabled })
-          }
+          className={settings?.sidebarHoverReveal ? 'settings-switch on' : 'settings-switch'}
+          onClick={() => update({ sidebarHoverReveal: !settings?.sidebarHoverReveal })}
           role="switch"
-          aria-checked={Boolean(settings?.quickNoteShortcutEnabled)}
+          aria-checked={Boolean(settings?.sidebarHoverReveal)}
           disabled={!settings}
         >
           <span className="settings-switch-knob" />
         </button>
       </div>
+
+      <div className="sidebar-settings-row">
+        <div>
+          <strong>Hover delay</strong>
+          <span>Before it comes forward</span>
+        </div>
+        <select
+          className="settings-select"
+          value={String(settings?.sidebarHoverDelay ?? 400)}
+          onChange={(e) => update({ sidebarHoverDelay: Number(e.target.value) })}
+          disabled={!settings || !settings.sidebarHoverReveal}
+        >
+          {HOVER_DELAYS.map((option) => (
+            <option key={option.ms} value={option.ms}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="sidebar-settings-divider" />
 
       <div className="sidebar-settings-row">
         <div>

@@ -87,21 +87,13 @@ export type ScratchChange =
   | { kind: 'upsert'; note: ScratchNote }
   | { kind: 'remove'; id: string }
 
-export interface StickyNoteData {
-  id: string
-  x: number
-  y: number
-  width: number
-  height: number
-  content: string
-  color: string
-}
-
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontChoice = 'system' | 'serif' | 'mono' | 'rounded'
 export type AccentChoice = 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
 export type AiProvider = 'none' | 'anthropic' | 'openai'
 export type SyncPreference = 'none' | 'icloud' | 'noteatoPro'
+/** Which screen edge the compact notes panel docks to (and reveals from). */
+export type ScreenEdge = 'left' | 'right'
 
 export interface Settings {
   onboardingCompleted: boolean
@@ -114,7 +106,6 @@ export interface Settings {
   theme: ThemeMode
   fontFamily: FontChoice
   accent: AccentChoice
-  zenMode: boolean
   aiProvider: AiProvider
   aiModel: string
   anthropicApiKey: string
@@ -127,10 +118,17 @@ export interface Settings {
   keepInMenuBar: boolean
   /** Make the compact notes/reminders edge window available from the menu bar. */
   sidebarModeEnabled: boolean
-  /** Keep the sidebar above other windows and visible across workspaces. */
+  /**
+   * Keep the sidebar visible on every Space and over fullscreen apps. It floats
+   * above other apps either way — see SidebarModeManager.applyPinned.
+   */
   sidebarPinned: boolean
-  /** Register the system-wide shortcut that opens a centered quick-note editor. */
-  quickNoteShortcutEnabled: boolean
+  /** The screen edge the sidebar docks to. */
+  sidebarEdge: ScreenEdge
+  /** Reveal and focus the sidebar when the pointer rests against that edge. */
+  sidebarHoverReveal: boolean
+  /** How long the pointer has to rest there first, in milliseconds. */
+  sidebarHoverDelay: number
   /**
    * Spellchecker language code (e.g. "en-GB"), or "auto" for the app locale.
    * Windows/Linux only — macOS always uses the system spellchecker.

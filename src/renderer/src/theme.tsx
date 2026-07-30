@@ -11,8 +11,6 @@ interface ThemeContextValue {
   setFontFamily: (font: FontChoice) => void
   accent: AccentChoice
   setAccent: (accent: AccentChoice) => void
-  zenMode: boolean
-  setZenMode: (zen: boolean) => void
   aiSelectionActions: boolean
   setAiSelectionActions: (value: boolean) => void
   aiAgentEnabled: boolean
@@ -27,8 +25,6 @@ const ThemeContext = createContext<ThemeContextValue>({
   setFontFamily: () => {},
   accent: 'ember',
   setAccent: () => {},
-  zenMode: false,
-  setZenMode: () => {},
   aiSelectionActions: true,
   setAiSelectionActions: () => {},
   aiAgentEnabled: false,
@@ -49,7 +45,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [fontFamily, setFontFamilyState] = useState<FontChoice>('system')
   const [accent, setAccentState] = useState<AccentChoice>('ember')
-  const [zenMode, setZenModeState] = useState(false)
   const [aiSelectionActions, setAiSelectionActionsState] = useState(true)
   const [aiAgentEnabled, setAiAgentEnabledState] = useState(false)
 
@@ -58,7 +53,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setThemeState(settings.theme)
       setFontFamilyState(settings.fontFamily)
       setAccentState(settings.accent)
-      setZenModeState(settings.zenMode)
       setAiSelectionActionsState(settings.aiSelectionActions)
       setAiAgentEnabledState(settings.aiAgentEnabled)
       const resolved = resolveTheme(settings.theme)
@@ -102,11 +96,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     window.api.settings.set({ accent: next })
   }
 
-  const setZenMode = (next: boolean): void => {
-    setZenModeState(next)
-    window.api.settings.set({ zenMode: next })
-  }
-
   const setAiSelectionActions = (next: boolean): void => {
     setAiSelectionActionsState(next)
     window.api.settings.set({ aiSelectionActions: next })
@@ -127,8 +116,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setFontFamily,
         accent,
         setAccent,
-        zenMode,
-        setZenMode,
         aiSelectionActions,
         setAiSelectionActions,
         aiAgentEnabled,

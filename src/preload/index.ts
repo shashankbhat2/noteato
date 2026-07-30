@@ -14,7 +14,6 @@ import type {
   SearchResult,
   Settings,
   SidebarModeState,
-  StickyNoteData,
   TrashEntry
 } from '../shared/types'
 
@@ -34,9 +33,8 @@ export interface ContextMenuParams {
 const api = {
   notes: {
     list: () => ipcRenderer.invoke('notes:list'),
-    listFolders: (): Promise<string[]> => ipcRenderer.invoke('notes:listFolders'),
     read: (path: string) => ipcRenderer.invoke('notes:read', path),
-    create: (title?: string, folder?: string) => ipcRenderer.invoke('notes:create', title, folder),
+    create: (title?: string) => ipcRenderer.invoke('notes:create', title),
     save: (path: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', path, options),
     setPinned: (path: string, pinned: boolean): Promise<NoteSummary | null> =>
       ipcRenderer.invoke('notes:setPinned', path, pinned),
@@ -51,15 +49,6 @@ const api = {
       isFolder: boolean
     ): Promise<NoteSummary | null> =>
       ipcRenderer.invoke('notes:restore', trashName, originalPath, isFolder),
-    createFolder: (path: string): Promise<void> => ipcRenderer.invoke('notes:createFolder', path),
-    renameFolder: (path: string, newName: string): Promise<void> =>
-      ipcRenderer.invoke('notes:renameFolder', path, newName),
-    moveNote: (path: string, targetFolder: string): Promise<NoteSummary | null> =>
-      ipcRenderer.invoke('notes:moveNote', path, targetFolder),
-    moveFolder: (path: string, targetParent: string): Promise<void> =>
-      ipcRenderer.invoke('notes:moveFolder', path, targetParent),
-    deleteFolder: (path: string): Promise<DeletedEntry> =>
-      ipcRenderer.invoke('notes:deleteFolder', path),
     search: (query: string): Promise<SearchResult[]> => ipcRenderer.invoke('notes:search', query),
     listTrash: (): Promise<TrashEntry[]> => ipcRenderer.invoke('notes:listTrash'),
     purgeTrash: (trashName: string): Promise<void> =>
@@ -126,9 +115,6 @@ const api = {
       return () => ipcRenderer.removeListener('sidebar:state-changed', listener)
     }
   },
-  quickNote: {
-    close: (): Promise<void> => ipcRenderer.invoke('quickNote:close')
-  },
   reminders: {
     takeFired: (): Promise<NoteSummary[]> => ipcRenderer.invoke('reminders:takeFired'),
     subscribeFired: (callback: (note: NoteSummary) => void) => {
@@ -141,13 +127,6 @@ const api = {
       ipcRenderer.on('reminders:open', listener)
       return () => ipcRenderer.removeListener('reminders:open', listener)
     }
-  },
-  sticky: {
-    list: (): Promise<StickyNoteData[]> => ipcRenderer.invoke('sticky:list'),
-    create: (): Promise<StickyNoteData> => ipcRenderer.invoke('sticky:create'),
-    update: (id: string, patch: Partial<StickyNoteData>) =>
-      ipcRenderer.invoke('sticky:update', id, patch),
-    close: (id: string) => ipcRenderer.invoke('sticky:close', id)
   },
   ai: {
     complete: (req: AiCompleteRequest): Promise<string> => ipcRenderer.invoke('ai:complete', req),

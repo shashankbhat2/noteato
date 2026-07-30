@@ -13,7 +13,6 @@ import type {
   SearchResult,
   Settings,
   SidebarModeState,
-  StickyNoteData,
   TrashEntry
 } from '../shared/types'
 
@@ -30,9 +29,8 @@ export interface ContextMenuParams {
 interface NoteatoApi {
   notes: {
     list: () => Promise<NoteSummary[]>
-    listFolders: () => Promise<string[]>
     read: (path: string) => Promise<Note>
-    create: (title?: string, folder?: string) => Promise<Note>
+    create: (title?: string) => Promise<Note>
     save: (path: string, options: SaveOptions) => Promise<Note>
     setPinned: (path: string, pinned: boolean) => Promise<NoteSummary | null>
     setReminder: (path: string, reminderAt: string | null) => Promise<NoteSummary | null>
@@ -43,11 +41,6 @@ interface NoteatoApi {
       originalPath: string,
       isFolder: boolean
     ) => Promise<NoteSummary | null>
-    createFolder: (path: string) => Promise<void>
-    renameFolder: (path: string, newName: string) => Promise<void>
-    moveNote: (path: string, targetFolder: string) => Promise<NoteSummary | null>
-    moveFolder: (path: string, targetParent: string) => Promise<void>
-    deleteFolder: (path: string) => Promise<DeletedEntry>
     search: (query: string) => Promise<SearchResult[]>
     listTrash: () => Promise<TrashEntry[]>
     purgeTrash: (trashName: string) => Promise<void>
@@ -85,19 +78,10 @@ interface NoteatoApi {
     setPinned: (pinned: boolean) => Promise<SidebarModeState>
     subscribeState: (callback: (state: SidebarModeState) => void) => () => void
   }
-  quickNote: {
-    close: () => Promise<void>
-  }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>
     subscribeFired: (callback: (note: NoteSummary) => void) => () => void
     subscribeOpen: (callback: (note: NoteSummary) => void) => () => void
-  }
-  sticky: {
-    list: () => Promise<StickyNoteData[]>
-    create: () => Promise<StickyNoteData>
-    update: (id: string, patch: Partial<StickyNoteData>) => Promise<void>
-    close: (id: string) => Promise<void>
   }
   ai: {
     complete: (req: AiCompleteRequest) => Promise<string>

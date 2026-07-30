@@ -9,7 +9,6 @@ import {
   IconX as X
 } from '@tabler/icons-react'
 import type { Note, NoteSummary, Settings } from '../../../shared/types'
-import type { Tab } from '../tabs'
 import { aiStream } from '../ai/client'
 import { AGENT_MODELS, type AgentModelChoice } from '../ai/models'
 import MarkdownText from './MarkdownText'
@@ -32,15 +31,24 @@ interface ChatMessage {
   created?: CreatedNoteRef[]
 }
 
+/** The minimum an open note has to expose for the assistant to work on it. */
+interface NoteRef {
+  id: string
+  path: string
+  title: string
+}
+
 interface Props {
-  note: Tab | null
-  /** The other half of a split view, sent along as read-only context. */
-  splitNote?: Tab | null
+  note: NoteRef | null
+  /** Another note pane on screen, sent along as read-only context. */
+  splitNote?: NoteRef | null
   notes: NoteSummary[]
   getMarkdown: (noteId: string) => Promise<string | null>
   applyMarkdown: (noteId: string, markdown: string) => Promise<string[]>
-  createNote: (path: string, markdown: string) => Promise<Note | null>
+  createNote: (title: string, markdown: string) => Promise<Note | null>
   onOpenNote: (target: CreatedNoteRef) => void
+  /** This pane's move/close controls; empty when only one pane is open. */
+  paneControls?: React.ReactNode
 }
 
 function readHistory(noteId: string): ChatMessage[] {
@@ -75,13 +83,15 @@ function resolveModel(
 function parseAgentResponse(raw: string): {
   reply: string
   edit: string | null
-  creates: { path: string; content: string }[]
+  creates: { title: string; content: string }[]
 } {
   const reply = raw.match(/<reply>([\s\S]*?)<\/reply>/i)?.[1]?.trim()
   const edit = raw.match(/<note_edit>([\s\S]*?)<\/note_edit>/i)?.[1]?.trim() ?? null
-  const creates: { path: string; content: string }[] = []
-  for (const match of raw.matchAll(/<note_create\s+path="([^"]+)"\s*>([\s\S]*?)<\/note_create>/gi)) {
-    creates.push({ path: match[1], content: match[2].trim() })
+  const creates: { title: string; content: string }[] = []
+  for (const match of raw.matchAll(
+    /<note_create\s+title="([^"]+)"\s*>([\s\S]*?)<\/note_create>/gi
+  )) {
+    creates.push({ title: match[1], content: match[2].trim() })
   }
   return {
     reply:
@@ -114,7 +124,8 @@ export default function AgentPanel({
   getMarkdown,
   applyMarkdown,
   createNote,
-  onOpenNote
+  onOpenNote,
+  paneControls
 }: Props) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [model, setModel] = useState<AgentModelChoice>(() => {
@@ -304,8 +315,6 @@ export default function AgentPanel({
           /* moved or deleted — skip */
         }
       }
-      const folderList = await window.api.notes.listFolders()
-
       const recentHistory = [...currentMessages, userMessage]
         .slice(-12)
         .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
@@ -322,12 +331,11 @@ export default function AgentPanel({
           model: resolved.model,
           maxTokens: 16384,
           system:
-            'You are the Noteato note agent. Answer questions using the current note and any mentioned notes as context. When the user asks to change the current note, output the entire updated note as markdown inside <note_edit>...</note_edit>. When the user asks for new notes, output each one as <note_create path="Folder/Note title.md">markdown body</note_create> — the path is relative to the notes root, the file name (without .md) becomes the title, missing folders are created automatically, and you may emit several note_create tags. Existing folders are listed in the prompt. Emit all note_edit/note_create tags FIRST, then always end with a short conversational response inside <reply>...</reply> — never describe a change before its tag has been emitted. Only the current note can be edited; the split note and mentioned notes are read-only context you may compare against and reference. Omit tags you do not need. Do not use code fences around any tag.',
+            'You are the Noteato note agent. Answer questions using the current note and any mentioned notes as context. When the user asks to change the current note, output the entire updated note as markdown inside <note_edit>...</note_edit>. When the user asks for new notes, output each one as <note_create title="Note title">markdown body</note_create> — the library is a flat list with no folders, and you may emit several note_create tags. Emit all note_edit/note_create tags FIRST, then always end with a short conversational response inside <reply>...</reply> — never describe a change before its tag has been emitted. Only the current note can be edited; the split note and mentioned notes are read-only context you may compare against and reference. Omit tags you do not need. Do not use code fences around any tag.',
           prompt: [
             `CURRENT NOTE\nTitle: ${note.title || 'Untitled'}\nPath: ${note.path}\n\n${markdown}`,
             ...splitSections,
             ...mentionSections,
-            `EXISTING FOLDERS\n${folderList.join('\n') || '(none — all notes live at the root)'}`,
             `RECENT CHAT\n${recentHistory}`
           ].join('\n\n')
         },
@@ -355,7 +363,7 @@ export default function AgentPanel({
         }
         const createdNotes: CreatedNoteRef[] = []
         for (const create of parsed.creates) {
-          const created = await createNote(create.path, create.content)
+          const created = await createNote(create.title, create.content)
           if (created) {
             createdNotes.push({ id: created.id, path: created.path, title: created.title })
           }
@@ -404,6 +412,7 @@ export default function AgentPanel({
           >
             <Plus size={14} />
           </button>
+          {paneControls}
         </div>
       </div>
 
@@ -472,32 +481,36 @@ export default function AgentPanel({
             ))}
           </div>
         )}
-        <div className="agent-context-row">
-          <div className="agent-context-badge" title={note?.path}>
-            <FileText size={11} />
-            <span>{note ? note.title || 'Untitled' : 'No note selected'}</span>
-          </div>
-          {splitNote && splitNote.id !== note?.id && (
-            <div className="agent-context-badge split" title={splitNote.path}>
-              <Columns size={11} />
-              <span>{splitNote.title || 'Untitled'}</span>
-            </div>
-          )}
-          {mentions.map((mention) => (
-            <div key={mention.id} className="agent-context-badge mention" title={mention.path}>
-              <FileText size={11} />
-              <span>{mention.title || 'Untitled'}</span>
-              <button
-                className="agent-context-remove"
-                title="Remove from context"
-                onClick={() => setMentions((prev) => prev.filter((m) => m.id !== mention.id))}
-              >
-                <X size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
         <div className="agent-input-wrap">
+          {/* What the assistant can see, inside the composer it applies to.
+              One scrollable row rather than a wrapping block, so adding a
+              tenth mention widens the rail instead of pushing the input down
+              the panel. */}
+          <div className="agent-context-rail">
+            <div className="agent-context-badge" title={note?.path}>
+              <FileText size={11} />
+              <span>{note ? note.title || 'Untitled' : 'No note selected'}</span>
+            </div>
+            {splitNote && splitNote.id !== note?.id && (
+              <div className="agent-context-badge split" title={splitNote.path}>
+                <Columns size={11} />
+                <span>{splitNote.title || 'Untitled'}</span>
+              </div>
+            )}
+            {mentions.map((mention) => (
+              <div key={mention.id} className="agent-context-badge mention" title={mention.path}>
+                <FileText size={11} />
+                <span>{mention.title || 'Untitled'}</span>
+                <button
+                  className="agent-context-remove"
+                  title="Remove from context"
+                  onClick={() => setMentions((prev) => prev.filter((m) => m.id !== mention.id))}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
           <textarea
             ref={composerRef}
             value={input}

@@ -239,7 +239,9 @@ export default function SidebarModeWindow() {
           <button
             className={windowState.pinned ? 'active' : undefined}
             onClick={() => void togglePinned()}
-            title={windowState.pinned ? 'Unpin sidebar' : 'Pin above other apps'}
+            title={
+              windowState.pinned ? 'Stop following across Spaces' : 'Show on every Space'
+            }
           >
             {windowState.pinned ? <Pinned size={14} /> : <Pin size={14} />}
           </button>
@@ -301,7 +303,7 @@ export default function SidebarModeWindow() {
                   {pinnedNotes.length > 0 && (
                     <section className="sidebar-mode-section">
                       <div className="sidebar-section-label">
-                        <span>Pinned</span>
+                        <span>Favourites</span>
                         <Pinned size={11} />
                       </div>
                       {pinnedNotes.map((note) => (

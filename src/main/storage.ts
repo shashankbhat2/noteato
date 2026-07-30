@@ -16,6 +16,7 @@ import {
 import { dirname, isAbsolute, join, relative } from 'path'
 import { app } from 'electron'
 import type Database from 'better-sqlite3'
+import { SqlKvStore } from './db'
 import type {
   DeletedEntry,
   Note,
@@ -104,12 +105,18 @@ function makeSnippet(body: string, idx: number, len: number): string {
   return s
 }
 
+/** Name the pre-flattening backup is restored under, if it ever is. */
+const FLATTEN_BACKUP_NAME = 'Folders (before flattening)'
+
 export class NoteStore {
   private notesDir: string
   // Deleted notes/folders are moved here (not permanently removed) so a delete
   // can be undone. Kept in userData rather than the notes folder to avoid
   // cluttering the user-facing markdown directory with trashed files.
   private trashDir: string
+  // Records that the one-time flattening has run, so it can't fire again after
+  // the user deliberately nests something themselves.
+  private flattenFlag: SqlKvStore<{ done: boolean }>
 
   constructor(
     private db: Database.Database,
@@ -118,6 +125,80 @@ export class NoteStore {
     this.notesDir = notesDir ?? join(app.getPath('documents'), 'Noteato')
     if (!existsSync(this.notesDir)) mkdirSync(this.notesDir, { recursive: true })
     this.trashDir = join(app.getPath('userData'), 'trash')
+    this.flattenFlag = new SqlKvStore(db, 'notes-flattened', { done: false })
+    this.flattenLibrary()
+  }
+
+  /**
+   * Bring every note up to the root of the notes directory.
+   *
+   * Noteato used to nest notes in folders and no longer has any folder UI, so
+   * a nested library would leave files reachable only from outside the app.
+   * The whole original tree is copied into the trash first — restoring that
+   * entry puts the folders back verbatim — and the flag makes this a one-time
+   * migration rather than something that fights a user who nests files by hand
+   * afterwards.
+   */
+  private flattenLibrary(): void {
+    if (this.flattenFlag.read().done) return
+
+    const paths: string[] = []
+    this.walkNotes(this.notesDir, '', paths)
+    const nested = paths.filter((p) => p.includes('/'))
+    if (nested.length === 0) {
+      this.flattenFlag.write({ done: true })
+      return
+    }
+
+    if (!existsSync(this.trashDir)) mkdirSync(this.trashDir, { recursive: true })
+    const trashName = `${Date.now()}-folders-before-flattening`
+    cpSync(this.notesDir, join(this.trashDir, trashName), { recursive: true })
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO trash_entries (trash_name, original_path, is_folder, title, deleted_at) VALUES (?, ?, 1, ?, ?)'
+      )
+      .run(trashName, FLATTEN_BACKUP_NAME, FLATTEN_BACKUP_NAME, new Date().toISOString())
+
+    for (const relPath of nested) {
+      const target = this.freeName(baseName(relPath))
+      try {
+        renameSync(join(this.notesDir, relPath), join(this.notesDir, target))
+      } catch {
+        copyFileSync(join(this.notesDir, relPath), join(this.notesDir, target))
+        unlinkSync(join(this.notesDir, relPath))
+      }
+    }
+
+    // Whatever the folders held besides notes (images, stray files) stays put;
+    // only the ones the move emptied are cleared away.
+    this.removeEmptyDirs(this.notesDir)
+    this.flattenFlag.write({ done: true })
+  }
+
+  /** Depth-first, so a folder whose only content was subfolders also goes. */
+  private removeEmptyDirs(dir: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+      const full = join(dir, entry.name)
+      this.removeEmptyDirs(full)
+      if (readdirSync(full).length === 0) rmSync(full, { recursive: true, force: true })
+    }
+  }
+
+  /**
+   * A root-level `.md` filename that isn't taken, suffixing `-2`, `-3`… on a
+   * clash. Shared by note creation and the flattening migration, which both
+   * have to land a name in a directory that may already hold one.
+   */
+  private freeName(desired: string): string {
+    const stem = desired.replace(/\.(md|markdown)$/i, '')
+    let name = `${stem}.md`
+    let counter = 2
+    while (existsSync(join(this.notesDir, name))) {
+      name = `${stem}-${counter}.md`
+      counter += 1
+    }
+    return name
   }
 
   // --- Registered external files/folders ------------------------------------
@@ -197,6 +278,10 @@ export class NoteStore {
     }
 
     this.notesDir = newDir
+    // The move above preserves the old tree, and the chosen directory may have
+    // arrived nested anyway, so the new location gets the same flattening.
+    this.flattenFlag.write({ done: false })
+    this.flattenLibrary()
   }
 
   // Resolve a relative path under the notes dir, rejecting anything that escapes
@@ -237,15 +322,6 @@ export class NoteStore {
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         out.push(rel)
       }
-    }
-  }
-
-  private walkFolders(dir: string, prefix: string, out: string[]): void {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name.startsWith('.') || !entry.isDirectory()) continue
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-      out.push(rel)
-      this.walkFolders(join(dir, entry.name), rel, out)
     }
   }
 
@@ -355,13 +431,6 @@ export class NoteStore {
     return summaries
   }
 
-  listFolders(): string[] {
-    const out: string[] = []
-    this.walkFolders(this.notesDir, '', out)
-    out.sort((a, b) => a.localeCompare(b))
-    return out
-  }
-
   read(relPath: string): Note {
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
@@ -457,19 +526,10 @@ export class NoteStore {
     return true
   }
 
-  create(title = 'Untitled', folder = '', id: string = randomUUID()): Note {
+  create(title = 'Untitled', id: string = randomUUID()): Note {
     const now = new Date().toISOString()
-    const dir = folder ? this.resolveWithin(folder) : this.notesDir
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-
-    let base = `${slugify(title)}.md`
-    let counter = 1
-    const relOf = (name: string): string => (folder ? `${folder}/${name}` : name)
-    while (existsSync(this.resolveWithin(relOf(base)))) {
-      base = `${slugify(title)}-${counter}.md`
-      counter += 1
-    }
-    const path = relOf(base)
+    if (!existsSync(this.notesDir)) mkdirSync(this.notesDir, { recursive: true })
+    const path = this.freeName(slugify(title))
 
     const meta: NoteMeta = {
       id,
@@ -483,7 +543,7 @@ export class NoteStore {
     }
     writeFileSync(this.resolveWithin(path), serializeNoteFile(meta, ''), 'utf-8')
 
-    return { ...meta, path, folder, excerpt: '', body: '' }
+    return { ...meta, path, folder: '', excerpt: '', body: '' }
   }
 
   save(relPath: string, options: SaveOptions): Note {
@@ -515,11 +575,8 @@ export class NoteStore {
       reminderAt: existing.reminderAt
     }
 
-    // Title-driven renames stay inside the note's current folder.
-    const folder = folderOf(relPath)
     let targetPath = relPath
-    const desiredName = `${slugify(options.title)}.md`
-    const desiredPath = folder ? `${folder}/${desiredName}` : desiredName
+    const desiredPath = `${slugify(options.title)}.md`
     if (desiredPath !== relPath && !existsSync(this.resolveWithin(desiredPath))) {
       renameSync(this.resolveNotePath(relPath), this.resolveWithin(desiredPath))
       targetPath = desiredPath
@@ -529,7 +586,7 @@ export class NoteStore {
     return {
       ...meta,
       path: targetPath,
-      folder: folderOf(targetPath),
+      folder: '',
       excerpt: stripLeadingH1(body).trim().slice(0, 160),
       body
     }
@@ -586,63 +643,11 @@ export class NoteStore {
     return this.toSummary(relPath)
   }
 
-  // --- Folder operations ---------------------------------------------------
-
-  createFolder(relPath: string): void {
-    const full = this.resolveWithin(relPath)
-    if (!existsSync(full)) mkdirSync(full, { recursive: true })
-  }
-
-  renameFolder(relPath: string, newName: string): void {
-    const parent = folderOf(relPath)
-    const safe = newName.replace(/[/\\]/g, '').trim() || 'Untitled'
-    const target = parent ? `${parent}/${safe}` : safe
-    if (target === relPath) return
-    if (existsSync(this.resolveWithin(target))) {
-      throw new Error('A folder with that name already exists here.')
-    }
-    renameSync(this.resolveWithin(relPath), this.resolveWithin(target))
-  }
-
-  moveNote(relPath: string, targetFolder: string): NoteSummary | null {
-    const b = baseName(relPath)
-    const destDir = targetFolder ? this.resolveWithin(targetFolder) : this.notesDir
-    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
-
-    let name = b
-    let counter = 1
-    const relOf = (): string => (targetFolder ? `${targetFolder}/${name}` : name)
-    while (existsSync(this.resolveWithin(relOf()))) {
-      name = b.replace(/\.md$/, `-${counter}.md`)
-      counter += 1
-    }
-    const target = relOf()
-    if (target === relPath) return this.toSummary(relPath)
-    renameSync(this.resolveWithin(relPath), this.resolveWithin(target))
-    return this.toSummary(target)
-  }
-
-  moveFolder(relPath: string, targetParent: string): void {
-    if (targetParent === relPath || targetParent.startsWith(`${relPath}/`)) {
-      throw new Error('Cannot move a folder into itself.')
-    }
-    // Already lives directly under the target — nothing to do.
-    if (folderOf(relPath) === targetParent) return
-    const b = baseName(relPath)
-    const destDir = targetParent ? this.resolveWithin(targetParent) : this.notesDir
-    if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
-
-    let name = b
-    let counter = 1
-    const relOf = (): string => (targetParent ? `${targetParent}/${name}` : name)
-    while (existsSync(this.resolveWithin(relOf()))) {
-      name = `${b}-${counter}`
-      counter += 1
-    }
-    renameSync(this.resolveWithin(relPath), this.resolveWithin(relOf()))
-  }
-
-  // --- Trash (undoable delete for notes and folders) -----------------------
+  // --- Trash (undoable delete) ---------------------------------------------
+  //
+  // Notes are the only thing the app deletes now, but folder entries still
+  // exist in the trash: the pre-flattening backup is one, and older
+  // installations may hold folders deleted before the folder UI was removed.
 
   private moveToTrash(relPath: string, isFolder: boolean, title: string): DeletedEntry {
     if (!existsSync(this.trashDir)) mkdirSync(this.trashDir, { recursive: true })
@@ -678,10 +683,6 @@ export class NoteStore {
       /* unreadable — keep the filename */
     }
     return this.moveToTrash(relPath, false, title)
-  }
-
-  deleteFolder(relPath: string): DeletedEntry {
-    return this.moveToTrash(relPath, true, baseName(relPath))
   }
 
   listTrash(): TrashEntry[] {

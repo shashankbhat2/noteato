@@ -1,11 +1,19 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import type { DeletedEntry, Note, NoteSummary, TrashEntry } from '../../../shared/types'
-import type { Tab } from '../tabs'
+import {
+  MAX_PANES,
+  PANE_MIN_PX,
+  makePane,
+  sameView,
+  type Pane,
+  type PaneView
+} from '../panes'
 import { useTheme } from '../theme'
 import { linkifyBlocks } from '../linkify'
 import { OPEN_NOTE_LINK_EVENT, type NoteatoEditor } from '../noteLink'
 import Sidebar from './Sidebar'
-import TabBar from './TabBar'
+import TitleBar from './TitleBar'
+import PaneControls from './PaneControls'
 import TrashView from './TrashView'
 import HomeView from './HomeView'
 import AgentPanel from './AgentPanel'
@@ -14,47 +22,39 @@ import SettingsModal from './SettingsModal'
 import ConfirmDialog from './ConfirmDialog'
 import SearchModal from './SearchModal'
 import ImportNotionModal from './ImportNotionModal'
-import NewTabModal from './NewTabModal'
 import ImportModal from './ImportModal'
-import ShortcutsHelp from './ShortcutsHelp'
 
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
-const OPEN_TABS_KEY = 'noteato:openTabs'
-// Sentinel tab id for the Trash view; never collides with note UUIDs and is
-// deliberately dropped on session restore (readStoredTabs resolves ids
-// against the note list).
-const TRASH_TAB_ID = '__trash__'
-const HOME_TAB_ID = '__home__'
-// The assistant is a view like any other, so it rides in a pane through the
-// same tab machinery rather than owning a rail of its own.
-const ASSISTANT_TAB_ID = '__assistant__'
+const OPEN_PANES_KEY = 'noteato:panes'
 const RECENT_NOTES_KEY = 'noteato:recentNotes'
 const RECENT_NOTES_MAX = 8
-// Two notes and the assistant is the useful ceiling; past that the panes are
-// too narrow to write in.
-const MAX_PANES = 3
-// Narrowest a pane can be dragged, in px — below this the note body has no room.
-const PANE_MIN_PX = 220
 
-// Last session's open tabs, stored by note id (paths can go stale between
-// sessions — they're re-resolved against the current note list on restore).
-interface StoredTabs {
-  ids: string[]
-  pinnedIds: string[]
-  activeId: string | null
+// Last session's panes, stored by note id — paths can go stale between
+// sessions, so they're re-resolved against the current note list on restore.
+interface StoredPane {
+  view: PaneView
+  pinned?: boolean
 }
 
-function readStoredTabs(): StoredTabs | null {
+interface StoredPanes {
+  panes: StoredPane[]
+  focusedIndex: number
+}
+
+function readStoredPanes(): StoredPanes | null {
   try {
-    const parsed = JSON.parse(localStorage.getItem(OPEN_TABS_KEY) ?? 'null')
-    if (!parsed || !Array.isArray(parsed.ids)) return null
+    const parsed = JSON.parse(localStorage.getItem(OPEN_PANES_KEY) ?? 'null')
+    if (!parsed || !Array.isArray(parsed.panes)) return null
+    const panes = parsed.panes.filter(
+      (entry: unknown): entry is StoredPane =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        ['note', 'home', 'assistant', 'trash'].includes((entry as StoredPane).view?.kind)
+    )
     return {
-      ids: parsed.ids.filter((id: unknown): id is string => typeof id === 'string'),
-      pinnedIds: Array.isArray(parsed.pinnedIds)
-        ? parsed.pinnedIds.filter((id: unknown): id is string => typeof id === 'string')
-        : [],
-      activeId: typeof parsed.activeId === 'string' ? parsed.activeId : null
+      panes,
+      focusedIndex: typeof parsed.focusedIndex === 'number' ? parsed.focusedIndex : 0
     }
   } catch {
     return null
@@ -63,7 +63,6 @@ function readStoredTabs(): StoredTabs | null {
 
 type ConfirmState =
   | { kind: 'note'; note: NoteSummary }
-  | { kind: 'folder'; path: string }
   | { kind: 'purge'; entry: TrashEntry }
   | { kind: 'empty-trash' }
   | null
@@ -74,32 +73,26 @@ interface OpenTarget {
   title: string
 }
 
-/** What a pane holds: a tab id, or null for the pane that hosts the tab strip. */
-type PaneSlot = string | null
-
-function folderName(path: string): string {
-  return path.slice(path.lastIndexOf('/') + 1)
-}
+const noteView = (note: OpenTarget): PaneView => ({
+  kind: 'note',
+  id: note.id,
+  path: note.path,
+  title: note.title
+})
 
 export default function MainLayout() {
-  const { zenMode, setZenMode, aiAgentEnabled } = useTheme()
+  const { aiAgentEnabled } = useTheme()
   const [notes, setNotes] = useState<NoteSummary[]>([])
-  const [folders, setFolders] = useState<string[]>([])
   const [trash, setTrash] = useState<TrashEntry[]>([])
-  const [tabs, setTabs] = useState<Tab[]>([])
-  const [activeTabId, setActiveTabId] = useState<string | null>(null)
-  // The pane row. One pane hosts the tab strip and shows `activeTabId` (it also
-  // keeps every other tab mounted but hidden, which is what preserves an
-  // editor's history and scroll when you switch tabs); each entry in
-  // `extraPanes` is a further pane pinned to one specific tab. `primaryAt` is
-  // where the strip's pane sits among them, so a pane can be opened on either
-  // side without the others moving.
-  const [extraPanes, setExtraPanes] = useState<string[]>([])
-  const [primaryAt, setPrimaryAt] = useState(0)
+  // The working area, left to right. Always at least one pane: closing the
+  // last one falls back to Home rather than leaving an empty shell.
+  const [panes, setPanes] = useState<Pane[]>(() => [makePane({ kind: 'home' })])
+  const [focusedKey, setFocusedKey] = useState<string>('')
   const [paneRatios, setPaneRatios] = useState<number[]>([1])
-  const [draggingTabId, setDraggingTabId] = useState<string | null>(null)
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
+  /** Id of the note pane focused most recently — the assistant's subject. */
+  const [lastNoteId, setLastNoteId] = useState<string | null>(null)
+  const [draggingNote, setDraggingNote] = useState<NoteSummary | null>(null)
   const [recentIds, setRecentIds] = useState<string[]>(() => {
     try {
       const parsed = JSON.parse(localStorage.getItem(RECENT_NOTES_KEY) ?? '[]')
@@ -110,7 +103,6 @@ export default function MainLayout() {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [newTabOpen, setNewTabOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
   const [undoState, setUndoState] = useState<(DeletedEntry & { label: string }) | null>(null)
@@ -121,25 +113,17 @@ export default function MainLayout() {
   )
   const editorAreaRef = useRef<HTMLDivElement>(null)
 
-  // The panes as they sit on screen, left→right.
-  const paneRow: PaneSlot[] = [
-    ...extraPanes.slice(0, primaryAt),
-    null,
-    ...extraPanes.slice(primaryAt)
-  ]
-  // The tab each pane is showing, in the same order — what the strip groups
-  // into one combined tab.
-  const paneTabIds = [
-    ...new Set(paneRow.map((slot) => slot ?? activeTabId).filter((id): id is string => id !== null))
-  ]
+  const focusedIndex = Math.max(
+    0,
+    panes.findIndex((pane) => pane.key === focusedKey)
+  )
+  const focusedPane = panes[focusedIndex]
   const ratios =
-    paneRatios.length === paneRow.length
-      ? paneRatios
-      : Array<number>(paneRow.length).fill(1 / paneRow.length)
+    paneRatios.length === panes.length ? paneRatios : Array<number>(panes.length).fill(1 / panes.length)
 
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const notionStatusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  // Active BlockNote editors keyed by tab id, so menu Undo/Redo can reach the
+  // Active BlockNote editors keyed by note id, so menu Undo/Redo can reach the
   // focused note's own history.
   const editorsRef = useRef(new Map<string, NoteatoEditor>())
 
@@ -187,6 +171,112 @@ export default function MainLayout() {
     })
   }
 
+  // --- Panes ---------------------------------------------------------------
+
+  /** Reset the widths whenever the pane count changed; otherwise keep them. */
+  const commitPanes = (next: Pane[]): void => {
+    setPanes(next)
+    setPaneRatios((prev) =>
+      prev.length === next.length ? prev : Array<number>(next.length).fill(1 / next.length)
+    )
+  }
+
+  /**
+   * Show `view` in the focused pane — unless another pane is already showing
+   * it, in which case that pane is focused instead. Mounting one note twice
+   * would give it two live editors racing each other's saves.
+   *
+   * A pinned pane never gives up its note: the nearest unpinned pane takes the
+   * view instead, and if every pane is pinned a new one opens beside them.
+   */
+  const openInFocused = (view: PaneView): void => {
+    const existing = panes.find((pane) => sameView(pane.view, view))
+    if (existing) {
+      setFocusedKey(existing.key)
+      return
+    }
+    const focused = panes[focusedIndex]
+    const target = focused?.pinned ? panes.find((pane) => !pane.pinned) : focused
+    if (!target) {
+      openInNewPane(view)
+      return
+    }
+    setPanes((prev) => prev.map((pane) => (pane.key === target.key ? { ...pane, view } : pane)))
+    setFocusedKey(target.key)
+  }
+
+  /** Hold this pane's note in place, or release it. */
+  const togglePanePin = (key: string): void => {
+    setPanes((prev) =>
+      prev.map((pane) => (pane.key === key ? { ...pane, pinned: !pane.pinned } : pane))
+    )
+  }
+
+  /**
+   * Open `view` in a pane of its own, just right of the focused one. At the
+   * cap the last pane gives way, so the new pane always appears where the
+   * user was looking.
+   */
+  const openInNewPane = (view: PaneView): void => {
+    const existing = panes.find((pane) => sameView(pane.view, view))
+    if (existing) {
+      setFocusedKey(existing.key)
+      return
+    }
+    const pane = makePane(view)
+    const next = [...panes]
+    next.splice(focusedIndex + 1, 0, pane)
+    if (next.length > MAX_PANES) {
+      // Something has to give at the cap, and it must never be a pinned pane —
+      // pinning is a promise that nothing replaces what's there. The last
+      // unpinned pane goes; if they're all pinned, the new pane doesn't open.
+      const evict = next.map((p, i) => ({ p, i })).filter(({ p }) => !p.pinned && p !== pane).pop()
+      if (!evict) return
+      next.splice(evict.i, 1)
+    }
+    commitPanes(next)
+    setFocusedKey(pane.key)
+  }
+
+  const closePane = (key: string): void => {
+    const index = panes.findIndex((pane) => pane.key === key)
+    if (index === -1) return
+    if (panes.length === 1) {
+      // Nothing left to fall back to — Home takes the pane over.
+      const home = makePane({ kind: 'home' })
+      commitPanes([home])
+      setFocusedKey(home.key)
+      return
+    }
+    const next = panes.filter((pane) => pane.key !== key)
+    commitPanes(next)
+    if (key === focusedKey) {
+      setFocusedKey(next[Math.min(index, next.length - 1)].key)
+    }
+  }
+
+  /** Slide one pane along the row, carrying its width with it. */
+  const movePane = (from: number, to: number): void => {
+    if (to < 0 || to >= panes.length || from === to) return
+    const next = [...panes]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    setPanes(next)
+    setPaneRatios((prev) => {
+      if (prev.length !== panes.length) return prev
+      const widths = [...prev]
+      const [w] = widths.splice(from, 1)
+      widths.splice(to, 0, w)
+      return widths
+    })
+  }
+
+  /** Close every pane showing `noteId` — used when its note goes away. */
+  const closeNotePanes = (noteId: string): void => {
+    const doomed = panes.filter((pane) => pane.view.kind === 'note' && pane.view.id === noteId)
+    for (const pane of doomed) closePane(pane.key)
+  }
+
   /**
    * Drag the seam between panes `index` and `index + 1`. Only that pair
    * changes width — the panes beyond the seam stay exactly where they are,
@@ -223,58 +313,58 @@ export default function MainLayout() {
   }
 
   useEffect(() => {
-    const hidden = zenMode || sidebarCollapsed
     document.documentElement.style.setProperty(
       '--sidebar-w',
-      hidden ? '0px' : 'var(--sidebar-expanded-w)'
+      sidebarCollapsed ? '0px' : 'var(--sidebar-expanded-w)'
     )
-  }, [zenMode, sidebarCollapsed])
+  }, [sidebarCollapsed])
 
-  // Reload notes + folders. Reconciles open tabs' titles by id (not paths — see
-  // move handlers, which re-point paths deliberately).
+  // Reload notes + trash. Reconciles open panes' titles and paths by id.
   const refresh = async (): Promise<NoteSummary[]> => {
-    const [list, folderList, trashList] = await Promise.all([
+    const [list, trashList] = await Promise.all([
       window.api.notes.list(),
-      window.api.notes.listFolders(),
       window.api.notes.listTrash()
     ])
     setNotes(list)
-    setFolders(folderList)
     setTrash(trashList)
-    setTabs((prev) =>
-      prev.map((t) => {
-        const n = list.find((x) => x.id === t.id)
-        return n ? { ...t, title: n.title } : t
+    repointPanes(list)
+    return list
+  }
+
+  /**
+   * Re-point open note panes after a rename changed their path or title. Notes
+   * missing from `list` are left alone: this is also called with a single
+   * changed note, where everything else being absent means nothing.
+   */
+  const repointPanes = (list: NoteSummary[]): void => {
+    setPanes((prev) =>
+      prev.map((pane) => {
+        const view = pane.view
+        if (view.kind !== 'note') return pane
+        const found = list.find((note) => note.id === view.id)
+        if (!found || (found.path === view.path && found.title === view.title)) return pane
+        return { ...pane, view: { ...view, path: found.path, title: found.title } }
       })
     )
-    return list
   }
 
   useEffect(() => {
     refresh().then((list) => {
-      // Reopen everything from the last session (dropping notes that no
-      // longer exist); fall back to the most recently updated note.
-      const stored = readStoredTabs()
-      const restored = (stored?.ids ?? [])
-        .map((id) => {
-          // The assistant carries no file, so it can't be resolved against the
-          // note list the way every other restorable tab is.
-          if (id === ASSISTANT_TAB_ID) return { id, path: '', title: 'Assistant' }
-          const n = list.find((note) => note.id === id)
-          return n ? { id: n.id, path: n.path, title: n.title } : null
+      // Reopen last session's panes, dropping notes that no longer exist.
+      const stored = readStoredPanes()
+      const restored = (stored?.panes ?? [])
+        .map((entry) => {
+          if (entry.view.kind !== 'note') return entry
+          const found = list.find((note) => note.id === (entry.view as { id: string }).id)
+          return found ? { ...entry, view: noteView(found) } : null
         })
-        .filter((t): t is Tab => t !== null)
-        .map((t) => ({ ...t, pinned: stored?.pinnedIds.includes(t.id) || undefined }))
-      if (restored.length > 0) {
-        setTabs(restored)
-        const active =
-          stored?.activeId && restored.some((t) => t.id === stored.activeId)
-            ? stored.activeId
-            : restored[restored.length - 1].id
-        setActiveTabId(active)
-      } else {
-        openHomeTab()
-      }
+        .filter((entry): entry is StoredPane => entry !== null)
+        .slice(0, MAX_PANES)
+        .map((entry) => ({ ...makePane(entry.view), pinned: entry.pinned }))
+      const next = restored.length > 0 ? restored : [makePane({ kind: 'home' })]
+      commitPanes(next)
+      const at = stored?.focusedIndex ?? 0
+      setFocusedKey(next[Math.min(Math.max(at, 0), next.length - 1)].key)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -290,10 +380,10 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Apply targeted changes from the compact renderer. Hidden editors are
-  // repointed to the changed path, which makes them reload the shared Markdown
-  // before the main window is used again; changes originating here keep the
-  // focused editor mounted and preserve its caret/history.
+  // Apply targeted changes from the compact renderer. Panes are repointed to
+  // the changed path, which makes them reload the shared Markdown before the
+  // main window is used again; changes originating here keep the focused
+  // editor mounted and preserve its caret/history.
   useEffect(() => {
     return window.api.notes.subscribeChanged((change) => {
       if (change.kind === 'refresh') {
@@ -302,13 +392,7 @@ export default function MainLayout() {
       }
       if (change.kind === 'remove') {
         setNotes((current) => current.filter((note) => note.id !== change.id))
-        setTabs((current) => {
-          const next = current.filter((tab) => tab.id !== change.id)
-          setActiveTabId((active) =>
-            active === change.id ? (next[next.length - 1]?.id ?? null) : active
-          )
-          return next
-        })
+        closeNotePanes(change.id)
         return
       }
       setNotes((current) => {
@@ -318,43 +402,32 @@ export default function MainLayout() {
         next[index] = { ...next[index], ...change.note }
         return next
       })
-      setTabs((current) =>
-        current.map((tab) =>
-          tab.id === change.note.id
-            ? { ...tab, path: change.note.path, title: change.note.title }
-            : tab
-        )
-      )
+      repointPanes([change.note])
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [panes, focusedKey])
 
-  // Persist the open tab set (skipped until the initial restore has run, so
-  // a fast quit right after launch can't wipe the previous session).
-  const tabsRestored = useRef(false)
+  // Persist the pane row (skipped until the initial restore has run, so a fast
+  // quit right after launch can't wipe the previous session).
+  const panesRestored = useRef(false)
   useEffect(() => {
-    if (!tabsRestored.current) {
-      tabsRestored.current = tabs.length > 0 || activeTabId !== null
-      if (!tabsRestored.current) return
+    if (!panesRestored.current) {
+      panesRestored.current = focusedKey !== ''
+      if (!panesRestored.current) return
     }
-    const stored: StoredTabs = {
-      ids: tabs.map((t) => t.id),
-      pinnedIds: tabs.filter((t) => t.pinned).map((t) => t.id),
-      activeId: activeTabId
+    const stored: StoredPanes = {
+      panes: panes.map((pane) => ({ view: pane.view, pinned: pane.pinned })),
+      focusedIndex
     }
-    localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(stored))
-  }, [tabs, activeTabId])
-
-  useEffect(() => {
-    if (selectedFolder && !folders.includes(selectedFolder)) setSelectedFolder(null)
-  }, [folders, selectedFolder])
+    localStorage.setItem(OPEN_PANES_KEY, JSON.stringify(stored))
+  }, [panes, focusedKey, focusedIndex])
 
   // Resolve a note mention clicked inside the editor. Refresh once if the id
   // isn't in the current list (the target may be new or just moved).
   const handleOpenNoteLink = async (noteId: string): Promise<void> => {
     const found =
       notes.find((n) => n.id === noteId) ?? (await refresh()).find((n) => n.id === noteId)
-    if (found) openNoteTab(found)
+    if (found) openInFocused(noteView(found))
   }
 
   useEffect(() => {
@@ -364,23 +437,24 @@ export default function MainLayout() {
     window.addEventListener(OPEN_NOTE_LINK_EVENT, onOpenLink)
     return () => window.removeEventListener(OPEN_NOTE_LINK_EVENT, onOpenLink)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notes])
+  }, [notes, panes, focusedKey])
 
   // Markdown files opened via the OS ("Open With" / double-click) are linked
-  // in place by the main process; collect any queued before this window was ready, then
-  // listen for opens while running.
+  // in place by the main process; collect any queued before this window was
+  // ready, then listen for opens while running.
   useEffect(() => {
     window.api.notes.takeExternalOpens().then(async (opened) => {
       if (opened.length === 0) return
       await refresh()
-      opened.forEach(openNoteTab)
+      const last = opened[opened.length - 1]
+      if (last) openInFocused(noteView(last))
     })
     return window.api.notes.subscribeExternalOpen(async (note) => {
       await refresh()
-      openNoteTab(note)
+      openInFocused(noteView(note))
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [panes, focusedKey])
 
   // Reminders that fired before this window was ready (app was closed when
   // one was due) arrive via takeFired(); ones that fire while running arrive
@@ -397,218 +471,38 @@ export default function MainLayout() {
     }
     window.api.reminders.takeFired().then(applyFired)
     const unsubFired = window.api.reminders.subscribeFired((note) => applyFired([note]))
-    const unsubOpen = window.api.reminders.subscribeOpen((note) => openNoteTab(note))
+    const unsubOpen = window.api.reminders.subscribeOpen((note) => openInFocused(noteView(note)))
     return () => {
       unsubFired()
       unsubOpen()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [panes, focusedKey])
 
-  // Create a note at an agent-chosen relative path ("Folder/Title.md"). The
-  // filename becomes the title; missing folders are created by NoteStore.
-  const handleAgentCreateNote = async (relPath: string, markdown: string): Promise<Note | null> => {
-    const segments = relPath
-      .replace(/\\/g, '/')
-      .split('/')
-      .map((s) => s.trim())
-      .filter(Boolean)
-    if (segments.length === 0 || segments.some((s) => s === '..' || s === '.')) return null
-    const title = segments.pop()!.replace(/\.md$/i, '').trim() || 'Untitled'
-    const created = await window.api.notes.create(title, segments.join('/'))
-    const saved = await window.api.notes.save(created.path, { title, body: markdown })
+  // Create a note the agent asked for. The library is flat, so all it picks is
+  // a title.
+  const handleAgentCreateNote = async (title: string, markdown: string): Promise<Note | null> => {
+    const clean = title.replace(/\.md$/i, '').trim() || 'Untitled'
+    const created = await window.api.notes.create(clean)
+    const saved = await window.api.notes.save(created.path, { title: clean, body: markdown })
     await refresh()
     return saved
   }
 
-  const openNoteTab = (note: OpenTarget): void => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.id === note.id)) return prev
-      return [...prev, { id: note.id, path: note.path, title: note.title }]
-    })
-    // Already showing in a pane of its own: focus that pane instead of also
-    // making it the strip's tab, which would mount the note twice.
-    if (extraPanes.includes(note.id)) {
-      focusPaneTab(note.id)
-      return
-    }
-    setActiveTabId(note.id)
-  }
-
-  const openTrashTab = (): void => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.id === TRASH_TAB_ID)) return prev
-      return [...prev, { id: TRASH_TAB_ID, path: '', title: 'Trash' }]
-    })
-    setActiveTabId(TRASH_TAB_ID)
-  }
-
-  const openHomeTab = (): void => {
-    setTabs((prev) => {
-      if (prev.some((t) => t.id === HOME_TAB_ID)) return prev
-      // Home leads the strip, like a browser start page.
-      return [{ id: HOME_TAB_ID, path: '', title: 'Home' }, ...prev]
-    })
-    setActiveTabId(HOME_TAB_ID)
-  }
-
-  /**
-   * The assistant opens into the pane beside whatever is focused, which is
-   * where it used to live permanently — but from here it is an ordinary tab,
-   * so it can be moved to the other half, un-split into a full pane, or
-   * closed like anything else.
-   */
-  const toggleAssistantPane = (): void => {
-    if (tabs.some((t) => t.id === ASSISTANT_TAB_ID)) {
-      closeTab(ASSISTANT_TAB_ID)
-      return
-    }
-    addNoteToSplit({ id: ASSISTANT_TAB_ID, path: '', title: 'Assistant' })
-  }
-
-  // Feeds the Home view's Recent cards; special tabs don't count.
+  // Feeds the Home view's Recent cards, and gives the assistant a subject that
+  // survives focus moving into the chat itself (see assistantContext).
   useEffect(() => {
-    if (!activeTabId || activeTabId.startsWith('__')) return
+    if (focusedPane?.view.kind !== 'note') return
+    const id = focusedPane.view.id
+    setLastNoteId(id)
     setRecentIds((prev) => {
-      const next = [activeTabId, ...prev.filter((id) => id !== activeTabId)].slice(
-        0,
-        RECENT_NOTES_MAX
-      )
+      const next = [id, ...prev.filter((x) => x !== id)].slice(0, RECENT_NOTES_MAX)
       localStorage.setItem(RECENT_NOTES_KEY, JSON.stringify(next))
       return next
     })
-  }, [activeTabId])
+  }, [focusedPane])
 
-  /** Commit a new row, resetting the widths only when the pane count changed. */
-  const setPaneRow = (row: PaneSlot[]): void => {
-    const at = row.indexOf(null)
-    setPrimaryAt(at === -1 ? 0 : at)
-    setExtraPanes(row.filter((slot): slot is string => slot !== null))
-    setPaneRatios((prev) =>
-      prev.length === row.length ? prev : Array<number>(row.length).fill(1 / row.length)
-    )
-  }
-
-  /**
-   * Keep the panes' tabs adjacent in the strip, in the order they appear on
-   * screen, so the group renders as one contiguous combined tab.
-   */
-  const regroupStrip = (row: PaneSlot[], activeId: string | null): void => {
-    const ids = row.map((slot) => slot ?? activeId).filter((id): id is string => id !== null)
-    if (ids.length < 2) return
-    setTabs((prev) => {
-      const members = ids
-        .map((id) => prev.find((t) => t.id === id))
-        .filter((t): t is Tab => t !== undefined)
-      if (members.length !== ids.length) return prev
-      const rest = prev.filter((t) => !ids.includes(t.id))
-      const firstAt = prev.findIndex((t) => ids.includes(t.id))
-      const insertAt = prev.slice(0, firstAt).filter((t) => !ids.includes(t.id)).length
-      return [...rest.slice(0, insertAt), ...members, ...rest.slice(insertAt)]
-    })
-  }
-
-  /**
-   * Put `id` in a pane at one end of the row. Over the cap, the pane furthest
-   * from that end gives way — never the one hosting the tab strip, which has
-   * nowhere else to go.
-   */
-  const withPane = (row: PaneSlot[], id: string, end: 'start' | 'end'): PaneSlot[] => {
-    const rest = row.filter((slot) => slot !== id)
-    const next = end === 'start' ? [id, ...rest] : [...rest, id]
-    while (next.length > MAX_PANES) {
-      const far = end === 'start' ? next.length - 1 : 0
-      next.splice(next[far] === null ? (end === 'start' ? far - 1 : 1) : far, 1)
-    }
-    return next
-  }
-
-  const closeTab = (id: string): void => {
-    const row = paneRow.filter((slot) => slot !== id)
-    if (row.length !== paneRow.length) setPaneRow(row)
-    setTabs((prev) => {
-      const idx = prev.findIndex((t) => t.id === id)
-      const next = prev.filter((t) => t.id !== id)
-      if (activeTabId === id) {
-        // The strip's pane can't adopt a tab another pane is already showing.
-        const free = next.filter((t) => !extraPanes.includes(t.id))
-        const fallback = free[Math.min(idx, free.length - 1)] ?? free[0] ?? null
-        setActiveTabId(fallback ? fallback.id : null)
-      }
-      return next
-    })
-  }
-
-  const selectTab = (id: string): void => {
-    // A tab pinned into its own pane is focused there rather than pulled into
-    // the strip's pane, which would leave that pane empty.
-    if (extraPanes.includes(id)) {
-      focusPaneTab(id)
-      return
-    }
-    setActiveTabId(id)
-  }
-
-  /**
-   * Focus the pane showing `id`. The strip moves to that pane and the tab it
-   * was showing takes over the one just vacated, so nothing shifts on screen.
-   */
-  const focusPaneTab = (id: string): void => {
-    if (id === activeTabId || !activeTabId) return
-    if (!extraPanes.includes(id)) {
-      setActiveTabId(id)
-      return
-    }
-    setPaneRow(paneRow.map((slot) => (slot === id ? null : slot === null ? activeTabId : slot)))
-    setActiveTabId(id)
-  }
-
-  /** Close one pane and its tab; the remaining panes share out its width. */
-  const closePaneAt = (index: number): void => {
-    if (paneRow.length < 2 || index < 0 || index >= paneRow.length) return
-    const slot = paneRow[index]
-    const closingId = slot ?? activeTabId
-    if (!closingId) return
-    const row = paneRow.filter((_, i) => i !== index)
-    if (slot === null) {
-      // The strip's pane is the one closing, so a survivor has to take it over.
-      const heir = row[0]
-      setActiveTabId(heir ?? null)
-      setPaneRow(row.map((s) => (s === heir ? null : s)))
-    } else {
-      setPaneRow(row)
-    }
-    setTabs((prev) => prev.filter((tab) => tab.id !== closingId))
-  }
-
-  /** Collapse back to a single pane; the other tabs stay open in the strip. */
-  const separatePanes = (): void => setPaneRow([null])
-
-  /** Mirror the row without changing which pane is focused. */
-  const reversePanes = (): void => {
-    const row = [...paneRow].reverse()
-    setPaneRow(row)
-    setPaneRatios((prev) => [...prev].reverse())
-    regroupStrip(row, activeTabId)
-  }
-
-  /** Drop a dragged tab onto one edge of the editor area to open a pane there. */
-  const openSplit = (id: string, side: 'left' | 'right'): void => {
-    if (tabs.length < 2) return
-    let active = activeTabId
-    if (active === id) {
-      // The strip's pane has to move to some other tab, since `id` is leaving
-      // it for a pane of its own.
-      active = tabs.find((t) => t.id !== id && !extraPanes.includes(t.id))?.id ?? null
-      if (!active) return
-      setActiveTabId(active)
-    }
-    const row = withPane(paneRow, id, side === 'left' ? 'start' : 'end')
-    setPaneRow(row)
-    regroupStrip(row, active)
-  }
-
-  // A tab's stored path is its bootstrap value and can lag behind a rename, so
+  // A pane's stored path is its bootstrap value and can lag behind a rename, so
   // OS-level actions resolve the note's current path by id — refreshing once if
   // the local list is the stale one.
   const notePathOf = async (id: string): Promise<string | null> => {
@@ -629,172 +523,14 @@ export default function MainLayout() {
     if (path) await window.api.notes.revealInFinder(path).catch(() => {})
   }
 
-  /**
-   * Open a note in a pane of its own on the right, adding the tab first if it
-   * isn't open yet. `openSplit` can't do this — it needs the target to already
-   * be in `tabs`, and freshly-set state isn't readable yet — so the tab is
-   * inserted and the pane is opened in one pass.
-   */
-  const addNoteToSplit = (note: OpenTarget): void => {
-    const partnerId =
-      activeTabId && activeTabId !== note.id
-        ? activeTabId
-        : tabs.find((t) => t.id !== note.id && !extraPanes.includes(t.id))?.id ?? null
-    // Nothing to sit beside — just open it normally.
-    if (!partnerId) {
-      openNoteTab(note)
-      return
-    }
-    setTabs((prev) =>
-      prev.some((t) => t.id === note.id)
-        ? prev
-        : [...prev, { id: note.id, path: note.path, title: note.title }]
-    )
-    const row = withPane(paneRow, note.id, 'end')
-    setPaneRow(row)
-    setActiveTabId(partnerId)
-    regroupStrip(row, partnerId)
-  }
-
-  /**
-   * Reorder the strip by dropping a tab onto another one (or onto the empty
-   * space after the last, where `targetId` is null).
-   *
-   * Two invariants the strip already relies on are preserved here: pinned tabs
-   * lead the strip, so a drag reorders within its own group rather than across
-   * it; and the two halves of a split stay adjacent, since they render as one
-   * combined tab — a drop aimed between them snaps to the nearer outside edge.
-   */
-  const moveTab = (draggedId: string, targetId: string | null, side: 'before' | 'after'): void => {
-    if (draggedId === targetId) return
-    setTabs((prev) => {
-      const moved = prev.find((t) => t.id === draggedId)
-      if (!moved) return prev
-      const rest = prev.filter((t) => t.id !== draggedId)
-      // Where the unpinned group starts once the dragged tab is out of the way.
-      const pinCount = rest.filter((t) => t.pinned).length
-
-      let index: number
-      if (targetId === null) {
-        index = moved.pinned ? pinCount : rest.length
-      } else {
-        const target = rest.findIndex((t) => t.id === targetId)
-        if (target === -1) return prev
-        index = side === 'before' ? target : target + 1
-      }
-
-      // The panes' tabs render as one combined tab, so a drop landing strictly
-      // inside their span would tear it apart — snap to the nearer outside edge.
-      if (paneTabIds.length > 1 && !paneTabIds.includes(draggedId)) {
-        const spots = paneTabIds.map((id) => rest.findIndex((t) => t.id === id))
-        if (spots.every((i) => i !== -1)) {
-          const lo = Math.min(...spots)
-          const hi = Math.max(...spots)
-          if (index > lo && index <= hi) index = index - lo <= hi + 1 - index ? lo : hi + 1
-        }
-      }
-
-      const lower = moved.pinned ? 0 : pinCount
-      const upper = moved.pinned ? pinCount : rest.length
-      index = Math.min(Math.max(index, lower), upper)
-
-      const next = [...rest]
-      next.splice(index, 0, moved)
-      return next
-    })
-  }
-
-  // --- Tab context-menu actions (Chrome-style; pinned tabs survive bulk closes)
-
-  const toggleTabPin = (id: string): void => {
-    setTabs((prev) => {
-      const next = prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
-      return [...next.filter((t) => t.pinned), ...next.filter((t) => !t.pinned)]
-    })
-  }
-
-  const closeOtherTabs = (id: string): void => {
-    setTabs(tabs.filter((t) => t.id === id || t.pinned))
-    setActiveTabId(id)
-  }
-
-  const closeTabsToRight = (id: string): void => {
-    const idx = tabs.findIndex((t) => t.id === id)
-    if (idx === -1) return
-    const next = tabs.filter((t, i) => i <= idx || t.pinned)
-    setTabs(next)
-    if (activeTabId && !next.some((t) => t.id === activeTabId)) setActiveTabId(id)
-  }
-
-  const closeAllTabs = (): void => {
-    const next = tabs.filter((t) => t.pinned)
-    setTabs(next)
-    if (activeTabId && !next.some((t) => t.id === activeTabId)) {
-      setActiveTabId(next.length ? next[next.length - 1].id : null)
-    }
-  }
-
-  const handleCreate = async (folder = '', title = 'Untitled'): Promise<void> => {
-    const note = await window.api.notes.create(title, folder)
+  const handleCreate = async (title = 'Untitled'): Promise<void> => {
+    const note = await window.api.notes.create(title)
     await refresh()
-    openNoteTab(note)
-  }
-
-  const handleCreateInSelectedFolder = (title?: string): Promise<void> =>
-    handleCreate(
-      selectedFolder && folders.includes(selectedFolder) ? selectedFolder : '',
-      title || 'Untitled'
-    )
-
-  const handleCreateFolder = async (parent: string, name: string): Promise<void> => {
-    const safe = name.replace(/[/\\]/g, '').trim()
-    if (!safe) return
-    await window.api.notes.createFolder(parent ? `${parent}/${safe}` : safe)
-    await refresh()
-  }
-
-  // Re-point any open tabs whose note path changed (after a move/rename).
-  const repointTabs = (list: NoteSummary[]): void => {
-    setTabs((prev) =>
-      prev.map((t) => {
-        const n = list.find((x) => x.id === t.id)
-        return n && n.path !== t.path ? { ...t, path: n.path } : t
-      })
-    )
-  }
-
-  const handleRenameFolder = async (path: string, name: string): Promise<void> => {
-    try {
-      await window.api.notes.renameFolder(path, name)
-    } catch {
-      /* name clash — leave as-is */
-    }
-    repointTabs(await refresh())
-  }
-
-  const handleMoveNote = async (path: string, targetFolder: string): Promise<void> => {
-    const moved = await window.api.notes.moveNote(path, targetFolder)
-    const list = await refresh()
-    if (moved) {
-      setTabs((prev) =>
-        prev.map((t) => (t.id === moved.id ? { ...t, path: moved.path, title: moved.title } : t))
-      )
-    } else {
-      repointTabs(list)
-    }
-  }
-
-  const handleMoveFolder = async (path: string, targetParent: string): Promise<void> => {
-    try {
-      await window.api.notes.moveFolder(path, targetParent)
-    } catch {
-      /* invalid target — ignore */
-    }
-    repointTabs(await refresh())
+    openInFocused(noteView(note))
   }
 
   // Rename from the sidebar. Saving with a new title also slug-renames the
-  // file, so re-point the open tab (if any) to the new path.
+  // file, so re-point the open pane (if any) to the new path.
   const handleRenameNote = async (note: NoteSummary, title: string): Promise<void> => {
     const full = await window.api.notes.read(note.path)
     const saved = await window.api.notes.save(note.path, {
@@ -803,10 +539,8 @@ export default function MainLayout() {
       tags: full.tags,
       fullWidth: full.fullWidth
     })
-    await refresh()
-    setTabs((prev) =>
-      prev.map((t) => (t.id === saved.id ? { ...t, path: saved.path, title: saved.title } : t))
-    )
+    repointPanes(await refresh())
+    repointPanes([saved])
   }
 
   const handleTogglePin = async (note: NoteSummary): Promise<void> => {
@@ -823,7 +557,6 @@ export default function MainLayout() {
   }
 
   const requestDeleteNote = (note: NoteSummary): void => setConfirm({ kind: 'note', note })
-  const requestDeleteFolder = (path: string): void => setConfirm({ kind: 'folder', path })
 
   const showUndo = (token: DeletedEntry, label: string): void => {
     if (undoTimer.current) clearTimeout(undoTimer.current)
@@ -851,21 +584,10 @@ export default function MainLayout() {
       await refresh()
       return
     }
-    if (c.kind === 'note') {
-      const token = await window.api.notes.delete(c.note.path)
-      closeTab(c.note.id)
-      await refresh()
-      showUndo(token, `Deleted “${c.note.title || 'Untitled'}”`)
-    } else {
-      // Close every open tab whose note lives inside the folder being deleted.
-      const affected = notes.filter(
-        (n) => n.folder === c.path || n.folder.startsWith(`${c.path}/`)
-      )
-      const token = await window.api.notes.deleteFolder(c.path)
-      affected.forEach((n) => closeTab(n.id))
-      await refresh()
-      showUndo(token, `Deleted folder “${folderName(c.path)}”`)
-    }
+    const token = await window.api.notes.delete(c.note.path)
+    closeNotePanes(c.note.id)
+    await refresh()
+    showUndo(token, `Deleted “${c.note.title || 'Untitled'}”`)
   }
 
   const handleRestoreTrash = async (entry: TrashEntry): Promise<void> => {
@@ -875,7 +597,7 @@ export default function MainLayout() {
       entry.isFolder
     )
     await refresh()
-    if (restored) openNoteTab(restored)
+    if (restored) openInFocused(noteView(restored))
   }
 
   const handleUndoDelete = async (): Promise<void> => {
@@ -888,30 +610,27 @@ export default function MainLayout() {
     )
     setUndoState(null)
     await refresh()
-    if (restored) openNoteTab(restored)
-  }
-
-  const handleCreateSticky = async (): Promise<void> => {
-    await window.api.sticky.create()
+    if (restored) openInFocused(noteView(restored))
   }
 
   const handleImport = async (): Promise<void> => {
     const imported = await window.api.notes.import()
     if (imported.length === 0) return
     await refresh()
-    imported.forEach(openNoteTab)
+    const last = imported[imported.length - 1]
+    if (last) openInFocused(noteView(last))
   }
 
   // Linking a folder can surface many notes — refresh the sidebar without
-  // opening a tab for each.
+  // opening a pane for each.
   const handleOpenFolder = async (): Promise<void> => {
     await window.api.notes.openFolder()
     await refresh()
   }
 
   // A Notion export can produce far more notes than the plain-markdown import
-  // above, so this deliberately doesn't open every imported note as a tab —
-  // it just refreshes the sidebar (folders included) and reports a summary.
+  // above, so this deliberately doesn't open any of them — it just refreshes
+  // the sidebar and reports a summary.
   const handleImportNotion = async (): Promise<void> => {
     const result = await window.api.notes.importNotion()
     if (!result) return
@@ -929,15 +648,15 @@ export default function MainLayout() {
   const handleRemoveExternal = async (note: NoteSummary): Promise<void> => {
     if (!note.external) return
     await window.api.notes.removeExternal(note.path)
-    closeTab(note.id)
+    closeNotePanes(note.id)
     await refresh()
   }
 
-  // Unlink a whole registered folder; close any tabs showing notes from it.
+  // Unlink a whole registered folder; close any panes showing notes from it.
   const handleRemoveLinkedFolder = async (rootPath: string): Promise<void> => {
     const affected = notes.filter((n) => n.externalRoot === rootPath)
     await window.api.notes.removeExternal(rootPath)
-    affected.forEach((n) => closeTab(n.id))
+    affected.forEach((n) => closeNotePanes(n.id))
     await refresh()
   }
 
@@ -954,49 +673,47 @@ export default function MainLayout() {
         excerpt: saved.excerpt,
         updatedAt: saved.updatedAt,
         reminderAt: saved.reminderAt,
+        // Favouriting from the note's own header comes back through here. The
+        // main process deliberately excludes the sender from its change
+        // broadcast, so this is the only route by which the sidebar learns the
+        // note moved into or out of Favourites.
+        pinned: saved.pinned,
         tags: saved.tags
       }
       return next
     })
-    // Editing a title renames the file, so the tab has to follow it. A tab that
-    // kept its bootstrap path would load the wrong (gone) file the next time its
-    // editor is mounted from scratch — which is exactly what moving a tab into
-    // split view does. NoteEditor ignores a path change that just reflects the
-    // rename of the note it is already showing, so this can't disturb an edit.
-    setTabs((prev) =>
-      prev.map((t) => (t.id === saved.id ? { ...t, title: saved.title, path: saved.path } : t))
-    )
+    // Editing a title renames the file, so the pane has to follow it. A pane
+    // that kept its bootstrap path would load the wrong (gone) file the next
+    // time its editor is mounted from scratch — which is exactly what moving a
+    // pane along the row does. NoteEditor ignores a path change that just
+    // reflects the rename of the note it is already showing, so this can't
+    // disturb an edit.
+    repointPanes([saved])
   }
 
   const latest = useRef({
     handleCreate,
-    handleCreateInSelectedFolder,
-    handleCreateSticky,
     handleImport,
     handleOpenFolder,
     setNotionGuideOpen,
-    closeTab,
+    closePane,
     toggleSidebar,
     setSettingsOpen,
     setSearchOpen,
-    zenMode,
-    setZenMode,
-    activeTabId
+    focusedKey,
+    focusedPane
   })
   latest.current = {
     handleCreate,
-    handleCreateInSelectedFolder,
-    handleCreateSticky,
     handleImport,
     handleOpenFolder,
     setNotionGuideOpen,
-    closeTab,
+    closePane,
     toggleSidebar,
     setSettingsOpen,
     setSearchOpen,
-    zenMode,
-    setZenMode,
-    activeTabId
+    focusedKey,
+    focusedPane
   }
 
   useEffect(() => {
@@ -1004,10 +721,7 @@ export default function MainLayout() {
       const h = latest.current
       switch (action) {
         case 'new-note':
-          h.handleCreateInSelectedFolder()
-          break
-        case 'new-sticky':
-          h.handleCreateSticky()
+          h.handleCreate()
           break
         case 'import-markdown':
           h.handleImport()
@@ -1031,9 +745,6 @@ export default function MainLayout() {
         case 'toggle-sidebar':
           h.toggleSidebar()
           break
-        case 'toggle-zen':
-          h.setZenMode(!h.zenMode)
-          break
         case 'undo':
         case 'redo': {
           // Let native inputs (title, modals, popups) keep their own undo stack;
@@ -1042,20 +753,30 @@ export default function MainLayout() {
           if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
             document.execCommand(action)
           } else {
-            const ed = h.activeTabId ? editorsRef.current.get(h.activeTabId) : undefined
+            const view = h.focusedPane?.view
+            const ed = view?.kind === 'note' ? editorsRef.current.get(view.id) : undefined
             if (action === 'undo') ed?.undo()
             else ed?.redo()
           }
           break
         }
-        case 'close-tab':
-          if (h.activeTabId) h.closeTab(h.activeTabId)
-          else window.api.app.closeWindow()
+        case 'close-pane': {
+          // ⌘W closes the pane, or puts the last note away by falling back to
+          // Home. Pressed on a lone Home pane there is nothing left to close,
+          // so it takes its usual meaning and closes the window.
+          const only = panesRef.current.length === 1
+          if (only && panesRef.current[0].view.kind === 'home') window.api.app.closeWindow()
+          else h.closePane(h.focusedKey)
           break
+        }
       }
     })
     return unsubscribe
   }, [])
+
+  // Read inside the shortcut handler, which is registered once.
+  const panesRef = useRef(panes)
+  panesRef.current = panes
 
   useEffect(() => {
     return () => {
@@ -1064,235 +785,176 @@ export default function MainLayout() {
     }
   }, [])
 
-  const assistantOpen = tabs.some((tab) => tab.id === ASSISTANT_TAB_ID)
+  const assistantOpen = panes.some((pane) => pane.view.kind === 'assistant')
+
+  const toggleAssistant = (): void => {
+    const existing = panes.find((pane) => pane.view.kind === 'assistant')
+    if (existing) closePane(existing.key)
+    else openInNewPane({ kind: 'assistant' })
+  }
 
   /**
    * The notes the assistant is working on: whatever else is on screen. The
-   * focused pane's note is the subject, and a second note pane rides along as
+   * focused note pane is the subject, and a second note pane rides along as
    * read-only context. With nothing beside it there is no subject — better
    * than guessing at a note the user can't see.
    */
-  const assistantContext = (): { note: Tab | null; splitNote: Tab | null } => {
-    const others = paneTabIds
-      .filter((id) => id !== ASSISTANT_TAB_ID && !id.startsWith('__'))
-      .map((id) => tabs.find((tab) => tab.id === id))
-      .filter((tab): tab is Tab => tab !== undefined)
-    // Whichever of them is focused leads; otherwise take them left to right.
-    const lead = others.find((tab) => tab.id === activeTabId) ?? others[0] ?? null
-    return { note: lead, splitNote: others.find((tab) => tab.id !== lead?.id) ?? null }
+  const assistantContext = (): { note: OpenTarget | null; splitNote: OpenTarget | null } => {
+    const others = panes
+      .map((pane) => pane.view)
+      .filter((view): view is Extract<PaneView, { kind: 'note' }> => view.kind === 'note')
+    // The last note pane you were in leads — not the currently focused pane,
+    // which is the assistant itself the moment you click into the chat. Using
+    // the live focus would silently switch the subject to whichever note
+    // happens to be leftmost as soon as you started typing.
+    const lead =
+      (lastNoteId ? others.find((view) => view.id === lastNoteId) : undefined) ??
+      others[0] ??
+      null
+    return { note: lead, splitNote: others.find((view) => view.id !== lead?.id) ?? null }
   }
 
-  // Tabs that render a built-in view instead of a note editor.
-  const renderSpecialTab = (tab: Tab): React.ReactNode | null => {
-    if (tab.id === ASSISTANT_TAB_ID) {
-      const { note, splitNote } = assistantContext()
-      return (
-        <AgentPanel
-          note={note}
-          splitNote={splitNote}
-          notes={notes}
-          getMarkdown={getAgentMarkdown}
-          applyMarkdown={applyAgentMarkdown}
-          createNote={handleAgentCreateNote}
-          onOpenNote={openNoteTab}
-        />
-      )
-    }
-    if (tab.id === TRASH_TAB_ID) {
-      return (
-        <TrashView
-          trash={trash}
-          onRestore={(entry) => void handleRestoreTrash(entry)}
-          onPurge={(entry) => setConfirm({ kind: 'purge', entry })}
-          onEmpty={() => setConfirm({ kind: 'empty-trash' })}
-        />
-      )
-    }
-    if (tab.id === HOME_TAB_ID) {
-      return (
-        <HomeView
-          notes={notes}
-          recentIds={recentIds}
-          onOpenNote={openNoteTab}
-          onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
-        />
-      )
-    }
-    return null
-  }
-
-  /**
-   * The assistant manages its own scrolling and needs a bounded height, unlike
-   * a note, which grows the pane and lets the pane scroll.
-   */
-  const paneClass = (id: string | null, extra = ''): string =>
-    `editor-pane${extra ? ` ${extra}` : ''}${id === ASSISTANT_TAB_ID ? ' fills-pane' : ''}`
-
-  // A note's shell has to span the pane even when the note is short, so the
-  // dictation button docks to the pane's bottom rather than to the end of the
-  // text. A flex column is what makes `flex: 1` on the shell resolve — a
-  // percentage height can't, since the wrapper's own height is auto.
-  const paneBodyStyle = (id: string): React.CSSProperties =>
-    id === ASSISTANT_TAB_ID
-      ? { height: '100%' }
-      : { display: 'flex', flexDirection: 'column', minHeight: '100%' }
-
-  /** A pane pinned to one tab. The pane hosting the tab strip is rendered inline. */
-  const renderPinnedPane = (id: string, index: number, flex: number): React.ReactNode => {
-    const tab = tabs.find((t) => t.id === id)
-    if (!tab) return null
-    return (
-      <main className={paneClass(tab.id, 'split-pane')} style={{ flex: `${flex} 1 0%` }}>
-        <div style={paneBodyStyle(tab.id)}>
-          {renderSpecialTab(tab) ?? (
-            <NoteEditor
-              path={tab.path}
-              onSaved={handleNoteSaved}
-              onEditorReady={(editor) => registerEditor(tab.id, editor)}
-              onCloseSplit={() => closePaneAt(index)}
-            />
-          )}
-        </div>
-      </main>
+  const renderPaneBody = (pane: Pane, index: number): React.ReactNode => {
+    const view = pane.view
+    const controls = (
+      <PaneControls
+        index={index}
+        count={panes.length}
+        onMove={movePane}
+        onClose={() => closePane(pane.key)}
+        canClose={panes.length > 1 || view.kind !== 'home'}
+        pinned={Boolean(pane.pinned)}
+        onTogglePin={() => togglePanePin(pane.key)}
+      />
     )
+    switch (view.kind) {
+      case 'note':
+        return (
+          <NoteEditor
+            path={view.path}
+            onSaved={handleNoteSaved}
+            onEditorReady={(editor) => registerEditor(view.id, editor)}
+            paneControls={controls}
+          />
+        )
+      case 'assistant': {
+        const { note, splitNote } = assistantContext()
+        return (
+          <AgentPanel
+            note={note}
+            splitNote={splitNote}
+            notes={notes}
+            getMarkdown={getAgentMarkdown}
+            applyMarkdown={applyAgentMarkdown}
+            createNote={handleAgentCreateNote}
+            onOpenNote={(target) => openInFocused(noteView(target))}
+            paneControls={controls}
+          />
+        )
+      }
+      case 'trash':
+        return (
+          <TrashView
+            trash={trash}
+            onRestore={(entry) => void handleRestoreTrash(entry)}
+            onPurge={(entry) => setConfirm({ kind: 'purge', entry })}
+            onEmpty={() => setConfirm({ kind: 'empty-trash' })}
+            paneControls={controls}
+          />
+        )
+      case 'home':
+        return (
+          <HomeView
+            notes={notes}
+            recentIds={recentIds}
+            onOpenNote={(target) => openInFocused(noteView(target))}
+            onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
+            paneControls={controls}
+          />
+        )
+    }
   }
 
   return (
-    <div className={zenMode ? 'app-shell zen' : 'app-shell'}>
-      {!zenMode && (
-        <TabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={toggleSidebar}
-          onSelect={selectTab}
-          onClose={closeTab}
-          onTogglePin={toggleTabPin}
-          onCloseOthers={closeOtherTabs}
-          onCloseRight={closeTabsToRight}
-          onCloseAll={closeAllTabs}
-          onMoveTab={moveTab}
-          onCopyPath={(id) => void copyNotePath(id)}
-          onRevealInFinder={(id) => void revealNote(id)}
-          onNewNote={() => setNewTabOpen(true)}
-          onTabDragStart={setDraggingTabId}
-          onTabDragEnd={() => {
-            setDraggingTabId(null)
+    <div className="app-shell">
+      <TitleBar
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={toggleSidebar}
+        onSearch={() => setSearchOpen(true)}
+        onNewNote={() => void handleCreate()}
+      />
+      <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
+        <Sidebar
+          notes={notes}
+          trashCount={trash.length}
+          activeNoteId={focusedPane?.view.kind === 'note' ? focusedPane.view.id : null}
+          collapsed={sidebarCollapsed}
+          onSelect={(note, inNewPane) =>
+            inNewPane ? openInNewPane(noteView(note)) : openInFocused(noteView(note))
+          }
+          onDeleteNote={requestDeleteNote}
+          onRemoveNote={(note) => void handleRemoveExternal(note)}
+          onRenameNote={(note, title) => void handleRenameNote(note, title)}
+          onTogglePin={handleTogglePin}
+          onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
+          onCopyPath={(note) => void copyNotePath(note.id)}
+          onRevealInFinder={(note) => void revealNote(note.id)}
+          onRemoveLinkedFolder={(path) => void handleRemoveLinkedFolder(path)}
+          onNoteDragStart={setDraggingNote}
+          onNoteDragEnd={() => {
+            setDraggingNote(null)
             setDropSide(null)
           }}
-          paneTabIds={paneTabIds}
-          onSplit={openSplit}
-          onSeparatePanes={separatePanes}
-          onClosePane={closePaneAt}
-          onReversePanes={reversePanes}
-          onFocusPane={focusPaneTab}
+          onOpenTrash={() => openInFocused({ kind: 'trash' })}
+          onOpenHome={() => openInFocused({ kind: 'home' })}
+          onOpenAssistant={toggleAssistant}
+          assistantOpen={assistantOpen}
+          assistantAvailable={aiAgentEnabled}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenImport={() => setImportOpen(true)}
         />
-      )}
-      <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
-        {!zenMode && (
-          <Sidebar
-            notes={notes}
-            folders={folders}
-            trashCount={trash.length}
-            activeNoteId={activeTabId}
-            selectedFolder={selectedFolder}
-            collapsed={sidebarCollapsed}
-            onSelect={(note) => {
-              setSelectedFolder(null)
-              openNoteTab(note)
-            }}
-            onSelectFolder={setSelectedFolder}
-            onCreateNote={(folder) => handleCreate(folder)}
-            onCreateFolder={handleCreateFolder}
-            onRenameFolder={handleRenameFolder}
-            onDeleteFolder={requestDeleteFolder}
-            onDeleteNote={requestDeleteNote}
-            onRemoveNote={(note) => void handleRemoveExternal(note)}
-            onRenameNote={(note, title) => void handleRenameNote(note, title)}
-            onTogglePin={handleTogglePin}
-            onAddToSplit={addNoteToSplit}
-            canSplit={tabs.length > 0}
-            onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
-            onMoveNote={handleMoveNote}
-            onMoveFolder={handleMoveFolder}
-            onCreateSticky={handleCreateSticky}
-            onImport={handleImport}
-            onOpenFolder={() => void handleOpenFolder()}
-            onRemoveLinkedFolder={(path) => void handleRemoveLinkedFolder(path)}
-            onImportNotion={() => setNotionGuideOpen(true)}
-            onSearch={() => setSearchOpen(true)}
-            onOpenTrash={openTrashTab}
-            onOpenHome={openHomeTab}
-            onOpenAssistant={toggleAssistantPane}
-            assistantOpen={assistantOpen}
-            assistantAvailable={aiAgentEnabled}
-            onOpenSettings={() => setSettingsOpen(true)}
-            onOpenImport={() => setImportOpen(true)}
-          />
-        )}
         <div className="editor-area" ref={editorAreaRef}>
           {/* Panes left to right, with a draggable seam between each pair. The
-              keys matter: they let a pane keep its editors when the row is
+              keys matter: they let a pane keep its editor when the row is
               reordered or another pane opens beside it. */}
-          {paneRow.map((slot, index) => (
-            <Fragment key={slot ?? '__strip__'}>
+          {panes.map((pane, index) => (
+            <Fragment key={pane.key}>
               {index > 0 && (
                 <div
                   className="pane-resizer"
                   onPointerDown={(e) => startPaneResize(e, index - 1)}
                 />
               )}
-              {slot !== null ? (
-                renderPinnedPane(slot, index, ratios[index])
-              ) : (
-                <main className={paneClass(activeTabId)} style={{ flex: `${ratios[index]} 1 0%` }}>
-                  {/* All tabs closed: Home takes over rather than an empty state. */}
-                  {tabs.length === 0 && (
-                    <HomeView
-                      notes={notes}
-                      recentIds={recentIds}
-                      onOpenNote={openNoteTab}
-                      onSetReminder={(note, reminderAt) =>
-                        void handleSetReminder(note, reminderAt)
-                      }
-                    />
-                  )}
-                  {/* Tabs pinned into their own pane are mounted there, so skip
-                      them here — one note must never have two live editors. */}
-                  {tabs
-                    .filter((tab) => !extraPanes.includes(tab.id))
-                    .map((tab) => (
-                      <div
-                        key={tab.id}
-                        // minHeight, not height: a sticky child only stays stuck
-                        // within its parent's box, so this must grow with the
-                        // note's content.
-                        style={
-                          tab.id === activeTabId ? paneBodyStyle(tab.id) : { display: 'none' }
-                        }
-                      >
-                        {renderSpecialTab(tab) ?? (
-                          <NoteEditor
-                            path={tab.path}
-                            onSaved={handleNoteSaved}
-                            onEditorReady={(editor) => registerEditor(tab.id, editor)}
-                          />
-                        )}
-                      </div>
-                    ))}
-                </main>
-              )}
+              <main
+                className={
+                  `editor-pane${pane.view.kind === 'assistant' ? ' fills-pane' : ''}` +
+                  (pane.key === focusedKey && panes.length > 1 ? ' focused' : '')
+                }
+                style={{ flex: `${ratios[index]} 1 0%` }}
+                onFocusCapture={() => setFocusedKey(pane.key)}
+                onMouseDown={() => setFocusedKey(pane.key)}
+              >
+                {/* A note's shell has to span the pane even when the note is
+                    short, so the dictation button docks to the pane's bottom
+                    rather than to the end of the text. A flex column is what
+                    makes `flex: 1` on the shell resolve — a percentage height
+                    can't, since the wrapper's own height is auto. The assistant
+                    manages its own scrolling and needs a bounded height. */}
+                <div
+                  style={
+                    pane.view.kind === 'assistant'
+                      ? { height: '100%' }
+                      : { display: 'flex', flexDirection: 'column', minHeight: '100%' }
+                  }
+                >
+                  {renderPaneBody(pane, index)}
+                </div>
+              </main>
             </Fragment>
           ))}
 
-          {/* Floats over the working area's bottom-left corner, clear of the
-              dictation button at each pane's bottom-right. */}
-          <div className="editor-area-shortcuts">
-            <ShortcutsHelp />
-          </div>
-
-          {/* Drop targets appear only while a tab is being dragged. */}
-          {draggingTabId && tabs.length > 1 && (
+          {/* Drop targets appear only while a note is dragged out of the sidebar. */}
+          {draggingNote && panes.length < MAX_PANES && (
             <div className="split-dropzones">
               {(['left', 'right'] as const).map((side) => (
                 <div
@@ -1308,13 +970,17 @@ export default function MainLayout() {
                   onDragLeave={() => setDropSide((s) => (s === side ? null : s))}
                   onDrop={(e) => {
                     e.preventDefault()
-                    const id = e.dataTransfer.getData('text/plain') || draggingTabId
-                    if (id) openSplit(id, side)
+                    const note = draggingNote
                     setDropSide(null)
-                    setDraggingTabId(null)
+                    setDraggingNote(null)
+                    if (!note) return
+                    const pane = makePane(noteView(note))
+                    const next = side === 'left' ? [pane, ...panes] : [...panes, pane]
+                    commitPanes(next)
+                    setFocusedKey(pane.key)
                   }}
                 >
-                  <span className="split-dropzone-hint">Split {side}</span>
+                  <span className="split-dropzone-hint">Open {side}</span>
                 </div>
               ))}
             </div>
@@ -1331,19 +997,10 @@ export default function MainLayout() {
           onClose={() => setImportOpen(false)}
         />
       )}
-      {newTabOpen && (
-        <NewTabModal
-          notes={notes}
-          recentIds={recentIds}
-          onOpen={openNoteTab}
-          onCreate={(title) => void handleCreateInSelectedFolder(title)}
-          onClose={() => setNewTabOpen(false)}
-        />
-      )}
       {searchOpen && (
         <SearchModal
           onClose={() => setSearchOpen(false)}
-          onSelect={(r) => openNoteTab({ id: r.id, path: r.path, title: r.title })}
+          onSelect={(r) => openInFocused({ kind: 'note', id: r.id, path: r.path, title: r.title })}
         />
       )}
       {notionGuideOpen && (
@@ -1360,22 +1017,18 @@ export default function MainLayout() {
           title={
             confirm.kind === 'note'
               ? 'Delete note?'
-              : confirm.kind === 'folder'
-                ? 'Delete folder?'
-                : confirm.kind === 'purge'
-                  ? 'Delete forever?'
-                  : 'Empty trash?'
+              : confirm.kind === 'purge'
+                ? 'Delete forever?'
+                : 'Empty trash?'
           }
           message={
             confirm.kind === 'note'
               ? `“${confirm.note.title || 'Untitled'}” will be moved to the trash.`
-              : confirm.kind === 'folder'
-                ? `“${folderName(confirm.path)}” and everything inside it will be moved to the trash.`
-                : confirm.kind === 'purge'
-                  ? `“${confirm.entry.title || 'Untitled'}” will be permanently deleted. This cannot be undone.`
-                  : 'Everything in the trash will be permanently deleted. This cannot be undone.'
+              : confirm.kind === 'purge'
+                ? `“${confirm.entry.title || 'Untitled'}” will be permanently deleted. This cannot be undone.`
+                : 'Everything in the trash will be permanently deleted. This cannot be undone.'
           }
-          confirmLabel={confirm.kind === 'note' || confirm.kind === 'folder' ? 'Delete' : 'Delete forever'}
+          confirmLabel={confirm.kind === 'note' ? 'Delete' : 'Delete forever'}
           danger
           onConfirm={performDelete}
           onCancel={() => setConfirm(null)}

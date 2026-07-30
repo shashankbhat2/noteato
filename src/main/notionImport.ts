@@ -50,8 +50,6 @@ export function importNotionExport(noteStore: NoteStore, sourceRoot: string): No
   const notesDir = noteStore.getNotesDir()
   const claimedNotes = new Set<string>()
   const claimedFiles = new Set<string>()
-  const claimedFolders = new Set<string>()
-  const folderOrder: string[] = []
   const pathMap = new Map<string, string>()
   // origRelPath -> note id, for links that target another imported note —
   // those get rewritten to Noteato's own durable "[Title](#note/<id>)" chip
@@ -60,49 +58,28 @@ export function importNotionExport(noteStore: NoteStore, sourceRoot: string): No
   const noteIds = new Map<string, string>()
   const planned: PlannedItem[] = []
 
-  const claimNote = (folder: string, title: string): string => {
-    let base = `${slugify(title)}.md`
-    let counter = 1
-    const relOf = (name: string): string => (folder ? `${folder}/${name}` : name)
-    let candidate = relOf(base)
+  const claimNote = (title: string): string => {
+    let candidate = `${slugify(title)}.md`
+    let counter = 2
     while (claimedNotes.has(candidate) || existsSync(join(notesDir, candidate))) {
-      base = `${slugify(title)}-${counter}.md`
-      candidate = relOf(base)
+      candidate = `${slugify(title)}-${counter}.md`
       counter += 1
     }
     claimedNotes.add(candidate)
     return candidate
   }
 
-  const claimFile = (folder: string, cleanedName: string): string => {
+  const claimFile = (cleanedName: string): string => {
     const dot = cleanedName.lastIndexOf('.')
     const stem = dot > 0 ? cleanedName.slice(0, dot) : cleanedName
     const ext = dot > 0 ? cleanedName.slice(dot) : ''
-    let name = cleanedName
-    let counter = 1
-    const relOf = (): string => (folder ? `${folder}/${name}` : name)
-    let candidate = relOf()
+    let candidate = cleanedName
+    let counter = 2
     while (claimedFiles.has(candidate) || existsSync(join(notesDir, candidate))) {
-      name = `${stem}-${counter}${ext}`
-      candidate = relOf()
+      candidate = `${stem}-${counter}${ext}`
       counter += 1
     }
     claimedFiles.add(candidate)
-    return candidate
-  }
-
-  const claimFolder = (parent: string, cleanedName: string): string => {
-    let name = cleanedName || 'Untitled'
-    let counter = 1
-    const relOf = (): string => (parent ? `${parent}/${name}` : name)
-    let candidate = relOf()
-    while (claimedFolders.has(candidate) || existsSync(join(notesDir, candidate))) {
-      name = `${cleanedName || 'Untitled'}-${counter}`
-      candidate = relOf()
-      counter += 1
-    }
-    claimedFolders.add(candidate)
-    folderOrder.push(candidate)
     return candidate
   }
 
@@ -111,28 +88,20 @@ export function importNotionExport(noteStore: NoteStore, sourceRoot: string): No
   // rewriting in pass 2 can resolve any cross-note reference regardless of
   // which order the two notes happen to be visited in.
   //
-  // A Notion page with children exports as a "<Title> <hash>.md" file
-  // alongside a same-titled sibling folder (folders don't get the hash
-  // suffix) holding the children. Directories are processed — and recursed
-  // into — before files at the same level, so a file whose cleaned stem
-  // matches a sibling folder's name can be nested *inside* that folder
-  // (as that page's own note, alongside its children) instead of sitting
-  // beside it as a confusing duplicate-named top-level entry.
-  function walk(srcDir: string, destFolder: string, origPrefix: string): void {
+  // The export's own directory structure is walked but not reproduced: the
+  // library is flat, so a nested Notion page lands beside its parent and the
+  // name collisions that used to be spread across folders are all resolved
+  // here by the claim helpers. Notion's "<Title> <hash>.md" file next to a
+  // same-titled child folder therefore just becomes one more note at the root.
+  function walk(srcDir: string, origPrefix: string): void {
     const entries = readdirSync(srcDir, { withFileTypes: true }).sort((a, b) =>
       a.name.localeCompare(b.name)
     )
-    const folderFinalPathByCleanedName = new Map<string, string>()
 
     for (const entry of entries) {
       if (entry.name.startsWith('.') || !entry.isDirectory()) continue
-      const srcPath = join(srcDir, entry.name)
       const origRel = origPrefix ? `${origPrefix}/${entry.name}` : entry.name
-      const cleaned = stripHash(entry.name, true)
-      const finalPath = claimFolder(destFolder, cleaned)
-      pathMap.set(origRel, finalPath)
-      folderFinalPathByCleanedName.set(cleaned, finalPath)
-      walk(srcPath, finalPath, origRel)
+      walk(join(srcDir, entry.name), origRel)
     }
 
     for (const entry of entries) {
@@ -150,8 +119,7 @@ export function importNotionExport(noteStore: NoteStore, sourceRoot: string): No
         const { title: h1Title, body } = extractTitle(raw)
         const cleanedStem = stripHash(entry.name, false).replace(MD_EXT_RE, '')
         const title = h1Title || cleanedStem || 'Untitled'
-        const targetFolder = folderFinalPathByCleanedName.get(cleanedStem) ?? destFolder
-        const finalPath = claimNote(targetFolder, title)
+        const finalPath = claimNote(title)
         const id = randomUUID()
         pathMap.set(origRel, finalPath)
         noteIds.set(origRel, id)
@@ -165,35 +133,29 @@ export function importNotionExport(noteStore: NoteStore, sourceRoot: string): No
           id
         })
       } else {
-        const cleaned = stripHash(entry.name, false)
-        const finalPath = claimFile(destFolder, cleaned)
+        const finalPath = claimFile(stripHash(entry.name, false))
         pathMap.set(origRel, finalPath)
         planned.push({ sourceAbs: srcPath, finalPath, origRelPath: origRel, kind: 'file' })
       }
     }
   }
 
-  walk(sourceRoot, '', '')
+  walk(sourceRoot, '')
 
-  // Pass 2: materialize folders, then notes (rewriting links using the map
-  // above), then copy every other file (images, csv exports, etc.) verbatim.
-  for (const folder of folderOrder) {
-    noteStore.createFolder(folder)
-  }
-
+  // Pass 2: create the notes (rewriting links using the map above), then copy
+  // every other file (images, csv exports, etc.) verbatim.
   const created: NotionImportResult['created'] = []
   const skipped: string[] = []
 
   for (const item of planned) {
     try {
       if (item.kind === 'file') {
-        // Every destination folder was already created above, in walk order.
         copyFileSync(item.sourceAbs, join(notesDir, item.finalPath))
         continue
       }
 
       const rewrittenBody = rewriteLinks(item.body ?? '', item.origRelPath, pathMap, noteIds)
-      const note = noteStore.create(item.title!, posixDirOf(item.finalPath), item.id)
+      const note = noteStore.create(item.title!, item.id)
       // The real create() call replicates pass 1's slugify+collision prediction
       // exactly (same algorithm, same disk state at call time) — if it ever
       // doesn't, treat the item as failed rather than silently mis-linking.
@@ -220,8 +182,6 @@ function rewriteLinks(
   noteIds: Map<string, string>
 ): string {
   const ownOrigDir = posixDirOf(ownOrigRelPath)
-  const ownFinalPath = pathMap.get(ownOrigRelPath)
-  const ownFinalDir = ownFinalPath ? posixDirOf(ownFinalPath) : ''
 
   return body.replace(LINK_RE, (whole, open: string, target: string, close: string) => {
     if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return whole // http(s), notion.so, mailto, etc.
@@ -241,13 +201,10 @@ function rewriteLinks(
       return `${open}${NOTE_LINK_PREFIX}${noteId}${close}`
     }
 
+    // Everything lands in one directory, so a surviving link (an image, a CSV)
+    // is always a sibling reference by name.
     const mappedFinal = pathMap.get(originalAbs)
     if (!mappedFinal) return whole
-    const rel = posix.relative(ownFinalDir, mappedFinal) || posix.basename(mappedFinal)
-    const encoded = rel
-      .split('/')
-      .map((seg) => encodeURIComponent(seg))
-      .join('/')
-    return `${open}${encoded}${close}`
+    return `${open}${encodeURIComponent(mappedFinal)}${close}`
   })
 }

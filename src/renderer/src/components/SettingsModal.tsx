@@ -7,20 +7,16 @@ import {
   IconMicrophone as MicIcon,
   IconMoon as Moon,
   IconPalette as PaletteIcon,
-  IconSparkles as SparklesIcon,
+  IconSparkle as SparklesIcon,
   IconSun as Sun,
   IconX as X
 } from '@tabler/icons-react'
-import type { AiProvider, Settings } from '../../../shared/types'
+import type { AiProvider, ScreenEdge, Settings } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
 import { ACCENT_OPTIONS } from '../accents'
 import { AI_MODELS, CHEAP_AI_MODELS } from '../ai/models'
-import {
-  QUICK_NOTE_ACCELERATOR,
-  SIDEBAR_MODE_ACCELERATOR,
-  shortcutDisplay
-} from '../../../shared/globalShortcuts'
+import { SIDEBAR_MODE_ACCELERATOR, shortcutDisplay } from '../../../shared/globalShortcuts'
 
 interface Props {
   onClose: () => void
@@ -28,6 +24,14 @@ interface Props {
 }
 
 type SettingsTab = 'general' | 'appearance' | 'ai' | 'dictation'
+
+/** Offered as steps rather than a free number — this is a feel, not a measurement. */
+const HOVER_DELAYS = [
+  { ms: 150, label: 'Instant' },
+  { ms: 400, label: 'Short' },
+  { ms: 800, label: 'Medium' },
+  { ms: 1500, label: 'Long' }
+]
 
 interface TabMeta {
   id: SettingsTab
@@ -140,8 +144,6 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     setFontFamily,
     accent,
     setAccent,
-    zenMode,
-    setZenMode,
     aiSelectionActions,
     setAiSelectionActions,
     aiAgentEnabled,
@@ -237,23 +239,40 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
             onToggle={() => setAndPersist({ sidebarModeEnabled: !s.sidebarModeEnabled })}
           />
         </Row>
+        <Row label="Sidebar edge" description="Which side of the screen the panel docks to">
+          <select
+            className="settings-select"
+            value={s.sidebarEdge}
+            disabled={!s.sidebarModeEnabled}
+            onChange={(e) => setAndPersist({ sidebarEdge: e.target.value as ScreenEdge })}
+          >
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </Row>
         <Row
-          label="Quick note shortcut"
-          description={
-            <>
-              Capture a note from any app ·{' '}
-              <kbd className="settings-shortcut-key">
-                {shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform)}
-              </kbd>
-            </>
-          }
+          label="Reveal on hover"
+          description="Rest the pointer against that edge to bring the sidebar forward"
         >
           <Switch
-            checked={s.quickNoteShortcutEnabled}
-            onToggle={() =>
-              setAndPersist({ quickNoteShortcutEnabled: !s.quickNoteShortcutEnabled })
-            }
+            checked={s.sidebarHoverReveal}
+            disabled={!s.sidebarModeEnabled}
+            onToggle={() => setAndPersist({ sidebarHoverReveal: !s.sidebarHoverReveal })}
           />
+        </Row>
+        <Row label="Hover delay" description="How long the pointer has to rest there first">
+          <select
+            className="settings-select"
+            value={String(s.sidebarHoverDelay)}
+            disabled={!s.sidebarModeEnabled || !s.sidebarHoverReveal}
+            onChange={(e) => setAndPersist({ sidebarHoverDelay: Number(e.target.value) })}
+          >
+            {HOVER_DELAYS.map((option) => (
+              <option key={option.ms} value={option.ms}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </Row>
       </Group>
 
@@ -358,12 +377,6 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
               </button>
             ))}
           </div>
-        </Row>
-      </Group>
-
-      <Group label="Writing">
-        <Row label="Zen mode" description="Hide the sidebar and tabs while writing · ⌘.">
-          <Switch checked={zenMode} onToggle={() => setZenMode(!zenMode)} />
         </Row>
       </Group>
     </>

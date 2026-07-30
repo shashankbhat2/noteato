@@ -4,7 +4,7 @@
 
 <h1 align="center">Noteato</h1>
 
-<p align="center">A minimal, block-based note taking app for Mac. Markdown, folders, search, dictation, sticky notes, reminders, and optional AI — all local, nothing behind an account.</p>
+<p align="center">A minimal, block-based note taking app for Mac. Markdown, search, dictation, side-by-side panes, reminders, and optional AI — all local, nothing behind an account.</p>
 
 <p align="center">
   <a href="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml"><img src="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
@@ -14,7 +14,7 @@
 
 ## Why
 
-Notion is a great tool that happens to also be a browser tab pretending to be an app: a web renderer, a sync engine, a database, a workspace/permissions model, and a note editor, all bundled together, for people who just want to write something down. Noteato is the opposite bet. Blocks and markdown for writing, folders and search for finding things again, dictation for when typing is slower than talking, sticky notes for the stuff that doesn't deserve a whole document, reminders for the stuff you'd otherwise forget, and AI that's entirely optional and bring-your-own-key — nothing routes through a Noteato server. Everything lives on your disk as plain `.md` files, not behind an account.
+Notion is a great tool that happens to also be a browser tab pretending to be an app: a web renderer, a sync engine, a database, a workspace/permissions model, and a note editor, all bundled together, for people who just want to write something down. Noteato is the opposite bet. Blocks and markdown for writing, one flat list and search for finding things again, dictation for when typing is slower than talking, panes for reading one note while writing another, reminders for the stuff you'd otherwise forget, and AI that's entirely optional and bring-your-own-key — nothing routes through a Noteato server. Everything lives on your disk as plain `.md` files, not behind an account.
 
 <p align="center">
   <img src="ss/editor.png" width="100%" alt="Noteato editor with the sidebar, recent notes, folders, and a focused writing surface" />
@@ -27,31 +27,29 @@ Notion is a great tool that happens to also be a browser tab pretending to be an
 - **Blocks, not a textarea** — slash menu, headings, to-dos, nesting, tables, etc. ([BlockNote](https://www.blocknotejs.org/))
 - **Plain markdown mode** — flip any note to a raw markdown textarea and back, in place.
 - **Notion-style block menu** on the drag handle — turn into, duplicate, copy, delete.
-- **Note links** — type `@` to mention another note; opens it in a tab, and keeps pointing at the right note even after it's renamed or moved.
-- **Per-note full-width toggle**, a **Zen mode** (`⌘.`) that hides AI, tabs, and the sidebar for distraction-free writing, four fonts, and six accent colors.
+- **Note links** — type `@` to mention another note; opens it in the focused pane, and keeps pointing at the right note even after it's renamed.
+- **Per-note full-width toggle**, a collapsible sidebar (`⌘\`), four fonts, and six accent colors.
 
 <p align="center">
   <img src="ss/blocks.png" width="100%" alt="Noteato slash menu with block types and keyboard shortcuts" />
   <br />
-  <sub>Build a note with blocks, or press <code>⌘.</code> and leave every panel behind.</sub>
+  <sub>Build a note with blocks.</sub>
 </p>
 
-<p align="center">
-  <img src="ss/zen_mode.png" width="100%" alt="Noteato Zen mode with no AI panel, tabs, or sidebar" />
-</p>
 
 ### Organization
 
-- **Nested folders** — create, rename, move, drag-and-drop.
-- **Full-text search** (`⌘K`) across every note.
-- **Pinned notes**, a **collapsible sidebar** (`⌘\`), inline rename, and undoable delete for both notes and folders.
+- **One flat list, no folders** — notes sort by when you last touched them, and search does the finding. Upgrading from an older version flattens the library once, keeping a restorable copy of the old tree in the trash.
+- **Up to three panes** side by side, each holding a note, Home, Trash or the assistant. ⌘-click a note (or drag it to the working area's edge) to open one beside what you're reading; drag the seam to resize. **Pin a pane** to hold its note in place while you browse others around it.
+- **Full-text search** (`⌘K`) across every note, including `#tag` filters.
+- **Favourites** at the top of the sidebar, inline rename, and undoable delete.
 - **Reminders** — set a one-time date/time reminder on any note from the editor toolbar or the sidebar's right-click menu, with quick presets or a custom picker. Fires a native notification even if the note isn't open; clicking it opens the note. A reminder that passes while the app is closed surfaces as a catch-up notification on the next launch.
 
 ### AI (optional, bring your own key)
 
 - **Enhance selected text** — improve, proofread, summarize, or extract key points, streamed in place with Copy/Insert/Replace controls.
 - **Ask about this note** — a popup scoped to the current note's content.
-- **Agent panel** — a right-side chat with per-note history, @-mentions of other notes as read-only context, creating new notes from chat, full-note edits, and a stop button with real cancellation.
+- **Assistant** — opens in a pane of its own, with per-note history, @-mentions of other notes as read-only context, creating new notes from chat, full-note edits, and a stop button with real cancellation. Everything it can see rides in a scrollable rail inside the composer.
 - Anthropic or OpenAI, your key, stored locally. No Noteato backend sits between the app and the provider, and every AI feature is off by default.
 
 <p align="center">
@@ -61,20 +59,20 @@ Notion is a great tool that happens to also be a browser tab pretending to be an
 ### Voice & quick capture
 
 - **Dictation** — press the mic button and talk; [Deepgram Nova-3](https://deepgram.com/) streams your words directly into the open note. Say “scratch that” or “undo that” to remove the last dictated phrase. Bring your own API key.
-- **Sticky notes** — always-on-top, borderless, one click away, visible across every Space.
+- **Compact side panel** (`⌘⌥S`) — a narrow always-on-top window for quick capture and reminders, separate from your markdown library. Rest the pointer against the screen edge to reveal it; click away to dismiss. Which edge, and how long the pointer has to rest, are both settings.
 
 <p align="center">
   <img src="ss/dictation.png" width="100%" alt="Live dictation writing directly into a Noteato note" />
 </p>
 
-### Files, tabs, and everything else
+### Files and everything else
 
 - **Markdown on disk** — every note is a plain `.md` file with a small frontmatter header. No database, no export step, no lock-in. Sync it with iCloud/Dropbox/git if you want.
 - **Import Markdown** (`⌘O`), and the OS recognizes Noteato as a Markdown editor — double-clicking a `.md` file in Finder opens it directly.
-- **Chrome-style tabs** with a real native titlebar (traffic lights included): right-click to pin, close others/to the right/all, plus previous/next tab navigation.
+- **No tabs.** A pane shows one thing, with its own move, pin and close controls in its header — nothing to tidy up between sessions.
 - **Light/dark/system theme**, matched to the actual window chrome, not just the page background.
 - Window size and position persist across restarts, including maximized state.
-- **Quick-note shortcuts** — `⌘T` new note, `⌘⇧N` new sticky note, `⌘O` import markdown, `⌘K` find in notes, `⌘W` close tab, `⌘\` toggle sidebar, `⌘.` zen mode, `⌘,` settings.
+- **Shortcuts** — `⌘T` new note, `⌘O` import markdown, `⌘K` find in notes, `⌘F` find in note, `⌘W` close pane, `⌘\` toggle sidebar, `⌘⌥S` compact side panel, `⌘,` settings.
 
 No telemetry, no accounts, no auto-updater phoning home. It's an Electron app, so it isn't the smallest possible binary on disk, but there's nothing running that you didn't ask for.
 

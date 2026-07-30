@@ -12,6 +12,8 @@ interface Props {
   onRestore: (entry: TrashEntry) => void
   onPurge: (entry: TrashEntry) => void
   onEmpty: () => void
+  /** This pane's move/close controls; empty when only one pane is open. */
+  paneControls?: React.ReactNode
 }
 
 function formatDeletedAt(iso: string): string {
@@ -30,8 +32,14 @@ function originalFolder(entry: TrashEntry): string {
   return slash === -1 ? '' : entry.originalPath.slice(0, slash)
 }
 
-/** Full-pane Trash tab: everything deleted, restorable until purged. */
-export default function TrashView({ trash, onRestore, onPurge, onEmpty }: Props) {
+/** Full-pane Trash view: everything deleted, restorable until purged. */
+export default function TrashView({
+  trash,
+  onRestore,
+  onPurge,
+  onEmpty,
+  paneControls
+}: Props) {
   return (
     <div className="trash-view">
       <header className="trash-view-header">
@@ -40,12 +48,15 @@ export default function TrashView({ trash, onRestore, onPurge, onEmpty }: Props)
           <span>Trash</span>
           {trash.length > 0 && <span className="trash-view-count">{trash.length}</span>}
         </h1>
-        {trash.length > 0 && (
-          <button className="trash-empty-btn" onClick={onEmpty}>
-            <TrashX size={14} />
-            <span>Empty Trash</span>
-          </button>
-        )}
+        <div className="view-header-actions">
+          {trash.length > 0 && (
+            <button className="trash-empty-btn" onClick={onEmpty}>
+              <TrashX size={14} />
+              <span>Empty Trash</span>
+            </button>
+          )}
+          {paneControls}
+        </div>
       </header>
       <p className="trash-view-hint">
         Deleted notes and folders stay here until you restore them or delete them forever.

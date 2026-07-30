@@ -2,6 +2,83 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-30
+
+A deliberate strip-back. Noteato had accumulated a folder tree, a tag shelf, a
+tab strip, zen mode, sticky notes and a quick-note window on top of the notes
+themselves. This release removes the chrome and keeps the one power feature
+that earns its complexity: side-by-side panes.
+
+### Added
+
+- Pinning a pane. The pin in a note's header holds that note in place: opening
+  anything from the sidebar goes to another pane, or opens a new one, rather
+  than replacing what you pinned. Keep a reference note on one side and work
+  through others beside it. Pinned panes survive a restart, and nothing — not
+  the sidebar, not a note link, not the three-pane cap — can evict one.
+- Hover to reveal the compact notes panel. Rest the pointer against a screen
+  edge and it slides in and takes focus; clicking anything outside puts it
+  away again. The edge (left or right) and the delay are both settings, in the
+  panel's own settings popover and in Settings → General. The panel now always
+  floats above other apps; its pin button controls only whether it follows you
+  across Spaces.
+- Favourites, which is what pinning a note was always called in the UI. They
+  lead the sidebar under their own heading, marked with a star.
+
+### Changed
+
+- **Folders are gone, and the notes directory is flattened on first launch.**
+  Every note now lives at the root. The whole original tree is copied into the
+  trash as "Folders (before flattening)" before anything moves, so the
+  structure can be restored from the Trash view; name clashes are resolved with
+  a `-2`, `-3` suffix. Note ids live in frontmatter and are untouched, so open
+  panes, note links and reminders all survive. The Notion importer imports flat
+  for the same reason.
+- **Tabs are gone.** A pane shows one thing. Clicking a note in the sidebar
+  replaces the focused pane; ⌘-click, the context menu, or dragging a note to
+  the working area's edge opens a new one, up to three. Each pane carries its
+  own move/close controls in its header — there is no strip to manage. ⌘W is
+  now Close Pane, and closing the last one falls back to Home.
+- The sidebar is a flat, recency-sorted list with Favourites at the top and a
+  rail of icons along the bottom for Home, Assistant, Import, Settings and
+  Trash. The tag section, the folder tree, the section headers and the
+  disclosure animations are all gone.
+- Search and New note moved out of the sidebar into the title bar, next to the
+  sidebar toggle, so they stay reachable when the sidebar is collapsed. The
+  shortcut sheet sits at the title bar's far end.
+- The assistant's composer is one object: the notes it can see ride in a
+  scrollable rail inside the composer rather than wrapping above it, so a long
+  context list can't push the conversation off screen. The note it will edit is
+  the accent-filled chip; the rest are read-only context.
+- Every part of the block editor follows the app's tokens. BlockNote writes its
+  theme inline on the editor element, but portals its menus to the document
+  body — so dropdowns, submenus, the slash menu and the link popover were all
+  falling back to the library's own greys and radii. They now inherit one hover
+  wash, one selected wash, one radius scale and one shadow.
+- Dictation moved to the note's bottom-left.
+
+### Removed
+
+- Zen mode, sticky notes, and the quick-note window and its global shortcut.
+  The compact edge panel (⌘⌥S) is unaffected and keeps its scratch notes.
+- Tags in the sidebar. Tags themselves are untouched: the bar under a note's
+  title still edits them, they still round-trip through frontmatter, and `#tag`
+  search still works.
+
+### Fixed
+
+- Favouriting a note from its own header never reached the sidebar, so the note
+  wouldn't move into or out of the group. The main process excludes the sender
+  from its change broadcast, making the save callback the only route back — and
+  that callback rebuilt the sidebar's copy from a field list that omitted the
+  favourite flag.
+- The assistant worked on the wrong note. It picked its subject from the
+  focused pane, but the focused pane *is* the assistant the moment you click
+  into the chat — so it silently fell back to the leftmost note. It now follows
+  the note pane you were last in.
+- The empty-title placeholder rendered in italic, reading as a styled title
+  rather than a prompt.
+
 ## [1.1.0] - 2026-07-29
 
 ### Added
@@ -287,7 +364,8 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/shashankbhat2/noteato/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/shashankbhat2/noteato/compare/v1.0.5...v1.1.0
 [0.8.0]: https://github.com/shashankbhat2/noteato/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/shashankbhat2/noteato/compare/v0.7.2...v0.7.3

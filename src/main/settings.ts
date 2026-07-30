@@ -30,7 +30,6 @@ export function createSettingsStore(): JsonStore<Settings> {
     theme: 'light',
     fontFamily: 'system',
     accent: 'ember',
-    zenMode: false,
     aiProvider: 'none',
     aiModel: '',
     anthropicApiKey: '',
@@ -41,7 +40,9 @@ export function createSettingsStore(): JsonStore<Settings> {
     keepInMenuBar: true,
     sidebarModeEnabled: true,
     sidebarPinned: true,
-    quickNoteShortcutEnabled: true,
+    sidebarEdge: 'left',
+    sidebarHoverReveal: true,
+    sidebarHoverDelay: 400,
     spellcheckLanguage: 'auto'
   })
 }

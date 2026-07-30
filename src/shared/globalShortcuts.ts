@@ -1,4 +1,3 @@
-export const QUICK_NOTE_ACCELERATOR = 'CommandOrControl+Alt+N'
 export const SIDEBAR_MODE_ACCELERATOR = 'CommandOrControl+Alt+S'
 
 export function shortcutDisplay(accelerator: string, platform: string): string {

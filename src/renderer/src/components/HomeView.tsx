@@ -12,7 +12,7 @@ import {
   IconPencil as Pencil,
   IconPin as Pin,
   IconPlus as Plus,
-  IconSparkles as Sparkles,
+  IconSparkle as Sparkles,
   IconSquare as Square,
   IconX as X
 } from '@tabler/icons-react'
@@ -55,6 +55,8 @@ interface Props {
   recentIds: string[]
   onOpenNote: (note: NoteSummary) => void
   onSetReminder: (note: NoteSummary, reminderAt: string | null) => void
+  /** This pane's move/close controls; empty when only one pane is open. */
+  paneControls?: React.ReactNode
 }
 
 interface ModelOption {
@@ -760,7 +762,13 @@ function NoteCard({
   )
 }
 
-export default function HomeView({ notes, recentIds, onOpenNote, onSetReminder }: Props) {
+export default function HomeView({
+  notes,
+  recentIds,
+  onOpenNote,
+  onSetReminder,
+  paneControls
+}: Props) {
   const [settings, setSettings] = useState<Settings | null>(null)
   // One phrase per visit, not per render.
   const [phrase] = useState(drawGreeting)
@@ -878,7 +886,7 @@ export default function HomeView({ notes, recentIds, onOpenNote, onSetReminder }
       if (pinned.length === 0) return null
       return section(
         'pinned',
-        'Pinned',
+        'Favourites',
         <div className="home-cards">
           {pinned.map((note) => (
             <NoteCard key={note.id} note={note} onOpen={onOpenNote} />
@@ -904,17 +912,20 @@ export default function HomeView({ notes, recentIds, onOpenNote, onSetReminder }
           {phrase}
           {name && <span className="home-greeting-name">, {name}</span>}
         </h1>
-        <label className="home-assistant-toggle">
-          <span>Assistant</span>
-          <button
-            className={settings.homeAssistantEnabled ? 'settings-switch on' : 'settings-switch'}
-            role="switch"
-            aria-checked={settings.homeAssistantEnabled}
-            onClick={() => setAssistantEnabled(!settings.homeAssistantEnabled)}
-          >
-            <span className="settings-switch-knob" />
-          </button>
-        </label>
+        <div className="view-header-actions">
+          <label className="home-assistant-toggle">
+            <span>Assistant</span>
+            <button
+              className={settings.homeAssistantEnabled ? 'settings-switch on' : 'settings-switch'}
+              role="switch"
+              aria-checked={settings.homeAssistantEnabled}
+              onClick={() => setAssistantEnabled(!settings.homeAssistantEnabled)}
+            >
+              <span className="settings-switch-knob" />
+            </button>
+          </label>
+          {paneControls}
+        </div>
       </header>
 
       {order.map(renderSection)}

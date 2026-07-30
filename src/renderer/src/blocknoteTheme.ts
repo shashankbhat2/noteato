@@ -2,40 +2,45 @@ import { lightDefaultTheme, darkDefaultTheme } from '@blocknote/mantine'
 import type { Theme } from '@blocknote/mantine'
 import type { ThemeMode } from '../../shared/types'
 
-function buildLightTheme(fontFamily: string): Theme {
-  return {
-    ...lightDefaultTheme,
-    colors: {
-      ...lightDefaultTheme.colors,
-      editor: { text: '#232323', background: '#ffffff' },
-      menu: { text: '#232323', background: '#ffffff' },
-      hovered: { text: '#232323', background: '#ededed' },
-      selected: { text: 'var(--text)', background: 'var(--accent-soft)' },
-      border: '#e4e4e4',
-      sideMenu: '#b0b0b0'
-    },
-    borderRadius: 4,
-    fontFamily
-  }
+/**
+ * BlockNote's chrome, pointed at the app's own tokens.
+ *
+ * Every value here is a `var(--…)` rather than a literal, so light and dark are
+ * one definition — the tokens themselves flip with `data-theme`, which is also
+ * what keeps the editor honest when the accent changes.
+ *
+ * The matching `:root { --bn-* }` block in styles.css covers the menus and
+ * popovers BlockNote portals to document.body, which never see the variables
+ * this sets inline on the editor element. The two have to agree, so both read
+ * from the same tokens.
+ *
+ * Only the highlight palette is left to the library's defaults — those are the
+ * user's own text colours, not app chrome.
+ */
+const SHARED_COLORS = {
+  editor: { text: 'var(--text)', background: 'var(--bg)' },
+  menu: { text: 'var(--text)', background: 'var(--bg)' },
+  tooltip: { text: 'var(--text)', background: 'var(--bg)' },
+  hovered: { text: 'var(--text)', background: 'var(--bg-tertiary)' },
+  selected: { text: 'var(--accent)', background: 'var(--accent-soft)' },
+  disabled: { text: 'var(--text-muted)', background: 'transparent' },
+  border: 'var(--border)',
+  sideMenu: 'var(--text-muted)'
 }
 
-function buildDarkTheme(fontFamily: string): Theme {
-  return {
-    ...darkDefaultTheme,
-    colors: {
-      ...darkDefaultTheme.colors,
-      editor: { text: '#ededed', background: '#262626' },
-      menu: { text: '#ededed', background: '#2e2e2e' },
-      hovered: { text: '#ededed', background: '#383838' },
-      selected: { text: 'var(--text)', background: 'var(--accent-soft)' },
-      border: '#3f3f3f',
-      sideMenu: '#6e6e6e'
-    },
-    borderRadius: 4,
-    fontFamily
-  }
+function buildTheme(base: Theme, fontFamily: string): Theme {
+  // `borderRadius` is deliberately omitted: anything set here is written inline
+  // onto the editor element and would then outrank the `:root` values that the
+  // portalled menus use, leaving the editor on one radius scale and its own
+  // dropdowns on another. Leaving it unset lets the stylesheet own the scale
+  // for both. Colours can't be dropped the same way — the base themes carry
+  // their own, so they have to be overridden rather than left absent.
+  const { borderRadius: _ignored, ...rest } = base
+  return { ...rest, colors: { ...base.colors, ...SHARED_COLORS }, fontFamily }
 }
 
 export function getNoteatoTheme(mode: ThemeMode, fontFamily: string): Theme {
-  return mode === 'dark' ? buildDarkTheme(fontFamily) : buildLightTheme(fontFamily)
+  return mode === 'dark'
+    ? buildTheme(darkDefaultTheme, fontFamily)
+    : buildTheme(lightDefaultTheme, fontFamily)
 }

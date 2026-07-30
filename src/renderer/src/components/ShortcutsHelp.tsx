@@ -1,19 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconKeyboard as Keyboard } from '@tabler/icons-react'
-import {
-  QUICK_NOTE_ACCELERATOR,
-  SIDEBAR_MODE_ACCELERATOR,
-  shortcutDisplay
-} from '../../../shared/globalShortcuts'
+import { SIDEBAR_MODE_ACCELERATOR, shortcutDisplay } from '../../../shared/globalShortcuts'
 
 const APP_SHORTCUTS: [string, string][] = [
   ['⌘T', 'New note'],
   ['⌘K', 'Search notes'],
-  ['⌘⇧N', 'New sticky note'],
   ['⌘O', 'Open markdown'],
-  ['⌘W', 'Close tab'],
+  ['⌘W', 'Close pane'],
   ['⌘\\', 'Toggle sidebar'],
-  ['⌘.', 'Toggle zen mode'],
   ['⌘,', 'Settings'],
   ['↵', 'In title: jump to note body']
 ]
@@ -23,7 +17,6 @@ export default function ShortcutsHelp() {
   const containerRef = useRef<HTMLDivElement>(null)
   const platform = window.electron.process.platform
   const shortcuts: [string, string][] = [
-    [shortcutDisplay(QUICK_NOTE_ACCELERATOR, platform), 'Quick note (global)'],
     [shortcutDisplay(SIDEBAR_MODE_ACCELERATOR, platform), 'Sidebar notes (global)'],
     ...APP_SHORTCUTS
   ]

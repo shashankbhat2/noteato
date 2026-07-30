@@ -18,9 +18,8 @@ import {
   IconBell as Bell,
   IconFilePlus as FilePlus,
   IconFileText as FileText,
-  IconPin as Pin,
-  IconPinnedFilled as PinnedFilled,
-  IconX as X
+  IconStar as Star,
+  IconStarFilled as StarFilled
 } from '@tabler/icons-react'
 import type { Note } from '../../../shared/types'
 import { useTheme } from '../theme'
@@ -49,8 +48,12 @@ interface Props {
   path: string
   onSaved: (note: Note) => void
   onEditorReady?: (editor: NoteatoEditor | null) => void
-  /** Present only for the split pane — renders a control to close the split. */
-  onCloseSplit?: () => void
+  /**
+   * The pane's own move/close controls, rendered at the end of this toolbar.
+   * A note has no other chrome to hang them off, and they're empty when only
+   * one pane is open.
+   */
+  paneControls?: React.ReactNode
 }
 
 interface AiPopupState {
@@ -151,7 +154,7 @@ function slashMenuItems(
     icon: <FilePlus size={18} />,
     onItemClick: () => {
       void (async () => {
-        const created = await window.api.notes.create('Untitled', note.folder)
+        const created = await window.api.notes.create('Untitled')
         editor.insertInlineContent([
           { type: 'noteLink', props: { noteId: created.id, title: created.title || 'Untitled' } },
           ' '
@@ -163,7 +166,7 @@ function slashMenuItems(
   return filterSuggestionItems([...getDefaultReactSlashMenuItems(editor), newPage], query)
 }
 
-export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit }: Props) {
+export default function NoteEditor({ path, onSaved, onEditorReady, paneControls }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [fullWidth, setFullWidth] = useState(false)
@@ -771,9 +774,9 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
           <button
             className={note.pinned ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
             onClick={() => void handleTogglePin()}
-            title={note.pinned ? 'Unpin note' : 'Pin note'}
+            title={note.pinned ? 'Remove from favourites' : 'Add to favourites'}
           >
-            {note.pinned ? <PinnedFilled size={15} /> : <Pin size={15} />}
+            {note.pinned ? <StarFilled size={15} /> : <Star size={15} />}
           </button>
           <button
             ref={reminderBtnRef}
@@ -797,11 +800,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, onCloseSplit 
           >
             {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
           </button>
-          {onCloseSplit && (
-            <button className="icon-toggle-btn" onClick={onCloseSplit} title="Close split view">
-              <X size={15} />
-            </button>
-          )}
+          {paneControls}
         </div>
       </div>
 

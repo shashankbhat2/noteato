@@ -41,11 +41,6 @@ export function buildAppMenu(): Menu {
           accelerator: 'CmdOrCtrl+T',
           click: () => sendShortcut('new-note')
         },
-        {
-          label: 'New Sticky Note',
-          accelerator: 'CmdOrCtrl+Shift+N',
-          click: () => sendShortcut('new-sticky')
-        },
         { type: 'separator' },
         {
           label: 'Open Markdown…',
@@ -73,9 +68,9 @@ export function buildAppMenu(): Menu {
         },
         { type: 'separator' },
         {
-          label: 'Close Tab',
+          label: 'Close Pane',
           accelerator: 'CmdOrCtrl+W',
-          click: () => sendShortcut('close-tab')
+          click: () => sendShortcut('close-pane')
         }
       ]
     },
@@ -108,11 +103,6 @@ export function buildAppMenu(): Menu {
           label: 'Toggle Sidebar',
           accelerator: 'CmdOrCtrl+\\',
           click: () => sendShortcut('toggle-sidebar')
-        },
-        {
-          label: 'Toggle Zen Mode',
-          accelerator: 'CmdOrCtrl+.',
-          click: () => sendShortcut('toggle-zen')
         },
         { type: 'separator' },
         { role: 'reload' },
