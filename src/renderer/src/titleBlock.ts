@@ -37,6 +37,29 @@ export function titleFromMarkdown(markdown: string): string {
 }
 
 /**
+ * Title for a note with no title block: the first line that has any text,
+ * whatever kind of block it came from.
+ *
+ * Scratch notes don't carry a mandatory H1 — you open one to jot something,
+ * not to name a document — so their title is only ever a label for the tab,
+ * derived from whatever you actually wrote. Markdown's line-level syntax is
+ * stripped so a note that happens to start with a bullet or a heading reads as
+ * its text rather than its punctuation.
+ */
+export function titleFromFirstLine(markdown: string): string {
+  for (const raw of markdown.split('\n')) {
+    const line = raw
+      .replace(/^\s*#{1,6}\s+/, '')
+      .replace(/^\s*[-*+]\s+(\[[ xX]\]\s+)?/, '')
+      .replace(/^\s*\d+\.\s+/, '')
+      .replace(/^\s*>\s?/, '')
+      .trim()
+    if (line) return line.slice(0, 80)
+  }
+  return ''
+}
+
+/**
  * Guarantee the document opens with a title block. Notes saved before the
  * title moved into the body (or created empty) get their frontmatter title
  * prepended as an H1 — written back to disk on the next save. A fallback of

@@ -1,27 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconBell as Bell,
-  IconChevronLeft as ChevronLeft,
   IconClock as Clock,
-  IconFileText as FileText,
   IconNotes as Notes,
   IconPin as Pin,
   IconPinned as Pinned,
   IconPlus as Plus,
   IconSearch as Search,
   IconSettings as SettingsIcon,
-  IconTrash as Trash,
   IconX as X
 } from '@tabler/icons-react'
 import type { ScratchNote, SidebarModeState } from '../../../shared/types'
-import noteatoIcon from '../../../../build/icon.png'
 import ScratchEditor from './ScratchEditor'
+import ScratchSearchModal from './ScratchSearchModal'
 import SidebarSettingsPopover from './SidebarSettingsPopover'
 
 type SidebarTab = 'notes' | 'reminders'
 
 const TAB_STORAGE_KEY = 'noteato:sidebarModeTab'
 const ACTIVE_NOTE_STORAGE_KEY = 'noteato:sidebarModeActiveNote'
+const OPEN_TABS_STORAGE_KEY = 'noteato:sidebarModeOpenTabs'
+
+function readOpenIds(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(OPEN_TABS_STORAGE_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 function readInitialTab(): SidebarTab {
   return localStorage.getItem(TAB_STORAGE_KEY) === 'reminders' ? 'reminders' : 'notes'
@@ -42,57 +49,14 @@ function formatReminderTime(iso: string): string {
   return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-function noteMatches(note: ScratchNote, query: string): boolean {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return true
-  return `${note.title} ${note.excerpt}`.toLowerCase().includes(needle)
-}
-
-function NoteRow({
-  note,
-  onOpen,
-  onDelete
-}: {
-  note: ScratchNote
-  onOpen: () => void
-  onDelete: () => void
-}) {
-  return (
-    <div className="sidebar-note-row" role="button" tabIndex={0} onClick={onOpen}>
-      <span className="sidebar-note-glyph">
-        <FileText size={14} />
-      </span>
-      <span className="sidebar-note-copy">
-        <span className="sidebar-note-title">{note.title || 'Untitled'}</span>
-        <span className="sidebar-note-excerpt">{note.excerpt || 'Empty note'}</span>
-      </span>
-      {note.reminderAt && (
-        <span className="sidebar-note-reminder" title={formatReminderTime(note.reminderAt)}>
-          <Bell size={11} />
-        </span>
-      )}
-      <button
-        className="sidebar-note-delete"
-        title="Delete note"
-        onClick={(event) => {
-          event.stopPropagation()
-          onDelete()
-        }}
-      >
-        <Trash size={12} />
-      </button>
-    </div>
-  )
-}
-
 export default function SidebarModeWindow() {
   const [tab, setTab] = useState<SidebarTab>(readInitialTab)
   const [notes, setNotes] = useState<ScratchNote[]>([])
-  const [query, setQuery] = useState('')
   const [activeId, setActiveId] = useState<string | null>(
     () => localStorage.getItem(ACTIVE_NOTE_STORAGE_KEY) || null
   )
   const activeIdRef = useRef(activeId)
+  const [openIds, setOpenIds] = useState<string[]>(readOpenIds)
   const [editorRevision, setEditorRevision] = useState(0)
   const [windowState, setWindowState] = useState<SidebarModeState>({
     enabled: true,
@@ -101,6 +65,7 @@ export default function SidebarModeWindow() {
   })
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
     const list = await window.api.scratch.list()
@@ -112,7 +77,27 @@ export default function SidebarModeWindow() {
     setActiveId(id)
     activeIdRef.current = id
     localStorage.setItem(ACTIVE_NOTE_STORAGE_KEY, id)
+    // Opening a note it doesn't have a tab for adds one at the end, the way a
+    // browser does — closing a tab is not the same as deleting the note, so
+    // the strip is a working set rather than the whole library.
+    setOpenIds((current) => (current.includes(id) ? current : [...current, id]))
   }, [])
+
+  /** Take a note off the strip. The note itself is untouched. */
+  const closeTab = (id: string): void => {
+    setOpenIds((current) => {
+      const next = current.filter((openId) => openId !== id)
+      if (activeIdRef.current === id) {
+        const at = current.indexOf(id)
+        const heir = next[Math.min(at, next.length - 1)] ?? null
+        activeIdRef.current = heir
+        setActiveId(heir)
+        if (heir) localStorage.setItem(ACTIVE_NOTE_STORAGE_KEY, heir)
+        else localStorage.removeItem(ACTIVE_NOTE_STORAGE_KEY)
+      }
+      return next
+    })
+  }
 
   useEffect(() => {
     void refresh()
@@ -153,30 +138,49 @@ export default function SidebarModeWindow() {
     }
   }, [refresh, openNote])
 
-  const filteredNotes = useMemo(
-    () => notes.filter((note) => noteMatches(note, query)),
-    [notes, query]
+  // In the order they were opened, dropping any whose note has since gone.
+  const tabNotes = useMemo(
+    () =>
+      openIds
+        .map((id) => notes.find((note) => note.id === id))
+        .filter((note): note is ScratchNote => note !== undefined),
+    [openIds, notes]
   )
-  const pinnedNotes = filteredNotes.filter((note) => note.pinned)
-  const unpinnedNotes = filteredNotes.filter((note) => !note.pinned)
-  const reminders = filteredNotes
-    .filter((note) => note.reminderAt)
-    .sort((a, b) => a.reminderAt!.localeCompare(b.reminderAt!))
+  const reminders = useMemo(
+    () =>
+      notes
+        .filter((note) => note.reminderAt)
+        .sort((a, b) => a.reminderAt!.localeCompare(b.reminderAt!)),
+    [notes]
+  )
   const activeNote = activeId ? notes.find((note) => note.id === activeId) ?? null : null
+
+  useEffect(() => {
+    localStorage.setItem(OPEN_TABS_STORAGE_KEY, JSON.stringify(openIds))
+  }, [openIds])
+
+  // Drop tabs whose note was deleted elsewhere (the main window, a reminder),
+  // and seed the strip with the most recent note on a first run so the panel
+  // opens on something to write in rather than an empty frame.
+  useEffect(() => {
+    if (loading) return
+    setOpenIds((current) => {
+      const live = current.filter((id) => notes.some((note) => note.id === id))
+      if (live.length > 0) return live.length === current.length ? current : live
+      return notes.length > 0 ? [notes[0].id] : current
+    })
+  }, [loading, notes])
+
+  // The active note always has a tab; land on one when the selection is gone.
+  useEffect(() => {
+    if (loading || tab !== 'notes' || tabNotes.length === 0) return
+    if (activeId && tabNotes.some((note) => note.id === activeId)) return
+    openNote(tabNotes[0].id)
+  }, [loading, tab, tabNotes, activeId, openNote])
 
   const chooseTab = (next: SidebarTab): void => {
     setTab(next)
-    setQuery('')
-    setActiveId(null)
-    activeIdRef.current = null
     localStorage.setItem(TAB_STORAGE_KEY, next)
-    localStorage.removeItem(ACTIVE_NOTE_STORAGE_KEY)
-  }
-
-  const closeEditor = (): void => {
-    setActiveId(null)
-    activeIdRef.current = null
-    localStorage.removeItem(ACTIVE_NOTE_STORAGE_KEY)
   }
 
   const createNote = async (): Promise<void> => {
@@ -189,8 +193,10 @@ export default function SidebarModeWindow() {
 
   const deleteNote = async (id: string): Promise<void> => {
     await window.api.scratch.delete(id)
+    // Take the tab first, so the effects that reconcile the strip and the
+    // selection see a note that is already gone rather than racing the list.
+    closeTab(id)
     setNotes((current) => current.filter((note) => note.id !== id))
-    if (activeIdRef.current === id) closeEditor()
   }
 
   const handleSaved = useCallback((saved: ScratchNote): void => {
@@ -209,11 +215,11 @@ export default function SidebarModeWindow() {
   return (
     <div className="sidebar-mode-shell">
       <header className="sidebar-mode-titlebar">
-        <div className="sidebar-mode-brand" aria-label="Noteato">
-          <img src={noteatoIcon} alt="" className="compact-noteato-icon" />
-        </div>
         <nav className="sidebar-mode-tabs" aria-label="Sidebar views">
-          <button className={tab === 'notes' ? 'active' : undefined} onClick={() => chooseTab('notes')}>
+          <button
+            className={tab === 'notes' ? 'active' : undefined}
+            onClick={() => chooseTab('notes')}
+          >
             Notes
           </button>
           <button
@@ -221,14 +227,17 @@ export default function SidebarModeWindow() {
             onClick={() => chooseTab('reminders')}
           >
             Reminders
-            {notes.some((note) => note.reminderAt) && (
-              <span className="sidebar-tab-count">
-                {notes.filter((note) => note.reminderAt).length}
-              </span>
+            {reminders.length > 0 && (
+              <span className="sidebar-tab-count">{reminders.length}</span>
             )}
           </button>
         </nav>
         <div className="sidebar-mode-window-actions">
+          {/* Search opens the same find-a-note modal the main window uses,
+              rather than sitting in the header taking width from the tabs. */}
+          <button onClick={() => setSearchOpen(true)} title="Search notes">
+            <Search size={14} />
+          </button>
           <button
             className={settingsOpen ? 'active' : undefined}
             onClick={() => setSettingsOpen((open) => !open)}
@@ -252,92 +261,72 @@ export default function SidebarModeWindow() {
         {settingsOpen && <SidebarSettingsPopover onClose={() => setSettingsOpen(false)} />}
       </header>
 
-      {activeNote ? (
+      {tab === 'notes' ? (
         <>
-          <div className="sidebar-mode-contextbar">
-            <button className="sidebar-context-back" onClick={closeEditor}>
-              <ChevronLeft size={15} />
-              <span>{tab === 'reminders' ? 'Reminders' : 'Notes'}</span>
-            </button>
-            {activeNote.reminderAt && (
-              <span className="sidebar-context-reminder">
-                <Clock size={12} />
-                {formatReminderTime(activeNote.reminderAt)}
-              </span>
-            )}
-          </div>
-          <ScratchEditor
-            key={`${activeNote.id}:${editorRevision}`}
-            note={activeNote}
-            onSaved={handleSaved}
-          />
-        </>
-      ) : (
-        <>
-          <div className="sidebar-mode-searchbar">
-            <Search size={14} />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={tab === 'notes' ? 'Search notes' : 'Search reminders'}
-              aria-label={tab === 'notes' ? 'Search notes' : 'Search reminders'}
-            />
-            <button onClick={() => void createNote()} title="New note">
+          {/* The note list and the open note are one screen: every note is a
+              tab, and the strip scrolls sideways rather than wrapping, so
+              adding the tenth note never costs the editor any height. */}
+          <div className="sidebar-mode-tabstrip">
+            <div className="sidebar-tabs-scroll">
+              {tabNotes.map((note) => (
+                <div
+                  key={note.id}
+                  className={note.id === activeId ? 'sidebar-note-tab active' : 'sidebar-note-tab'}
+                  role="button"
+                  tabIndex={0}
+                  title={note.title || 'Untitled'}
+                  onClick={() => openNote(note.id)}
+                >
+                  {note.pinned && <Pinned size={10} className="sidebar-note-tab-pin" />}
+                  {note.reminderAt && <Bell size={10} className="sidebar-note-tab-bell" />}
+                  <span>{note.title || 'Untitled'}</span>
+                  <button
+                    className="sidebar-note-tab-close"
+                    title="Close tab"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      closeTab(note.id)
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button className="sidebar-tab-new" onClick={() => void createNote()} title="New note">
               <Plus size={15} />
             </button>
           </div>
 
+          {loading ? (
+            <div className="sidebar-mode-loading">Gathering your notes…</div>
+          ) : activeNote ? (
+            <ScratchEditor
+              key={`${activeNote.id}:${editorRevision}`}
+              note={activeNote}
+              onSaved={handleSaved}
+              onDelete={() => void deleteNote(activeNote.id)}
+            />
+          ) : (
+            <div className="sidebar-mode-empty">
+              <Notes size={20} />
+              <strong>{notes.length > 0 ? 'Nothing open' : 'A quiet place for a quick thought'}</strong>
+              <span>
+                {notes.length > 0
+                  ? 'Search to reopen a note, or start a new one.'
+                  : 'Create a note without leaving what you are doing.'}
+              </span>
+              <button onClick={() => void createNote()}>New note</button>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
           <main className="sidebar-mode-content">
-            {loading ? (
-              <div className="sidebar-mode-loading">Gathering your notes…</div>
-            ) : tab === 'notes' ? (
-              filteredNotes.length === 0 ? (
-                <div className="sidebar-mode-empty">
-                  <Notes size={20} />
-                  <strong>{query ? 'No matching notes' : 'A quiet place for a quick thought'}</strong>
-                  <span>{query ? 'Try a different search.' : 'Create a note without leaving what you are doing.'}</span>
-                  {!query && <button onClick={() => void createNote()}>New note</button>}
-                </div>
-              ) : (
-                <div className="sidebar-mode-list">
-                  {pinnedNotes.length > 0 && (
-                    <section className="sidebar-mode-section">
-                      <div className="sidebar-section-label">
-                        <span>Favourites</span>
-                        <Pinned size={11} />
-                      </div>
-                      {pinnedNotes.map((note) => (
-                        <NoteRow
-                          key={note.id}
-                          note={note}
-                          onOpen={() => openNote(note.id)}
-                          onDelete={() => void deleteNote(note.id)}
-                        />
-                      ))}
-                    </section>
-                  )}
-                  {unpinnedNotes.length > 0 && (
-                    <section className="sidebar-mode-section">
-                      <div className="sidebar-section-label">
-                        <span>Notes</span>
-                        <Notes size={11} />
-                      </div>
-                      {unpinnedNotes.map((note) => (
-                        <NoteRow
-                          key={note.id}
-                          note={note}
-                          onOpen={() => openNote(note.id)}
-                          onDelete={() => void deleteNote(note.id)}
-                        />
-                      ))}
-                    </section>
-                  )}
-                </div>
-              )
-            ) : reminders.length === 0 ? (
+            {reminders.length === 0 ? (
               <div className="sidebar-mode-empty">
                 <Bell size={20} />
-                <strong>{query ? 'No matching reminders' : 'Nothing waiting on you'}</strong>
+                <strong>Nothing waiting on you</strong>
                 <span>Reminders attached to your notes will gather here.</span>
               </div>
             ) : (
@@ -351,7 +340,10 @@ export default function SidebarModeWindow() {
                     <button
                       className="sidebar-reminder-row"
                       key={note.id}
-                      onClick={() => openNote(note.id)}
+                      onClick={() => {
+                        chooseTab('notes')
+                        openNote(note.id)
+                      }}
                     >
                       <span className="sidebar-reminder-rail" />
                       <span className="sidebar-note-copy">
@@ -369,6 +361,17 @@ export default function SidebarModeWindow() {
             )}
           </main>
         </>
+      )}
+
+      {searchOpen && (
+        <ScratchSearchModal
+          notes={notes}
+          onPick={(id) => {
+            chooseTab('notes')
+            openNote(id)
+          }}
+          onClose={() => setSearchOpen(false)}
+        />
       )}
     </div>
   )

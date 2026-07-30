@@ -880,8 +880,10 @@ export default function MainLayout() {
       <TitleBar
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}
-        onSearch={() => setSearchOpen(true)}
-        onNewNote={() => void handleCreate()}
+        onOpenAssistant={toggleAssistant}
+        onOpenSettings={() => setSettingsOpen(true)}
+        assistantOpen={assistantOpen}
+        assistantAvailable={aiAgentEnabled}
       />
       <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
         <Sidebar
@@ -907,11 +909,9 @@ export default function MainLayout() {
           }}
           onOpenTrash={() => openInFocused({ kind: 'trash' })}
           onOpenHome={() => openInFocused({ kind: 'home' })}
-          onOpenAssistant={toggleAssistant}
-          assistantOpen={assistantOpen}
-          assistantAvailable={aiAgentEnabled}
-          onOpenSettings={() => setSettingsOpen(true)}
           onOpenImport={() => setImportOpen(true)}
+          onSearch={() => setSearchOpen(true)}
+          onCreateNote={() => void handleCreate()}
         />
         <div className="editor-area" ref={editorAreaRef}>
           {/* Panes left to right, with a draggable seam between each pair. The

@@ -5,8 +5,8 @@ import {
   IconLink as Link,
   IconStar as Star,
   IconDownload as Download,
-  IconSettings as Settings,
-  IconSparkle as Sparkles,
+  IconPlus as Plus,
+  IconSearch as Search,
   IconTrash as Trash2,
   IconX as X
 } from '@tabler/icons-react'
@@ -40,11 +40,9 @@ interface Props {
   onNoteDragEnd: () => void
   onOpenTrash: () => void
   onOpenHome: () => void
-  onOpenAssistant: () => void
   onOpenImport: () => void
-  onOpenSettings: () => void
-  assistantOpen: boolean
-  assistantAvailable: boolean
+  onSearch: () => void
+  onCreateNote: () => void
 }
 
 export default function Sidebar({
@@ -65,11 +63,9 @@ export default function Sidebar({
   onNoteDragEnd,
   onOpenTrash,
   onOpenHome,
-  onOpenAssistant,
   onOpenImport,
-  onOpenSettings,
-  assistantOpen,
-  assistantAvailable
+  onSearch,
+  onCreateNote
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [reminderPopover, setReminderPopover] = useState<{
@@ -228,6 +224,34 @@ export default function Sidebar({
 
   return (
     <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
+      {/* What you do *to* the library, above the library itself. */}
+      <nav className="sidebar-rail">
+        <button className="sidebar-rail-btn" onClick={onOpenHome} title="Home">
+          <Home size={17} />
+        </button>
+        <button
+          className="sidebar-rail-btn"
+          onClick={onSearch}
+          title={`Search notes · ${MODIFIER_HINT}K`}
+        >
+          <Search size={17} />
+        </button>
+        <button
+          className="sidebar-rail-btn"
+          onClick={onCreateNote}
+          title={`New note · ${MODIFIER_HINT}T`}
+        >
+          <Plus size={17} />
+        </button>
+        <button className="sidebar-rail-btn" onClick={onOpenImport} title="Import">
+          <Download size={17} />
+        </button>
+        <button className="sidebar-rail-btn" onClick={onOpenTrash} title="Trash">
+          <Trash2 size={17} />
+          {trashCount > 0 && <span className="sidebar-trash-dot" />}
+        </button>
+      </nav>
+
       <div className="sidebar-scroll">
         {notes.length === 0 && <p className="sidebar-empty">No notes yet.</p>}
         {/* Two groups, and only when there is something to tell apart — an
@@ -246,32 +270,6 @@ export default function Sidebar({
           </>
         )}
       </div>
-
-      {/* Everything that isn't a note lives down here, out of the list's way. */}
-      <nav className="sidebar-rail">
-        <button className="sidebar-rail-btn" onClick={onOpenHome} title="Home">
-          <Home size={17} />
-        </button>
-        {assistantAvailable && (
-          <button
-            className={assistantOpen ? 'sidebar-rail-btn active' : 'sidebar-rail-btn'}
-            onClick={onOpenAssistant}
-            title="Assistant"
-          >
-            <Sparkles size={17} />
-          </button>
-        )}
-        <button className="sidebar-rail-btn" onClick={onOpenImport} title="Import">
-          <Download size={17} />
-        </button>
-        <button className="sidebar-rail-btn" onClick={onOpenSettings} title="Settings">
-          <Settings size={17} />
-        </button>
-        <button className="sidebar-rail-btn" onClick={onOpenTrash} title="Trash">
-          <Trash2 size={17} />
-          {trashCount > 0 && <span className="sidebar-trash-dot" />}
-        </button>
-      </nav>
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />

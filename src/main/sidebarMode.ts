@@ -252,10 +252,13 @@ export class SidebarModeManager {
 
     // Clicking or focusing anything outside puts the panel away, which is what
     // makes hover-reveal a peek rather than a window you have to keep tidying
-    // up after. Guarded so the reveal's own focus change can't dismiss it, and
-    // so the exit animation's own bookkeeping doesn't re-enter this.
+    // up after. Pinning opts out entirely — that is what the pin is for, and a
+    // panel you asked to keep around must not vanish the moment you go back to
+    // the app you were reading. Otherwise guarded so the reveal's own focus
+    // change can't dismiss it, and so the exit animation can't re-enter this.
     win.on('blur', () => {
       if (win.isDestroyed() || !win.isVisible()) return
+      if (this.getSettings().sidebarPinned) return
       if (this.animation || Date.now() - this.shownAt < BLUR_GRACE_MS) return
       this.hide()
     })

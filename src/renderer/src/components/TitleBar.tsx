@@ -1,8 +1,8 @@
 import { useRef } from 'react'
 import {
   IconLayoutSidebar as PanelLeft,
-  IconPlus as Plus,
-  IconSearch as Search
+  IconSettings as Settings,
+  IconSparkle as Sparkles
 } from '@tabler/icons-react'
 import ShortcutsHelp from './ShortcutsHelp'
 
@@ -11,20 +11,24 @@ const DOUBLE_CLICK_MS = 400
 interface Props {
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
-  onSearch: () => void
-  onNewNote: () => void
+  onOpenAssistant: () => void
+  onOpenSettings: () => void
+  assistantOpen: boolean
+  assistantAvailable: boolean
 }
 
 /**
- * The window's drag region, and the three actions that aren't about any one
- * note: show/hide the sidebar, search, and start a new note. They sit together
- * here rather than in the sidebar so they stay reachable when it's collapsed.
+ * The window's drag region. The sidebar toggle sits at the leading edge by the
+ * traffic lights; the trailing end collects the things that aren't about any
+ * one note — the assistant, settings, and the shortcut sheet.
  */
 export default function TitleBar({
   sidebarCollapsed,
   onToggleSidebar,
-  onSearch,
-  onNewNote
+  onOpenAssistant,
+  onOpenSettings,
+  assistantOpen,
+  assistantAvailable
 }: Props) {
   const isMac = window.electron.process.platform === 'darwin'
 
@@ -51,29 +55,29 @@ export default function TitleBar({
         <button
           className="title-bar-btn"
           onClick={onToggleSidebar}
-          title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar · ${isMac ? '⌘\\' : 'Ctrl+\\'}`}
         >
           <PanelLeft size={16} />
         </button>
-        <button
-          className="title-bar-btn"
-          onClick={onSearch}
-          title={`Search notes · ${isMac ? '⌘K' : 'Ctrl+K'}`}
-        >
-          <Search size={16} />
-        </button>
-        <button
-          className="title-bar-btn"
-          onClick={onNewNote}
-          title={`New note · ${isMac ? '⌘T' : 'Ctrl+T'}`}
-        >
-          <Plus size={16} />
-        </button>
       </div>
 
-      {/* The shortcut sheet is a reference, not an action on the note — it sits
-          at the far end, away from the three things you actually reach for. */}
       <div className="title-bar-trailing">
+        {assistantAvailable && (
+          <button
+            className={assistantOpen ? 'title-bar-btn active' : 'title-bar-btn'}
+            onClick={onOpenAssistant}
+            title="Assistant"
+          >
+            <Sparkles size={16} />
+          </button>
+        )}
+        <button
+          className="title-bar-btn"
+          onClick={onOpenSettings}
+          title={`Settings · ${isMac ? '⌘,' : 'Ctrl+,'}`}
+        >
+          <Settings size={16} />
+        </button>
         <ShortcutsHelp />
       </div>
     </div>

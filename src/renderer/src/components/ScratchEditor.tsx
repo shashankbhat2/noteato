@@ -12,14 +12,15 @@ import {
   IconBold as Bold,
   IconCheckbox as Checkbox,
   IconItalic as Italic,
-  IconList as List
+  IconList as List,
+  IconTrash as Trash
 } from '@tabler/icons-react'
 import type { ScratchNote } from '../../../shared/types'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
-import { ensureTitleBlock, enforceTitleBlock, titleFromMarkdown } from '../titleBlock'
+import { titleFromFirstLine } from '../titleBlock'
 import {
   createNoteatoEditor,
   type NoteatoBlock,
@@ -33,6 +34,7 @@ const SAVE_DEBOUNCE_MS = 450
 interface Props {
   note: ScratchNote
   onSaved: (note: ScratchNote) => void
+  onDelete: () => void
 }
 
 function compactSlashItems(editor: NoteatoEditor, query: string) {
@@ -53,7 +55,7 @@ function compactSlashItems(editor: NoteatoEditor, query: string) {
 }
 
 /** Compact editor for a SQLite-backed scratch note (sidebar mode, quick note). */
-export default function ScratchEditor({ note: summary, onSaved }: Props) {
+export default function ScratchEditor({ note: summary, onSaved, onDelete }: Props) {
   const { resolvedTheme, fontFamily } = useTheme()
   const [note, setNote] = useState<ScratchNote | null>(null)
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | null>(null)
@@ -75,8 +77,9 @@ export default function ScratchEditor({ note: summary, onSaved }: Props) {
       const blocks = loaded.body.trim()
         ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
         : scratch.document
-      // The first block is the title (see titleBlock.ts).
-      if (!cancelled) setInitialBlocks(ensureTitleBlock(blocks, loaded.title))
+      // No title block here, unlike the main editor: a scratch note opens as an
+      // empty paragraph you can just start typing into.
+      if (!cancelled) setInitialBlocks(blocks)
     })
     return () => {
       cancelled = true
@@ -96,7 +99,7 @@ export default function ScratchEditor({ note: summary, onSaved }: Props) {
     const activeEditor = editorRef.current
     if (!activeEditor || !noteRef.current) return
     const body = await activeEditor.blocksToMarkdownLossy(activeEditor.document)
-    const nextTitle = titleFromMarkdown(body) || 'Untitled'
+    const nextTitle = titleFromFirstLine(body) || 'Untitled'
     saveChain.current = saveChain.current
       .then(async () => {
         const base = noteRef.current
@@ -119,19 +122,7 @@ export default function ScratchEditor({ note: summary, onSaved }: Props) {
     saveTimer.current = setTimeout(() => void persistRef.current(), SAVE_DEBOUNCE_MS)
   }
 
-  // Re-assert "first block is the title H1" once the change has settled — see
-  // enforceTitleBlock. Deferred so the fix-up never dispatches from inside the
-  // transaction that triggered it.
-  const titleFixQueued = useRef(false)
-  const handleChange = (): void => {
-    scheduleSave()
-    if (titleFixQueued.current) return
-    titleFixQueued.current = true
-    queueMicrotask(() => {
-      titleFixQueued.current = false
-      if (editorRef.current) enforceTitleBlock(editorRef.current)
-    })
-  }
+  const handleChange = (): void => scheduleSave()
 
   useEffect(() => {
     const flushOnWindowBlur = (): void => {
@@ -240,6 +231,11 @@ export default function ScratchEditor({ note: summary, onSaved }: Props) {
           }}
         >
           <Bell size={15} />
+        </button>
+        {/* Deleting the note lives with the note's own actions, not on its tab
+            — the tab's control closes it, which is recoverable. */}
+        <button className="danger" title="Delete note" onClick={onDelete}>
+          <Trash size={15} />
         </button>
       </div>
 
