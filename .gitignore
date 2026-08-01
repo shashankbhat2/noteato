@@ -1,6 +1,7 @@
 node_modules
 out
 dist
+agent/.build
 *.log
 *.tsbuildinfo
 .DS_Store
