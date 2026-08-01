@@ -22,7 +22,7 @@
     "release": "npm run clean && npm run build:agent:release && electron-vite build && electron-builder --mac --arm64 --publish always",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:agent": "swift test --package-path agent",
@@ -32,7 +32,8 @@
     "bench:memory": "electron bench/memory/main.cjs",
     "bench": "npm run bench:panel && npm run bench:search && npm run bench:memory",
     "build:agent:release": "bash scripts/build-agent.sh",
-    "dev:agent": "swift run --package-path agent NoteatoAgent"
+    "dev:agent": "swift run --package-path agent NoteatoAgent",
+    "probe:capture": "swift run -c release --package-path agent CaptureProbe"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

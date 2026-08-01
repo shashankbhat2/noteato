@@ -108,6 +108,20 @@ function makeSnippet(body: string, idx: number, len: number): string {
 /** Name the pre-flattening backup is restored under, if it ever is. */
 const FLATTEN_BACKUP_NAME = 'Folders (before flattening)'
 
+/**
+ * A capture's own directory: an ISO-ish timestamp plus a short suffix, written
+ * by the agent (AgentCore/CaptureWriter). Matching on shape rather than on a
+ * marker file because the reconciler has to recognise one even if the capture
+ * was interrupted before everything landed.
+ */
+const CAPTURE_DIR = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9]{4,}$/
+
+/** True for `<capture>/note.md` — a note that lives with its audio. */
+function isCaptureNote(relPath: string): boolean {
+  const parts = relPath.split('/')
+  return parts.length === 2 && parts[1] === 'note.md' && CAPTURE_DIR.test(parts[0])
+}
+
 export class NoteStore {
   private notesDir: string
   // Deleted notes/folders are moved here (not permanently removed) so a delete
@@ -144,7 +158,10 @@ export class NoteStore {
 
     const paths: string[] = []
     this.walkNotes(this.notesDir, '', paths)
-    const nested = paths.filter((p) => p.includes('/'))
+    // A captured note is nested *on purpose* — it lives beside the audio it was
+    // derived from. Flattening one would move the markdown out and orphan the
+    // recording, which is the one file here that cannot be regenerated.
+    const nested = paths.filter((p) => p.includes('/') && !isCaptureNote(p))
     if (nested.length === 0) {
       this.flattenFlag.write({ done: true })
       return
@@ -655,7 +672,11 @@ export class NoteStore {
     }
 
     let targetPath = relPath
-    const desiredPath = `${slugify(options.title)}.md`
+    // A captured note lives with the audio it came from, in a directory named
+    // for when it was taken. Renaming the file would move the markdown out and
+    // strand the recording — the one file here that cannot be regenerated. Its
+    // location is deliberately independent of its title (revamp brief §4.3).
+    const desiredPath = isCaptureNote(relPath) ? relPath : `${slugify(options.title)}.md`
     if (desiredPath !== relPath && !existsSync(this.resolveWithin(desiredPath))) {
       renameSync(this.resolveNotePath(relPath), this.resolveWithin(desiredPath))
       targetPath = desiredPath

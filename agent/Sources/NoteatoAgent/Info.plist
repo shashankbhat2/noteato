@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.noteato.agent</string>
+    <key>CFBundleName</key>
+    <string>Noteato Agent</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.2.0</string>
+    <!-- Menu bar only: no Dock icon, never activates. Set in code too, so the
+         agent behaves the same run from a build directory as from the app. -->
+    <key>LSUIElement</key>
+    <true/>
+    <!-- Required before the process may even ask for the microphone. Without
+         it macOS terminates the process on the first request rather than
+         prompting, which is why this plist is linked into the binary rather
+         than living only in the enclosing .app. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Noteato records what you say so you can capture a thought the moment you have it. Audio stays on this Mac.</string>
+  </dict>
+</plist>

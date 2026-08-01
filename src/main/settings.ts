@@ -27,6 +27,7 @@ export function createSettingsStore(): JsonStore<Settings> {
     syncPreference: 'none',
     deepgramApiKey: '',
     notesDir: null,
+    preRollSeconds: 10,
     theme: 'light',
     fontFamily: 'system',
     accent: 'neutral',

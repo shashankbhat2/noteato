@@ -111,6 +111,12 @@ export interface Settings {
   anthropicApiKey: string
   openaiApiKey: string
   aiSelectionActions: boolean
+  /**
+   * Seconds of microphone audio the agent keeps buffered so a capture can
+   * begin before the hotkey is pressed. 0 closes the microphone entirely —
+   * the setting's whole point, so it must not merely buffer and discard.
+   */
+  preRollSeconds: number
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
   /** Make the compact notes/reminders edge window available from the menu bar. */

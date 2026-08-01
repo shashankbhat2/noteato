@@ -34,6 +34,19 @@ public final class HotkeyManager {
         /// ⇧⌥⌘S — bring the library to the front (launching it if needed).
         public static let library = Shortcut(
             keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | cmdKey | shiftKey))
+
+        // Live only while the HUD is up. Registered globally because a
+        // non-activating panel never becomes key and so cannot receive these
+        // as ordinary key events — and unregistered the moment the HUD closes,
+        // so Esc keeps its normal meaning everywhere else.
+        public static let commitCapture = Shortcut(keyCode: UInt32(kVK_Escape), modifiers: 0)
+        public static let discardCapture = Shortcut(
+            keyCode: UInt32(kVK_Escape), modifiers: UInt32(cmdKey))
+    }
+
+    /// Handle for a registration, so a temporary hotkey can be given back.
+    public struct Token: Equatable, Sendable {
+        fileprivate let id: UInt32
     }
 
     private var handlers: [UInt32: () -> Void] = [:]
@@ -67,18 +80,27 @@ public final class HotkeyManager {
         handlers[id]?()
     }
 
+    /// Returns a token on success, nil when the combination is already taken
+    /// by another app — callers have to surface that rather than assume it
+    /// worked, since a shortcut that silently does nothing is unexplainable
+    /// from the user's side.
     @discardableResult
-    public func register(_ shortcut: Shortcut, action: @escaping () -> Void) -> Bool {
+    public func register(_ shortcut: Shortcut, action: @escaping () -> Void) -> Token? {
         let id = nextID
         nextID += 1
         var ref: EventHotKeyRef?
         let hotKeyID = EventHotKeyID(signature: OSType(0x4E54_4F41 /* NTOA */ ), id: id)
         let status = RegisterEventHotKey(
             shortcut.keyCode, shortcut.modifiers, hotKeyID, GetEventDispatcherTarget(), 0, &ref)
-        guard status == noErr, let ref else { return false }
+        guard status == noErr, let ref else { return nil }
         registered[id] = ref
         handlers[id] = action
-        return true
+        return Token(id: id)
+    }
+
+    public func unregister(_ token: Token) {
+        if let ref = registered.removeValue(forKey: token.id) { UnregisterEventHotKey(ref) }
+        handlers.removeValue(forKey: token.id)
     }
 
     public func unregisterAll() {

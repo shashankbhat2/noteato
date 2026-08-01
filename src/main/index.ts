@@ -80,6 +80,13 @@ const agentClient = new AgentClient(
       case 'toggleSidebar':
         sidebarModeManager.toggle()
         break
+      case 'captureCommitted':
+        // The agent wrote a note directly to the vault. A full refresh is the
+        // honest response: this process has no idea what else changed while it
+        // was not the one writing.
+        reminderScheduler.rebuildAll()
+        broadcastNoteChange({ kind: 'refresh' })
+        break
       case 'welcome':
         if (message.protocolVersion !== undefined && message.protocolVersion !== 1) {
           console.warn(
@@ -567,6 +574,9 @@ function registerIpcHandlers(): void {
       globalShortcutManager.sync(runtime)
     }
     if ('sidebarEdge' in patch) sidebarModeManager.applyEdge()
+    if ('preRollSeconds' in patch || 'notesDir' in patch) {
+      agentClient.send({ type: 'settingsChanged' })
+    }
     if (
       'sidebarModeEnabled' in patch ||
       'sidebarHoverReveal' in patch ||

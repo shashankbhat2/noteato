@@ -15,14 +15,23 @@ import { app } from 'electron'
  */
 
 export interface AgentMessage {
-  type: 'welcome' | 'pong' | 'showLibrary' | 'toggleSidebar' | 'hudDidShow' | 'hudDidHide'
+  type:
+    | 'welcome'
+    | 'pong'
+    | 'showLibrary'
+    | 'toggleSidebar'
+    | 'hudDidShow'
+    | 'hudDidHide'
+    | 'captureCommitted'
   version?: string
   pid?: number
   protocolVersion?: number
+  /** Set on captureCommitted: the note directory the agent just wrote. */
+  path?: string
 }
 
 interface ClientMessage {
-  type: 'hello' | 'ping' | 'goodbye'
+  type: 'hello' | 'ping' | 'goodbye' | 'settingsChanged'
   pid?: number
   protocolVersion?: number
 }

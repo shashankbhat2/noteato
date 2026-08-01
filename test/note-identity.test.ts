@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import Database from 'better-sqlite3'
@@ -113,5 +113,84 @@ describe('note identity', () => {
     expect(store.read(a.id).title).toBe('Gamma')
     expect(store.read(b.id).title).toBe('Alpha')
     expect(store.resolvePath(a.id)).not.toBe(store.resolvePath(b.id))
+  })
+})
+
+/**
+ * A capture is a note that lives in a directory beside its audio (revamp brief
+ * §4.3). The library has to treat it as an ordinary note without disturbing
+ * that arrangement — the audio is the one file here that cannot be regenerated.
+ */
+describe('captured notes', () => {
+  let dir: string
+  let db: Database.Database
+  let store: NoteStore
+
+  const captureDirName = '2026-08-01T14-32-11Z-a7f3'
+
+  const writeCapture = (root: string, name = captureDirName, id = 'capture-id-1'): void => {
+    mkdirSync(join(root, name), { recursive: true })
+    writeFileSync(join(root, name, 'audio.m4a'), 'not really audio, but a file')
+    writeFileSync(
+      join(root, name, 'note.md'),
+      `---\nid: ${id}\ntitle: "Capture 1 Aug, 14:32"\ncreatedAt: 2026-08-01T14:32:11.000Z\nupdatedAt: 2026-08-01T14:32:11.000Z\ntags: []\nfullWidth: false\npinned: false\nreminderAt: \nsource: capture\ndurationSeconds: 12\n---\n\n# Capture 1 Aug, 14:32\n`,
+      'utf-8'
+    )
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'noteato-capture-'))
+    db = new Database(':memory:')
+  })
+
+  afterEach(() => {
+    db.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('surfaces a captured note in the library', () => {
+    writeCapture(dir)
+    store = new NoteStore(db, dir)
+    const summaries = store.list()
+    expect(summaries.map((s) => s.id)).toContain('capture-id-1')
+    expect(store.read('capture-id-1').title).toBe('Capture 1 Aug, 14:32')
+  })
+
+  // The bug this guards: flattening moves nested notes to the root. Doing that
+  // to a capture would leave the markdown at the top level and its recording
+  // stranded in a directory nothing points at.
+  it('leaves a capture in its directory when the library is flattened', () => {
+    writeCapture(dir)
+    // A genuinely nested note, which flattening *should* move.
+    mkdirSync(join(dir, 'Old Folder'), { recursive: true })
+    writeFileSync(
+      join(dir, 'Old Folder', 'legacy.md'),
+      `---\nid: legacy-1\ntitle: "Legacy"\ncreatedAt: 2026-01-01T00:00:00.000Z\nupdatedAt: 2026-01-01T00:00:00.000Z\ntags: []\nfullWidth: false\npinned: false\nreminderAt: \n---\n\n# Legacy\n`,
+      'utf-8'
+    )
+
+    store = new NoteStore(db, dir) // constructor runs flattenLibrary()
+
+    // The capture is untouched, audio still beside it.
+    expect(existsSync(join(dir, captureDirName, 'note.md'))).toBe(true)
+    expect(existsSync(join(dir, captureDirName, 'audio.m4a'))).toBe(true)
+    expect(store.resolvePath('capture-id-1')).toBe(`${captureDirName}/note.md`)
+
+    // The ordinary nested note was flattened, as before.
+    expect(existsSync(join(dir, 'legacy.md'))).toBe(true)
+  })
+
+  it('keeps a capture in place when its title changes', () => {
+    writeCapture(dir)
+    store = new NoteStore(db, dir)
+    const saved = store.save('capture-id-1', {
+      title: 'Thoughts on the launch',
+      body: '# Thoughts on the launch\n\ntranscribed later'
+    })
+
+    // A rename must not move the note away from its audio.
+    expect(saved.path).toBe(`${captureDirName}/note.md`)
+    expect(existsSync(join(dir, captureDirName, 'audio.m4a'))).toBe(true)
+    expect(store.read('capture-id-1').title).toBe('Thoughts on the launch')
   })
 })

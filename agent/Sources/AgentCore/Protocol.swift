@@ -31,6 +31,9 @@ public struct ClientMessage: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case hello
         case ping
+        /// Settings changed in the library. The agent re-reads the file rather
+        /// than trusting a payload, so the two cannot disagree.
+        case settingsChanged
         /// The library is closing; the agent keeps running.
         case goodbye
     }
@@ -57,21 +60,29 @@ public struct AgentMessage: Codable, Equatable, Sendable {
         /// The sidebar accelerator fired. The agent owns the key; the library
         /// owns the panel, so this is forwarded rather than handled.
         case toggleSidebar
-        /// The HUD opened or closed. Phase 1 carries no capture payload yet.
         case hudDidShow
         case hudDidHide
+        /// A capture was written. `path` is its note directory, so the library
+        /// can surface it without rescanning the vault.
+        case captureCommitted
     }
 
     public var type: Kind
     public var version: String?
     public var pid: Int?
     public var protocolVersion: Int?
+    /// Set on `captureCommitted`: the note directory just written.
+    public var path: String?
 
-    public init(type: Kind, version: String? = nil, pid: Int? = nil, protocolVersion: Int? = nil) {
+    public init(
+        type: Kind, version: String? = nil, pid: Int? = nil, protocolVersion: Int? = nil,
+        path: String? = nil
+    ) {
         self.type = type
         self.version = version
         self.pid = pid
         self.protocolVersion = protocolVersion
+        self.path = path
     }
 }
 
