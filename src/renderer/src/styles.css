@@ -1129,13 +1129,13 @@ button {
   gap: 5px;
   height: 30px;
   padding: 0 10px;
-  border: 1px solid var(--accent);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accentForeground);
+  background: var(--surface-hover);
+  color: var(--secondaryText);
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 550;
   cursor: pointer;
   transition:
     color var(--dur-fast) var(--ease),
@@ -1144,9 +1144,9 @@ button {
 }
 
 .sidebar-new:hover {
-  color: var(--accentForeground);
-  border-color: color-mix(in srgb, var(--accent) 86%, var(--editorBackground));
-  background: color-mix(in srgb, var(--accent) 86%, var(--editorBackground));
+  color: var(--primaryText);
+  border-color: transparent;
+  background: var(--hoverSurface);
 }
 
 /* Utilities, at the foot: reachable without competing with the library. */

@@ -11,12 +11,17 @@ OUT="$ROOT/resources"
 
 swift build -c release --package-path "$ROOT/agent" --arch arm64
 
-BIN="$(swift build -c release --package-path "$ROOT/agent" --arch arm64 --show-bin-path)/NoteatoAgent"
-if [ ! -x "$BIN" ]; then
-  echo "build-agent: expected binary at $BIN" >&2
-  exit 1
-fi
-
+BIN_DIR="$(swift build -c release --package-path "$ROOT/agent" --arch arm64 --show-bin-path)"
 mkdir -p "$OUT"
-cp "$BIN" "$OUT/NoteatoAgent"
-echo "build-agent: staged $(du -h "$OUT/NoteatoAgent" | cut -f1) -> resources/NoteatoAgent"
+
+# Both binaries ship. NoteatoTranscribe is a separate process because the ASR
+# model peaks near the agent's whole memory budget, and the agent looks for it
+# beside itself — so they have to land in the same directory.
+for name in NoteatoAgent NoteatoTranscribe; do
+  if [ ! -x "$BIN_DIR/$name" ]; then
+    echo "build-agent: expected binary at $BIN_DIR/$name" >&2
+    exit 1
+  fi
+  cp "$BIN_DIR/$name" "$OUT/$name"
+  echo "build-agent: staged $(du -h "$OUT/$name" | cut -f1) -> resources/$name"
+done

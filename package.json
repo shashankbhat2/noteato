@@ -34,7 +34,8 @@
     "build:agent:release": "bash scripts/build-agent.sh",
     "dev:agent": "swift run --package-path agent NoteatoAgent",
     "probe:capture": "swift run -c release --package-path agent CaptureProbe",
-    "bench:asr": "swift run -c release --package-path agent AsrBench"
+    "bench:asr": "swift run -c release --package-path agent AsrBench",
+    "transcribe": "swift run -c release --package-path agent NoteatoTranscribe"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

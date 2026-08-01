@@ -65,6 +65,8 @@ public struct AgentMessage: Codable, Equatable, Sendable {
         /// A capture was written. `path` is its note directory, so the library
         /// can surface it without rescanning the vault.
         case captureCommitted
+        /// Its transcript landed and the note was retitled from what was said.
+        case captureTranscribed
     }
 
     public var type: Kind

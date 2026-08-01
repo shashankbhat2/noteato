@@ -44,6 +44,9 @@ let package = Package(
         // failures that matter here (permission, device sample rate, encoder)
         // are environmental and invisible to unit tests. Shares the agent's
         // Info.plist so it can ask for the mic at all.
+        // Transcribes one capture and exits. A separate process because the
+        // model peaks near the agent's whole memory budget — see Transcriber.
+        .executableTarget(name: "NoteatoTranscribe", dependencies: ["AgentCore"]),
         // Measures the transcription engine on *this* machine before anything
         // depends on it: the vendor's realtime figure is an M4 Pro number on
         // their audio, and §6 asks for latency-per-accuracy, not a claim.

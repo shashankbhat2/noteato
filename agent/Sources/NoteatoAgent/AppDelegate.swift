@@ -164,11 +164,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async {
                     self?.server.send(
                         AgentMessage(type: .captureCommitted, path: committed.directory.path))
+                    self?.transcribe(committed.directory)
                 }
             } catch {
                 DispatchQueue.main.async { self?.reportCaptureFailure(error) }
             }
         }
+    }
+
+    /// Transcribe a committed capture in a separate, short-lived process.
+    ///
+    /// Not in-process: the model peaks near the agent's entire memory budget
+    /// (see Transcriber), so keeping it out is what lets the resident process
+    /// stay small by construction. It also means a crash in the ASR stack
+    /// cannot take the microphone down with it.
+    ///
+    /// Failure is deliberately quiet. The audio — the part that cannot be
+    /// regenerated — is already safely on disk, and interrupting someone with
+    /// an alert because a title is still a timestamp would be worse than the
+    /// problem. Phase 4 will surface untranscribed captures as a state in the
+    /// library, which is where it belongs.
+    private func transcribe(_ directory: URL) {
+        guard let helper = transcriberURL() else { return }
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = [directory.path, "--quiet"]
+        process.terminationHandler = { [weak self] finished in
+            DispatchQueue.main.async {
+                guard finished.terminationStatus == 0 else { return }
+                self?.server.send(
+                    AgentMessage(type: .captureTranscribed, path: directory.path))
+            }
+        }
+        do {
+            try process.run()
+        } catch {
+            FileHandle.standardError.write(
+                Data("NoteatoAgent: could not start transcription (\(error))\n".utf8))
+        }
+    }
+
+    /// The helper sits beside this binary, both in the app bundle's Resources
+    /// and in a build directory, so one lookup covers development and release.
+    private func transcriberURL() -> URL? {
+        let here = URL(fileURLWithPath: CommandLine.arguments[0])
+            .resolvingSymlinksInPath()
+            .deletingLastPathComponent()
+        let candidate = here.appendingPathComponent("NoteatoTranscribe")
+        return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
     }
 
     /// A capture that could not be written is the one failure the user has to

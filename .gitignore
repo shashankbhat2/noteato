@@ -3,6 +3,7 @@ out
 dist
 agent/.build
 resources/NoteatoAgent
+resources/NoteatoTranscribe
 *.log
 *.tsbuildinfo
 .DS_Store

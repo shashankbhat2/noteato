@@ -23,6 +23,7 @@ export interface AgentMessage {
     | 'hudDidShow'
     | 'hudDidHide'
     | 'captureCommitted'
+    | 'captureTranscribed'
   version?: string
   pid?: number
   protocolVersion?: number

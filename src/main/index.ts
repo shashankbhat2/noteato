@@ -80,6 +80,7 @@ const agentClient = new AgentClient(
       case 'toggleSidebar':
         sidebarModeManager.toggle()
         break
+      case 'captureTranscribed':
       case 'captureCommitted':
         // The agent wrote a note directly to the vault. A full refresh is the
         // honest response: this process has no idea what else changed while it

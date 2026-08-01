@@ -59,6 +59,46 @@
             "target": "CaptureProbe",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release CaptureProbe (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Debug NoteatoTranscribe (agent)",
+            "target": "NoteatoTranscribe",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug NoteatoTranscribe (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Release NoteatoTranscribe (agent)",
+            "target": "NoteatoTranscribe",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release NoteatoTranscribe (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Debug AsrBench (agent)",
+            "target": "AsrBench",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug AsrBench (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Release AsrBench (agent)",
+            "target": "AsrBench",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release AsrBench (agent)"
         }
     ]
 }
