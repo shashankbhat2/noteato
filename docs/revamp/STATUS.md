@@ -3,7 +3,7 @@
 Branch `revamp/agent-architecture`. Companion to [`phase-plan.md`](./phase-plan.md) (what to build)
 and [`phase-0-audit.md`](./phase-0-audit.md) (what was there before).
 
-Last updated: 2026-08-01, end of Phase 1.5.
+Last updated: 2026-08-01, end of Phase 2.
 
 ---
 
@@ -16,8 +16,8 @@ Last updated: 2026-08-01, end of Phase 1.5.
 | **0.5B — AI surface** | ✅ done | Per-note Chat tab; no floating dock |
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
 | **1.5 — Identity migration** | ✅ done | Notes keyed on id; renames no longer move a note out from under an open pane |
-| **2 — Capture path** | ⬜ next | Mic, pre-roll ring buffer, commit to the §4.3 note format |
-| **3 — On-device ASR** | ⬜ | FluidAudio (Parakeet on ANE) — benchmarked against whisper.cpp, then wired |
+| **2 — Capture path** | 🟨 mostly | Mic, pre-roll, commit to the §4.3 format. **Library migration not done** — see below |
+| **3 — On-device ASR** | ⬜ next | FluidAudio (Parakeet on ANE) — benchmarked against whisper.cpp, then wired |
 | **4 — Retrieval** | ⬜ | Hybrid index, type-to-search, result → audio seek |
 | **5–7** | ⬜ | Dictation, meetings, tier gating |
 | **Signing (parallel track)** | ⬜ not started | Gates the *release* of 1–4, blocks no development |
@@ -54,9 +54,14 @@ NOTEATO_AGENT=1 npm run dev
 
 What to try:
 
-- **⌥⌘Space** → the capture HUD appears centred, over fullscreen apps, without stealing focus.
-  Press again to dismiss. It is deliberately empty of controls: waveform and timer only. There is
-  **no audio yet** — the waveform is an idle animation. That is Phase 2.
+- **⌥⌘Space** → the capture HUD appears, and **recording is already underway** — it opens with the
+  last 10 seconds of audio, so speak *before* pressing the key and check the words are there.
+  `Esc` or ⌥⌘Space again commits; `Cmd+Esc` discards. The note lands in your vault as
+  `<timestamp>-<hash>/` holding `audio.m4a` and `note.md`.
+- **The menu bar icon says what the mic is doing** — listening, recording, or off — and the menu
+  carries "Pause listening". Locking the screen pauses it too.
+- `npm run probe:capture -- --seconds 3` exercises the whole path against the real microphone and
+  prints what it found, which is the fastest way to tell a permission problem from a code one.
 - **⌥⌘S** → the compact side panel, exactly as before. The agent owns the key and forwards it; the
   library still owns the panel.
 - **⇧⌥⌘S** → bring the library to the front, launching it if it isn't running.
@@ -141,6 +146,24 @@ src/main/agentClient.ts      the Electron side of the socket
 - **The HUD does not record.** Phase 2.
 - **`bench:panel` needs a window server**, so it is unreliable on hosted CI runners. It reports
   rather than gates there; the gate is meaningful locally.
+
+---
+
+## What Phase 2 left undone, deliberately
+
+**Existing notes have not been migrated** to the §4.3 directory layout. Captures write the new form
+and the library reads both, so nothing is broken — but the flat `<slug>.md` notes already in your
+vault stay as they are.
+
+That is a real gap against the brief, and it is deferred on purpose: the migration rewrites every
+note in a real library, and this session already found two ways the library moves a note away from
+its audio (`flattenLibrary` and `save`). Both are fixed and tested. Doing a bulk rewrite in the same
+pass, on files that have no backup, is how a session like this destroys someone's notes. It wants
+the `flattenLibrary()` precedent — a full restorable copy first, and a one-time flag — as its own
+piece of work.
+
+Also not done: transcription (Phase 3), so a capture's title is the time it was taken. `note.md`
+carries `source: capture` and `durationSeconds` so Phase 3 can find the ones needing transcription.
 
 ---
 

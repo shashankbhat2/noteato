@@ -185,7 +185,7 @@ largest piece of Phase 2; pulling it out is what makes Phase 2 estimable.
 
 ---
 
-## Phase 2 — Capture path · L — ⬜ NEXT
+## Phase 2 — Capture path · L — 🟨 MOSTLY DONE (migration deferred — see STATUS.md)
 
 **Work**
 
@@ -218,7 +218,7 @@ one-time flag so it can't re-fire. That precedent is in `storage.ts:142` and sho
 
 ---
 
-## Phase 3 — On-device ASR · L
+## Phase 3 — On-device ASR · L — ⬜ NEXT
 
 **Engine: [FluidAudio](https://github.com/FluidInference/FluidAudio)** (Apache 2.0) — a Swift SDK
 running Parakeet on the Apple Neural Engine. This resolves the constraint that made Parakeet a
