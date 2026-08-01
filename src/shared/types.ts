@@ -89,7 +89,7 @@ export type ScratchChange =
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontChoice = 'system' | 'serif' | 'mono' | 'rounded'
-export type AccentChoice = 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
+export type AccentChoice = 'neutral' | 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
 export type AiProvider = 'none' | 'anthropic' | 'openai'
 export type SyncPreference = 'none' | 'icloud' | 'noteatoPro'
 /** Which screen edge the compact notes panel docks to (and reveals from). */
@@ -168,4 +168,3 @@ export interface AiCompleteRequest {
  * chat surface (revamp brief §9/§11).
  */
 export type AiNoteAction = 'summarize' | 'improve' | 'extract' | 'proofread' | 'ask'
-

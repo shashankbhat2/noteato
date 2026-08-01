@@ -10,7 +10,7 @@ import {
 import type { Settings } from '../../../shared/types'
 import type { NoteatoEditor } from '../noteLink'
 import { AiNotConfiguredError, aiStream, isAiConfigured } from '../ai/client'
-import { AI_MODELS } from '../ai/models'
+import { AI_MODELS, DEFAULT_CHAT_MODELS } from '../ai/models'
 import { noteActionSpec } from '../ai/noteActions'
 import { useSpeechToText } from '../dictation/useDictation'
 import MarkdownText from './MarkdownText'
@@ -137,7 +137,7 @@ export default function NoteAiPanel({
       setSelectedModel((current) => {
         if (options.some((option) => option.id === current)) return current
         if (options.some((option) => option.id === settings.aiModel)) return settings.aiModel
-        return options[0]?.id ?? ''
+        return settings.aiProvider === 'none' ? '' : DEFAULT_CHAT_MODELS[settings.aiProvider]
       })
     })
     return () => {

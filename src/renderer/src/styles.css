@@ -14,7 +14,7 @@ body,
   /* Both rows share the traffic-light centerline, but only the note needs the
      extra depth that carries its bottom fade. */
   --window-header-h: 38px;
-  --note-header-h: 54px;
+  --note-header-h: 42px;
   /* Gutter between the floating panes. */
   --pane-gap: 10px;
   /* Distance every sidebar row and control keeps from the panel edges. */
@@ -59,8 +59,8 @@ body,
   --radius-lg: 14px;
   --text: #292b2f;
   --text-muted: #6b6f76;
-  --accent: #a1523c;
-  --accent-soft: rgba(161, 82, 60, 0.1);
+  --accent: #5f6368;
+  --accent-soft: rgba(95, 99, 104, 0.12);
   /* Selected-item wash — one value for the active tab and the active note. */
   --accent-active: color-mix(in srgb, var(--accent) 15%, transparent);
   --danger: #b3452f;
@@ -85,8 +85,8 @@ body,
   --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.4);
   --text: #e7e8ea;
   --text-muted: #989ca2;
-  --accent: #d98a70;
-  --accent-soft: rgba(217, 138, 112, 0.14);
+  --accent: #e7e8ea;
+  --accent-soft: rgba(231, 232, 234, 0.14);
   --danger: #e0806c;
 }
 
@@ -124,7 +124,15 @@ body,
 }
 
 /* Accent presets — override only --accent/--accent-soft so they compose with
-   the light/dark themes above. Ember is the default (matches :root). */
+   the light/dark themes above. White / Gray is the default (matches :root). */
+:root[data-accent='neutral'] {
+  --accent: #5f6368;
+  --accent-soft: rgba(95, 99, 104, 0.12);
+}
+:root[data-theme='dark'][data-accent='neutral'] {
+  --accent: #e7e8ea;
+  --accent-soft: rgba(231, 232, 234, 0.14);
+}
 :root[data-accent='ember'] {
   --accent: #a1523c;
   --accent-soft: rgba(161, 82, 60, 0.12);
@@ -860,6 +868,7 @@ button {
 /* Same measure and gutters as Home — the two are peers, and a narrower Trash
    made the pane look like it had shrunk when you switched to it. */
 .trash-view {
+  width: 100%;
   height: 100%;
   overflow-y: auto;
   max-width: var(--view-measure);
@@ -1120,10 +1129,10 @@ button {
   gap: 5px;
   height: 30px;
   padding: 0 10px;
-  border: 1px solid var(--primaryText);
+  border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
-  background: var(--primaryText);
-  color: var(--editorBackground);
+  background: var(--accent);
+  color: var(--accentForeground);
   font: inherit;
   font-size: 12px;
   font-weight: 600;
@@ -1135,9 +1144,9 @@ button {
 }
 
 .sidebar-new:hover {
-  color: var(--editorBackground);
-  border-color: color-mix(in srgb, var(--primaryText) 86%, var(--editorBackground));
-  background: color-mix(in srgb, var(--primaryText) 86%, var(--editorBackground));
+  color: var(--accentForeground);
+  border-color: color-mix(in srgb, var(--accent) 86%, var(--editorBackground));
+  background: color-mix(in srgb, var(--accent) 86%, var(--editorBackground));
 }
 
 /* Utilities, at the foot: reachable without competing with the library. */
@@ -1529,6 +1538,13 @@ body.resizing-panes .editor-pane {
 .note-editor.full-width {
   --note-editor-gutter: 72px;
   max-width: none;
+}
+
+/* Width is a per-note property. When another note replaces the current one,
+   apply its measure in the same paint as its content instead of animating the
+   old document through the new document's line lengths. */
+.note-editor-shell.switching-note .note-editor {
+  transition: none;
 }
 
 /* BlockNote reserves 54px on each side by default for its drag-handle
@@ -2441,12 +2457,12 @@ body.resizing-panes .editor-pane {
   top: 0;
   z-index: 5;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   flex: 0 0 var(--note-header-h);
   min-height: var(--note-header-h);
-  padding: 3px 8px 19px 4px;
+  padding: 4px 8px 6px 10px;
   border-bottom: none;
   background: var(--editorBackground);
   transition: padding-left var(--dur) var(--ease);
@@ -2498,6 +2514,17 @@ body.resizing-panes .editor-pane {
   gap: 10px;
 }
 
+.note-header-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--primaryText);
+  font-size: 12.5px;
+  font-weight: 560;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Notes flatten their pane-control wrapper so More can sit immediately before
    Close. Other views keep PaneControls as its normal grouped unit. */
 .note-editor-toolbar .toolbar-actions {
@@ -2530,31 +2557,49 @@ body.resizing-panes .editor-pane {
   min-width: 0;
   align-items: center;
   gap: 2px;
-  padding: 3px;
+  margin-top: 1px;
+  padding: 0;
   border: 1px solid var(--subtleBorder);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: none;
+}
+
+/* Surface navigation belongs to the document, not its compact identity row.
+   It stays centred in the card while either the note or chat scrolls beneath
+   it, with no glass or shadow treatment. */
+.note-surface-tabs-floating {
+  position: absolute;
+  z-index: 18;
+  bottom: 14px;
+  left: 50%;
+  margin: 0;
+  transform: translateX(-50%);
 }
 
 .note-surface-tabs button {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  min-height: 24px;
-  padding: 0 9px;
+  gap: 6px;
+  min-height: 36px;
+  padding: 5px 13px;
   border: none;
-  border-radius: calc(var(--radius-md) - 3px);
+  border-radius: calc(var(--radius-lg) - 1px);
   background: transparent;
   color: var(--mutedText);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   transition:
     color var(--dur-fast) var(--ease),
     background-color var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease);
+}
+
+.note-surface-tabs button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .note-surface-tabs button:hover:not(:disabled) {
@@ -2818,12 +2863,37 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-composer {
+  position: relative;
+  z-index: 10;
   width: min(740px, calc(100% - 80px));
-  margin: 0 auto 30px;
-  padding-top: 14px;
+  /* Pull only the fade into the thread while keeping the field at the same
+     visual position: -58px + 72px leaves the original 14px field offset. */
+  margin: -58px auto 64px;
+  padding-top: 72px;
+}
+
+.note-chat-composer::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: -32px;
+  left: -32px;
+  height: 80px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    transparent 18%,
+    color-mix(in srgb, var(--editorBackground) 24%, transparent) 42%,
+    color-mix(in srgb, var(--editorBackground) 68%, transparent) 72%,
+    var(--editorBackground) 100%
+  );
 }
 
 .note-chat-composer-field {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-height: 106px;
   flex-direction: column;
@@ -3020,7 +3090,7 @@ body.resizing-panes .editor-pane {
 
 @container pane (max-width: 430px) {
   .note-surface-tabs button {
-    padding-inline: 9px;
+    padding-inline: 10px;
   }
 
   .note-surface-tabs button span,
@@ -3806,41 +3876,44 @@ body.resizing-panes .editor-pane {
   color: var(--text-muted);
 }
 
-/* Compact segmented control — the selected cell lifts off the track. */
+/* Horizontal choices use the same flat track as the Note / Chat /
+   Transcription switcher. Keeping the inset on the buttons rather than the
+   container gives every tab control the same edge alignment. */
 .segmented {
   display: flex;
   gap: 2px;
-  padding: 3px;
+  padding: 0;
+  border: 1px solid var(--subtleBorder);
   border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow: var(--shadow-inset);
+  box-shadow: none;
 }
 
 .segmented button {
-  display: flex;
+  display: inline-flex;
+  min-height: 28px;
   align-items: center;
   gap: 5px;
   border: none;
-  border-radius: calc(var(--radius-md) - 4px);
-  padding: 5px 11px;
+  border-radius: calc(var(--radius-md) - 1px);
+  padding: 3px 9px;
   background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--mutedText);
+  font-size: 11.5px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .segmented button:hover {
-  color: var(--text);
+  color: var(--primaryText);
+  background: color-mix(in srgb, var(--hoverSurface) 60%, transparent);
 }
 
-/* Seated into the track — depth comes from the groove around it, not from a
-   drop shadow lifting it off the surface. */
 .segmented button.active {
-  background: var(--accent-active);
-  color: var(--accent);
-  font-weight: 560;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  background: var(--accent);
+  color: var(--accentForeground);
+  box-shadow: none;
 }
 
 .settings-select,
@@ -4699,8 +4772,7 @@ body.resizing-panes .editor-pane {
   user-select: none;
 }
 
-/* The two views, as a segmented control. Takes the leading space the window
-   actions leave it; search is an icon over there rather than a field here. */
+/* The two views use the same flat horizontal track as the note surfaces. */
 .sidebar-mode-tabs {
   /* Sized to its two labels, not to the header — stretching them across the
      panel made a two-item switch look like a nav bar. */
@@ -4709,36 +4781,39 @@ body.resizing-panes .editor-pane {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 3px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--bg-tertiary) 76%, transparent);
+  padding: 0;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: none;
   -webkit-app-region: no-drag;
 }
 
 .sidebar-mode-tabs button {
-  height: 24px;
-  display: flex;
+  min-height: 28px;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
   border: none;
-  border-radius: 5px;
-  padding: 0 9px;
+  border-radius: calc(var(--radius-md) - 1px);
+  padding: 3px 9px;
   background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 550;
+  color: var(--mutedText);
+  font-size: 11.5px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
 
 .sidebar-mode-tabs button:hover {
-  color: var(--text);
+  color: var(--primaryText);
+  background: color-mix(in srgb, var(--hoverSurface) 60%, transparent);
 }
 
 .sidebar-mode-tabs button.active {
-  color: var(--text);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.09);
+  color: var(--accentForeground);
+  background: var(--accent);
+  box-shadow: none;
 }
 
 /* The panel is ~390px wide, so the shared modal has to fit it rather than the
@@ -4772,8 +4847,8 @@ body.resizing-panes .editor-pane {
 }
 
 .sidebar-mode-tabs button.active .sidebar-tab-count {
-  color: var(--accent);
-  opacity: 1;
+  color: currentColor;
+  opacity: 0.78;
 }
 
 .sidebar-mode-window-actions {
@@ -4933,9 +5008,14 @@ body.resizing-panes .editor-pane {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px var(--sidebar-panel-inset);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+  gap: 2px;
+  margin: 6px var(--sidebar-panel-inset) 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .sidebar-tabs-scroll {
@@ -4943,7 +5023,7 @@ body.resizing-panes .editor-pane {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -4956,14 +5036,14 @@ body.resizing-panes .editor-pane {
 .sidebar-note-tab {
   flex-shrink: 0;
   max-width: 150px;
-  height: 26px;
+  min-height: 28px;
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 0 4px 0 9px;
-  border-radius: 6px;
+  padding: 3px 4px 3px 9px;
+  border-radius: calc(var(--radius-md) - 1px);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--mutedText);
   font-size: 11.5px;
   font-weight: 500;
   cursor: pointer;
@@ -4980,19 +5060,25 @@ body.resizing-panes .editor-pane {
 }
 
 .sidebar-note-tab:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--sidebar-hover) 78%, transparent);
+  color: var(--primaryText);
+  background: color-mix(in srgb, var(--hoverSurface) 60%, transparent);
 }
 
 .sidebar-note-tab.active {
-  color: var(--text);
-  background: var(--bg);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.09);
+  color: var(--accentForeground);
+  background: var(--accent);
+  box-shadow: none;
 }
 
 .sidebar-note-tab-pin {
   flex-shrink: 0;
   color: var(--accent);
+}
+
+.sidebar-note-tab.active .sidebar-note-tab-pin,
+.sidebar-note-tab.active .sidebar-note-tab-bell,
+.sidebar-note-tab.active .sidebar-note-tab-close {
+  color: var(--accentForeground);
 }
 
 .sidebar-note-tab-bell {
@@ -5036,17 +5122,18 @@ body.resizing-panes .editor-pane {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: calc(var(--radius-md) - 1px);
   background: transparent;
-  color: var(--accent);
+  color: var(--mutedText);
   cursor: pointer;
 }
 
 .sidebar-tab-new:hover {
-  background: var(--accent-soft);
+  color: var(--primaryText);
+  background: color-mix(in srgb, var(--hoverSurface) 60%, transparent);
 }
 
 .sidebar-mode-content {
@@ -7044,7 +7131,7 @@ body.is-reordering * {
    A step away from the page, in the same direction as the page: light in light
    mode, dark in dark mode. A near-black slab on a light document is a hole. */
 
-.note-editor .bn-block-content[data-content-type='codeBlock'] {
+:is(.note-editor, .sidebar-editor-canvas) .bn-block-content[data-content-type='codeBlock'] {
   background: var(--codeBackground);
   border: 1px solid var(--subtleBorder);
   border-radius: var(--radius-md);
@@ -7052,21 +7139,34 @@ body.is-reordering * {
   margin: 6px 0;
 }
 
-.note-editor .bn-block-content[data-content-type='codeBlock'] > pre {
+:is(.note-editor, .sidebar-editor-canvas)
+  .bn-block-content[data-content-type='codeBlock']
+  > pre {
   font-size: 13px;
   line-height: 1.55;
   color: var(--primaryText);
 }
 
-/* Shiki writes its light token colour inline and keeps the dark equivalent in
-   a custom property. The explicit override is needed only in dark mode because
-   inline token styles otherwise outrank the app theme. */
+/* Shiki emits both palettes as variables on each decorated token. Select a
+   palette explicitly in both modes: no mode inherits the other one's inline
+   colour, and changing the app theme updates an already-open block in place. */
+:root[data-theme='light']
+  :is(.note-editor, .sidebar-editor-canvas)
+  .bn-block-content[data-content-type='codeBlock']
+  span.shiki {
+  color: var(--shiki-light, var(--primaryText)) !important;
+  background-color: transparent !important;
+  font-style: var(--shiki-light-font-style, inherit) !important;
+  font-weight: var(--shiki-light-font-weight, inherit) !important;
+  text-decoration: var(--shiki-light-text-decoration, inherit) !important;
+}
+
 :root[data-theme='dark']
-  .note-editor
+  :is(.note-editor, .sidebar-editor-canvas)
   .bn-block-content[data-content-type='codeBlock']
   span.shiki {
   color: var(--shiki-dark, var(--primaryText)) !important;
-  background-color: var(--shiki-dark-bg, transparent) !important;
+  background-color: transparent !important;
   font-style: var(--shiki-dark-font-style, inherit) !important;
   font-weight: var(--shiki-dark-font-weight, inherit) !important;
   text-decoration: var(--shiki-dark-text-decoration, inherit) !important;
@@ -7074,7 +7174,10 @@ body.is-reordering * {
 
 /* The language picker is an edit affordance: quiet until the block is hovered
    or focused. */
-.note-editor .bn-block-content[data-content-type='codeBlock'] > div > select {
+:is(.note-editor, .sidebar-editor-canvas)
+  .bn-block-content[data-content-type='codeBlock']
+  > div
+  > select {
   opacity: 0;
   color: var(--mutedText);
   background: transparent;
@@ -7083,8 +7186,14 @@ body.is-reordering * {
   transition: opacity var(--dur-fast) var(--ease);
 }
 
-.note-editor .bn-block-content[data-content-type='codeBlock']:hover > div > select,
-.note-editor .bn-block-content[data-content-type='codeBlock']:focus-within > div > select {
+:is(.note-editor, .sidebar-editor-canvas)
+  .bn-block-content[data-content-type='codeBlock']:hover
+  > div
+  > select,
+:is(.note-editor, .sidebar-editor-canvas)
+  .bn-block-content[data-content-type='codeBlock']:focus-within
+  > div
+  > select {
   opacity: 1;
 }
 

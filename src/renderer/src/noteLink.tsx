@@ -31,7 +31,10 @@ async function createThemeAwareCodeHighlighter(): Promise<CodeHighlighter> {
               light: 'github-light',
               dark: 'github-dark'
             },
-            defaultColor: 'light'
+            // Emit both palettes as CSS variables instead of baking the light
+            // colour into `style="color: …"`. The renderer can then switch
+            // themes without rebuilding every code decoration in the editor.
+            defaultColor: false
           } as never)
         }
       }

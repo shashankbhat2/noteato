@@ -32,7 +32,12 @@ import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
 import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
-import { ensureTitleBlock, enforceTitleBlock, titleFromMarkdown } from '../titleBlock'
+import {
+  ensureTitleBlock,
+  enforceTitleBlock,
+  titleFromBlocks,
+  titleFromMarkdown
+} from '../titleBlock'
 import {
   createNoteatoEditor,
   emitOpenNoteLink,
@@ -279,6 +284,7 @@ function NoteSideMenu(props: React.ComponentProps<typeof SideMenu>) {
 export default function NoteEditor({ path, onSaved, onEditorReady, paneControls }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
+  const [headerTitle, setHeaderTitle] = useState('Untitled')
   const [fullWidth, setFullWidth] = useState(false)
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | 'loading'>('loading')
@@ -292,6 +298,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   const [findFocusTick, setFindFocusTick] = useState(0)
   const [activeSurface, setActiveSurface] = useState<NoteSurface>('note')
   const [outlineVisible, setOutlineVisible] = useState(false)
+  const [isSwitchingNote, setIsSwitchingNote] = useState(false)
 
   useEffect(() => {
     setActiveSurface('note')
@@ -320,6 +327,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   // True while an on-disk change is being applied to the editor — those
   // programmatic block swaps must not trigger a save of their own.
   const applyingExternalRef = useRef(false)
+  const switchSettleFrameRef = useRef<number | null>(null)
   const onEditorReadyRef = useRef(onEditorReady)
   onEditorReadyRef.current = onEditorReady
 
@@ -333,19 +341,26 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     // A rename feeds the note's new path back down through this prop. That's
     // the note already on screen — reloading it would throw away the caret and
     // any edits made since the save for nothing.
-    if (livePathRef.current === path) return
+    if (livePathRef.current === path) {
+      // Returning to the still-mounted note after another path failed to load
+      // should reveal that editor again instead of leaving the error screen up.
+      setLoadError(null)
+      setIsSwitchingNote(false)
+      return
+    }
 
     let cancelled = false
-    setInitialBlocks('loading')
+    // Keep the current editor mounted while the replacement note is read and
+    // parsed. Clearing it here made the entire document shell collapse into a
+    // centred loading message on every sidebar click, then expand again.
+    const replacingVisibleNote = livePathRef.current !== null
+    if (replacingVisibleNote) setIsSwitchingNote(true)
+    else setInitialBlocks('loading')
     setLoadError(null)
 
     const load = async (): Promise<void> => {
       const loaded = await window.api.notes.read(path)
       if (cancelled) return
-      livePathRef.current = loaded.path
-      setNote(loaded)
-      setFullWidth(loaded.fullWidth)
-      tagsRef.current = loaded.tags
 
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
@@ -356,7 +371,23 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
       // Externally linked files are shown exactly as they are on disk — no
       // title block is ever injected into someone else's markdown.
       if (!cancelled) {
+        // Commit every piece of note-specific layout together. React batches
+        // these updates, so title metadata, width and editor content change in
+        // one paint instead of walking through several intermediate layouts.
+        livePathRef.current = loaded.path
+        tagsRef.current = loaded.tags
+        setNote(loaded)
+        setHeaderTitle(loaded.title || 'Untitled')
+        setFullWidth(loaded.fullWidth)
         setInitialBlocks(loaded.external ? blocks : ensureTitleBlock(blocks, loaded.title))
+
+        if (switchSettleFrameRef.current !== null) {
+          cancelAnimationFrame(switchSettleFrameRef.current)
+        }
+        switchSettleFrameRef.current = requestAnimationFrame(() => {
+          switchSettleFrameRef.current = null
+          if (!cancelled) setIsSwitchingNote(false)
+        })
       }
     }
 
@@ -365,11 +396,16 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     // there'd be nothing on screen to say so or to try again from.
     void load().catch((err: unknown) => {
       if (cancelled) return
+      setIsSwitchingNote(false)
       setLoadError(err instanceof Error ? err.message : String(err))
     })
 
     return () => {
       cancelled = true
+      if (switchSettleFrameRef.current !== null) {
+        cancelAnimationFrame(switchSettleFrameRef.current)
+        switchSettleFrameRef.current = null
+      }
     }
   }, [path, loadAttempt])
 
@@ -427,8 +463,13 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
 
   // Expose the active editor so the app menu's Undo/Redo can drive its history.
   useEffect(() => {
-    onEditorReadyRef.current?.(editor ?? null)
-    return () => onEditorReadyRef.current?.(null)
+    // Capture the callback that registered this exact editor. During a note
+    // switch the parent callback starts pointing at the next note before the
+    // next editor exists; using the live ref in cleanup would unregister the
+    // new id and leave the old editor in the map.
+    const registeredCallback = onEditorReadyRef.current
+    registeredCallback?.(editor ?? null)
+    return () => registeredCallback?.(null)
   }, [editor])
 
   // Right-click menu inside the note body. The main process forwards the
@@ -542,6 +583,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     })
     livePathRef.current = saved.path
     setNote(saved)
+    setHeaderTitle(saved.title || 'Untitled')
     tagsRef.current = saved.tags
     onSaved(saved)
     return saved
@@ -683,6 +725,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
           applyingExternalRef.current = false
         }
         setNote(latest)
+        setHeaderTitle(latest.title || 'Untitled')
       })()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1082,7 +1125,8 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   return (
     <div
       ref={rootRef}
-      className="note-editor-shell"
+      className={isSwitchingNote ? 'note-editor-shell switching-note' : 'note-editor-shell'}
+      aria-busy={isSwitchingNote}
       onKeyDownCapture={handleEditorKeyDown}
       onKeyDown={handleEditorKeyDownBubble}
       onPointerDownCapture={handleImagePointerDownCapture}
@@ -1093,38 +1137,9 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
       {/* Spans the card and stays put while the note scrolls beneath it. */}
       <div className="note-editor-toolbar">
         <div className="note-toolbar-leading">
-          <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
-            <button
-              role="tab"
-              aria-selected={activeSurface === 'note'}
-              className={activeSurface === 'note' ? 'active' : ''}
-              title="Note"
-              onClick={() => setActiveSurface('note')}
-            >
-              <FileText size={13} />
-              <span>Note</span>
-            </button>
-            <button
-              role="tab"
-              aria-selected={activeSurface === 'chat'}
-              className={activeSurface === 'chat' ? 'active' : ''}
-              title="Chat"
-              onClick={() => setActiveSurface('chat')}
-            >
-              <Sparkle size={13} />
-              <span>Chat</span>
-            </button>
-            <button
-              role="tab"
-              aria-selected={activeSurface === 'transcription'}
-              className={activeSurface === 'transcription' ? 'active' : ''}
-              disabled={!hasRecording}
-              title="Transcription becomes available when this note has a recording"
-            >
-              <Microphone size={13} />
-              <span>Transcription</span>
-            </button>
-          </div>
+          <span className="note-header-title" title={headerTitle}>
+            {headerTitle}
+          </span>
           {parentLabel && (
             <span className="note-location" title={note.path}>
               {parentLabel}
@@ -1207,7 +1222,14 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
               if (imagePickingRef.current) return
               // Linked files are shown exactly as they are on disk — a title
               // heading is never forced into someone else's markdown.
-              if (!note.external) scheduleTitleFix()
+              if (!note.external) {
+                scheduleTitleFix()
+                // `scheduleTitleFix` runs first, so this reads the stable
+                // leading H1 even when Backspace briefly tries to merge it.
+                queueMicrotask(() => {
+                  setHeaderTitle(titleFromBlocks(editor.document) || 'Untitled')
+                })
+              }
               if (!aiStreamingRef.current) scheduleSave()
             }}
             theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
@@ -1267,6 +1289,43 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
           active={activeSurface === 'chat'}
           onError={setAiError}
         />
+      </div>
+
+      <div
+        className="note-surface-tabs note-surface-tabs-floating"
+        role="tablist"
+        aria-label="Note surfaces"
+      >
+        <button
+          role="tab"
+          aria-selected={activeSurface === 'note'}
+          className={activeSurface === 'note' ? 'active' : ''}
+          title="Note"
+          onClick={() => setActiveSurface('note')}
+        >
+          <FileText size={13} />
+          <span>Note</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeSurface === 'chat'}
+          className={activeSurface === 'chat' ? 'active' : ''}
+          title="Chat"
+          onClick={() => setActiveSurface('chat')}
+        >
+          <Sparkle size={13} />
+          <span>Chat</span>
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeSurface === 'transcription'}
+          className={activeSurface === 'transcription' ? 'active' : ''}
+          disabled={!hasRecording}
+          title="Transcription becomes available when this note has a recording"
+        >
+          <Microphone size={13} />
+          <span>Transcription</span>
+        </button>
       </div>
 
       {aiError && <div className="ai-error-toast">{aiError}</div>}

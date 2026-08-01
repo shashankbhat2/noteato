@@ -21,7 +21,7 @@ const ThemeContext = createContext<ThemeContextValue>({
   setTheme: () => {},
   fontFamily: 'system',
   setFontFamily: () => {},
-  accent: 'ember',
+  accent: 'neutral',
   setAccent: () => {},
   aiSelectionActions: true,
   setAiSelectionActions: () => {}
@@ -40,7 +40,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>('light')
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [fontFamily, setFontFamilyState] = useState<FontChoice>('system')
-  const [accent, setAccentState] = useState<AccentChoice>('ember')
+  const [accent, setAccentState] = useState<AccentChoice>('neutral')
   const [aiSelectionActions, setAiSelectionActionsState] = useState(true)
 
   useEffect(() => {

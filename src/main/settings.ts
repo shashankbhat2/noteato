@@ -29,7 +29,7 @@ export function createSettingsStore(): JsonStore<Settings> {
     notesDir: null,
     theme: 'light',
     fontFamily: 'system',
-    accent: 'ember',
+    accent: 'neutral',
     aiProvider: 'none',
     aiModel: '',
     anthropicApiKey: '',
