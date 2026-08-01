@@ -23,8 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeys.start()
         let captureOK = hotkeys.register(.capture) { [weak self] in self?.toggleHUD() }
-        let sidebarOK = hotkeys.register(.sidebar) { [weak self] in self?.openLibrary() }
-        if !captureOK || !sidebarOK {
+        let sidebarOK = hotkeys.register(.sidebar) { [weak self] in self?.toggleSidebar() }
+        let libraryOK = hotkeys.register(.library) { [weak self] in self?.openLibrary() }
+        if !captureOK || !sidebarOK || !libraryOK {
             // Another app already owns the combination. Not fatal — the menu
             // bar item still works — but the user needs to know why their key
             // does nothing, so it is surfaced rather than logged.
@@ -52,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             withTitle: "Capture   ⌥⌘Space", action: #selector(menuCapture), keyEquivalent: "")
             .target = self
         menu.addItem(
-            withTitle: "Open Library", action: #selector(menuOpenLibrary), keyEquivalent: "")
+            withTitle: "Open Library   ⇧⌥⌘S", action: #selector(menuOpenLibrary), keyEquivalent: "")
             .target = self
         menu.addItem(.separator())
         let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -80,6 +81,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             hud.show()
             server.send(AgentMessage(type: .hudDidShow))
+        }
+    }
+
+    /// The panel belongs to the library. If it is running, forward; if not,
+    /// launch it — the shortcut has to keep meaning what it meant before the
+    /// agent took ownership of the key.
+    private func toggleSidebar() {
+        if server.hasClient {
+            server.send(AgentMessage(type: .toggleSidebar))
+        } else {
+            launcher.launch()
         }
     }
 

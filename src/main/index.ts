@@ -76,6 +76,9 @@ const agentClient = new AgentClient(
       case 'showLibrary':
         showMainWindow()
         break
+      case 'toggleSidebar':
+        sidebarModeManager.toggle()
+        break
       case 'welcome':
         if (message.protocolVersion !== undefined && message.protocolVersion !== 1) {
           console.warn(

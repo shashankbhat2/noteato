@@ -57,6 +57,9 @@ What to try:
 - **⌥⌘Space** → the capture HUD appears centred, over fullscreen apps, without stealing focus.
   Press again to dismiss. It is deliberately empty of controls: waveform and timer only. There is
   **no audio yet** — the waveform is an idle animation. That is Phase 2.
+- **⌥⌘S** → the compact side panel, exactly as before. The agent owns the key and forwards it; the
+  library still owns the panel.
+- **⇧⌥⌘S** → bring the library to the front, launching it if it isn't running.
 - **The menu-bar waveform icon** → Capture, Open Library, and a line saying whether the library is
   connected.
 - **Quit the library and press ⌥⌘Space again.** The HUD still opens. That is the §2 invariant: the

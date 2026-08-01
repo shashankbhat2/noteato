@@ -54,6 +54,9 @@ public struct AgentMessage: Codable, Equatable, Sendable {
         case pong
         /// The menu bar asked for the library while it was already running.
         case showLibrary
+        /// The sidebar accelerator fired. The agent owns the key; the library
+        /// owns the panel, so this is forwarded rather than handled.
+        case toggleSidebar
         /// The HUD opened or closed. Phase 1 carries no capture payload yet.
         case hudDidShow
         case hudDidHide

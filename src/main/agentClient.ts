@@ -15,7 +15,7 @@ import { app } from 'electron'
  */
 
 export interface AgentMessage {
-  type: 'welcome' | 'pong' | 'showLibrary' | 'hudDidShow' | 'hudDidHide'
+  type: 'welcome' | 'pong' | 'showLibrary' | 'toggleSidebar' | 'hudDidShow' | 'hudDidHide'
   version?: string
   pid?: number
   protocolVersion?: number

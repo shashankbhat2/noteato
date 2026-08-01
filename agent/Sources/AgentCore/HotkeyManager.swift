@@ -24,8 +24,15 @@ public final class HotkeyManager {
         /// ⌥⌘Space — capture.
         public static let capture = Shortcut(
             keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey | cmdKey))
-        /// ⌃⌥S — the compact side panel, which the library still owns.
+        /// ⌥⌘S — the compact side panel. The library owns the panel itself, so
+        /// the agent forwards this rather than handling it; the accelerator
+        /// matches SIDEBAR_MODE_ACCELERATOR in src/shared/globalShortcuts.ts.
+        /// Taking ownership of a shortcut without preserving what it did is a
+        /// silent regression, which is exactly what this pairing prevents.
         public static let sidebar = Shortcut(
+            keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | cmdKey))
+        /// ⇧⌥⌘S — bring the library to the front (launching it if needed).
+        public static let library = Shortcut(
             keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | cmdKey | shiftKey))
     }
 
