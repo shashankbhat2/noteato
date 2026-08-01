@@ -218,7 +218,7 @@ one-time flag so it can't re-fire. That precedent is in `storage.ts:142` and sho
 
 ---
 
-## Phase 3 — On-device ASR · L — ⬜ NEXT
+## Phase 3 — On-device ASR · L — ✅ DONE
 
 **Engine: [FluidAudio](https://github.com/FluidInference/FluidAudio)** (Apache 2.0) — a Swift SDK
 running Parakeet on the Apple Neural Engine. This resolves the constraint that made Parakeet a
@@ -268,7 +268,7 @@ discovering the trade later.
 
 ---
 
-## Phase 4 — Retrieval · L
+## Phase 4 — Retrieval · L — ⬜ NEXT
 
 This is a fix, not an enhancement. The audit measured the current search at **190 ms median on 5,000
 notes with a warm cache** — already over the 150 ms budget, with 1.5 KB bodies and no transcripts.

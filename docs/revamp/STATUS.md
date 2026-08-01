@@ -3,7 +3,7 @@
 Branch `revamp/agent-architecture`. Companion to [`phase-plan.md`](./phase-plan.md) (what to build)
 and [`phase-0-audit.md`](./phase-0-audit.md) (what was there before).
 
-Last updated: 2026-08-01, end of Phase 2.
+Last updated: 2026-08-01, end of Phase 3.
 
 ---
 
@@ -17,8 +17,8 @@ Last updated: 2026-08-01, end of Phase 2.
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
 | **1.5 — Identity migration** | ✅ done | Notes keyed on id; renames no longer move a note out from under an open pane |
 | **2 — Capture path** | 🟨 mostly | Mic, pre-roll, commit to the §4.3 format. **Library migration not done** — see below |
-| **3 — On-device ASR** | ⬜ next | FluidAudio (Parakeet on ANE) — benchmarked against whisper.cpp, then wired |
-| **4 — Retrieval** | ⬜ | Hybrid index, type-to-search, result → audio seek |
+| **3 — On-device ASR** | ✅ done | FluidAudio (Parakeet on ANE), in a helper process that exits |
+| **4 — Retrieval** | ⬜ next | Hybrid index, type-to-search, result → audio seek |
 | **5–7** | ⬜ | Dictation, meetings, tier gating |
 | **Signing (parallel track)** | ⬜ not started | Gates the *release* of 1–4, blocks no development |
 
@@ -104,8 +104,8 @@ On this M2, 2026-08-01. `npm run bench` reproduces the first two.
 | Agent idle CPU | < 1 % | **0.0 %** | ✅ |
 | Search, 5k notes | < 150 ms | **197.7 ms** | ❌ Phase 4 fixes this |
 | Library cold open | < 1.5 s | **3.11 s** | ❌ not yet addressed |
-| Transcription RTF | < 0.3× | — | Phase 3 |
-| Hotkey → recording | 0 ms | — | Phase 2 |
+| Transcription RTF | < 0.3× | **0.01–0.02** | ✅ 57–196× realtime |
+| Hotkey → recording | 0 ms | **0 ms** | ✅ already buffered |
 
 The HUD figure measures `AgentCore.CaptureHUD` — the type the agent actually shows, not a stand-in.
 It does **not** include hotkey dispatch; `RegisterEventHotKey` delivery measured well under a
@@ -162,8 +162,11 @@ pass, on files that have no backup, is how a session like this destroys someone'
 the `flattenLibrary()` precedent — a full restorable copy first, and a one-time flag — as its own
 piece of work.
 
-Also not done: transcription (Phase 3), so a capture's title is the time it was taken. `note.md`
-carries `source: capture` and `durationSeconds` so Phase 3 can find the ones needing transcription.
+**The Deepgram path is still present**, contrary to the phase plan, which had Phase 3 delete it. The
+duplication that rule exists to prevent is gone — the agent owns note capture outright — and
+Deepgram now serves only the mic in the chat composer, which dictates a *question* rather than
+capturing a note. Phase 5 replaces that with the on-device streaming path; removing it now would
+leave a dead button and no replacement for a whole phase.
 
 ---
 
