@@ -1,7 +1,9 @@
 # Noteato Revamp — Build Plan
 
-Companion to [`phase-0-audit.md`](./phase-0-audit.md). Follows the brief's §12 phase structure, with
-three changes the audit forced:
+Companion to [`phase-0-audit.md`](./phase-0-audit.md). **Live progress and local run instructions
+are in [`STATUS.md`](./STATUS.md)** — this file is the plan, that one is the state.
+
+Follows the brief's §12 phase structure, with three changes the audit forced:
 
 1. **A groundwork phase (0.5) before Phase 1.** There is no test runner in the repo, so §10's CI
    gates have nothing to hang on. That has to exist before the first phase that claims a number.
@@ -19,20 +21,22 @@ Sizes are relative effort, not calendar: **S** ≈ a sitting, **M** ≈ a few da
 
 ## Decisions — resolved
 
-**1. AI: one bottom action bar on the note; AI opens as a window.** Not a deletion — a reshape. The
-two chat surfaces (`AgentPanel` hosted in a pane, and the second assistant in `HomeView`) collapse
-into a single bar of explicit, named actions at the foot of the note, with AI output opening in its
-own window rather than docking as a sidebar or pane.
+**1. AI: one floating panel for the whole layout, following the focused note.** Not a deletion — a
+reshape. The two chat surfaces (`AgentPanel` in a pane, and the second assistant in `HomeView`) are
+gone. In their place, a single panel holding dictation and the note-level AI, whose subject is
+whichever note pane has focus — and which names that note, because a surface acting on "the current
+note" has to say which one.
 
-This lands close to what §9 and §11 were actually asking for: no chat sidebar, AI acting on notes
-through named actions with visible output. The existing selection-AI work
-(`SelectionAiPopup.tsx`, `SelectionAiToolbar.tsx`) is the raw material — those actions move into the
-bar rather than being rewritten.
+- **Enhance** → the four whole-note actions, one result, Copy / Insert.
+- **Ask** → a conversation about the focused note, threaded per note.
+- **Selection actions stay in the bubble menu**, where the text being acted on is already visible.
 
-It's also load-bearing later, not cosmetic: **the bar is the surface §9's traceability requirement
+It is load-bearing later, not cosmetic: **this panel is the surface §9's traceability requirement
 lands on.** Summaries and action items carrying timestamp ranges back into the transcript need
-somewhere to be invoked from and somewhere to render. Building it in Phase 0.5 means Phase 4 has a
-home to put them in.
+somewhere to be invoked from and somewhere to render.
+
+*Note on §11:* the brief rules out a chat surface outright. `Ask` is one, scoped and threaded per
+note. Built as decided; flagged here so it stays a decision rather than becoming drift.
 
 **2. Tags, scratch notes and the sidebar panel all stay.** They are shipped features with user data
 on disk. This is an explicit, deliberate exception to §11's "no tag taxonomies" and to reading §4.2's
@@ -69,12 +73,12 @@ notarization in the release workflow. See audit §5a for why this matters more t
 
 ---
 
-## Phase 0.5 — Groundwork and the action bar · M
+## Phase 0.5 — Groundwork and the AI panel · M — ✅ DONE
 
 Two independent pieces. Both are pre-agent work in the existing codebase, and both should land
 before Phase 1.5, which is easier once (B) has removed a pane type.
 
-### A. Test and benchmark groundwork · S
+### A. Test and benchmark groundwork · S — ✅ done
 
 Nothing here is a feature. All of it is a prerequisite for measuring anything.
 
@@ -86,22 +90,19 @@ Nothing here is a feature. All of it is a prerequisite for measuring anything.
 - Archive `plan.md`, `roadmap.md`, `tldraw-integration.md` → `docs/archive/`. They describe folders,
   iCloud sync and a hosted AI proxy; `roadmap.md` Phase 1 is literally the thing §11 forbids.
 
-### B. The note action bar · M
+### B. The AI panel · M — ✅ done (shipped as one floating panel, not a bar — see STATUS.md)
 
-- New `NoteActionBar` at the foot of the note editor: one row of explicit, named actions.
-- The selection-AI actions (`SelectionAiPopup`, `SelectionAiToolbar`) move into it. Reuse, not rewrite
-  — `ai/client.ts` and the `ai:stream` IPC channel stay exactly as they are.
-- AI output opens in **its own window**, not a pane and not a dock. New `BrowserWindow`, same preload.
-- Remove the assistant as a *pane type* (`AgentPanel` in `panes.ts`) and the `HomeView` assistant.
-- Collapse the three AI settings flags (`aiSelectionActions`, `aiAgentEnabled`,
-  `homeAssistantEnabled`) into what the new surface actually needs.
-- Update the README and replace `ss/assistant.png`, which documents the pane that's going away.
+- `NoteAiPanel`, mounted once in `MainLayout`: dictation + Enhance + Ask, floating over the layout.
+- Subject = the focused note pane; a non-note pane leaves it null and the panel says so.
+- `ai/client.ts` and the `ai:stream` IPC channel are reused unchanged.
+- Removed the assistant as a *pane type* (`AgentPanel` in `panes.ts`) and the `HomeView` assistant.
+- Collapsed three AI settings flags to one; dropped `ss/assistant.png`.
 
-**Sequencing note** — do (B) before Phase 1.5. Dropping the assistant pane type leaves `panes.ts`
-with one fewer case for the identity refactor to carry through.
+**Sequencing note** — (B) landed before Phase 1.5, so `panes.ts` has one fewer case for the identity
+refactor to carry.
 
-**Proof** — `npm test` and the Swift tests run green in CI; the three benchmarks report numbers; the
-action bar reaches parity with the selection-AI actions it replaces.
+**Proof** — verified in the running app: one panel, subject follows focus across panes, Ask opens a
+composer with no insert affordance, bubble menu intact. Tests and benchmarks green.
 
 **Risk** — CI runs on shared `macos-latest` runners, where absolute timings are noisy. Recommend the
 gate assert the §10 ceiling (80 ms / 150 ms) on a **median of N runs**, and publish the raw number as
@@ -110,7 +111,7 @@ will make the build flaky, and a flaky perf gate gets disabled within a month.
 
 ---
 
-## Phase 1 — Agent skeleton · M
+## Phase 1 — Agent skeleton · M — ✅ DONE (29 ms cold, 46.7 MB, 0.0% CPU)
 
 Prove the process model and the latency. No audio.
 
@@ -159,7 +160,7 @@ someone else's machine.
 
 ---
 
-## Phase 1.5 — Identity migration · L
+## Phase 1.5 — Identity migration · L — ⬜ NEXT
 
 A pure refactor. No new features, no on-disk change, no user-visible difference. This exists purely
 to keep Phase 2 from becoming an XL.

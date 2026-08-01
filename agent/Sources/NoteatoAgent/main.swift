@@ -1,8 +1,11 @@
-import AgentCore
-import Foundation
+import AppKit
 
-// Placeholder entry point. Phase 1 replaces this with the menu-bar process:
-// NSStatusItem, RegisterEventHotKey, the HUD panel, and the socket server.
-// It exists now so CI builds and links the executable target.
-let version = "0.0.0-phase0.5"
-FileHandle.standardOutput.write(Data("NoteatoAgent \(version)\n".utf8))
+// LSUIElement equivalent, set in code so the agent works both as a bare binary
+// (development, benchmarks) and embedded in the app bundle: menu bar only, no
+// Dock icon, never activates.
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()

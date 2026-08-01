@@ -12,7 +12,7 @@ let package = Package(
         .executableTarget(name: "NoteatoAgent", dependencies: ["AgentCore"]),
         // The §10 hotkey→HUD gate. Lives in this package so that Phase 1 can
         // point it at the agent's real HUD instead of measuring a replica.
-        .executableTarget(name: "PanelBench"),
+        .executableTarget(name: "PanelBench", dependencies: ["AgentCore"]),
         .testTarget(name: "AgentCoreTests", dependencies: ["AgentCore"])
     ]
 )

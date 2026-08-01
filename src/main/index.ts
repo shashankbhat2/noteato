@@ -35,6 +35,7 @@ import { TrayManager } from './tray'
 import { SidebarModeManager } from './sidebarMode'
 import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
+import { AgentClient } from './agentClient'
 
 const appDb = getAppDb()
 const settingsStore = createSettingsStore()
@@ -63,6 +64,35 @@ const reminderScheduler = new ReminderScheduler(
   (change) => broadcastScratchChange(change)
 )
 const globalShortcutManager = new GlobalShortcutManager(() => sidebarModeManager.toggle())
+
+// The resident native agent (docs/revamp/phase-plan.md, Phase 1). Behind a flag
+// while both capture paths coexist; the Electron path goes in Phase 3. Absent
+// agent is an ordinary state — the client retries quietly and the library works
+// exactly as before.
+const agentEnabled = process.env['NOTEATO_AGENT'] === '1'
+const agentClient = new AgentClient(
+  (message) => {
+    switch (message.type) {
+      case 'showLibrary':
+        showMainWindow()
+        break
+      case 'welcome':
+        if (message.protocolVersion !== undefined && message.protocolVersion !== 1) {
+          console.warn(
+            `NoteatoAgent speaks protocol ${message.protocolVersion}; this library speaks 1.`
+          )
+        }
+        break
+      default:
+        break
+    }
+  },
+  (connected) => {
+    // Exclusive ownership: the agent registers the global shortcuts whenever it
+    // is up, and Electron takes them back only if it goes away.
+    globalShortcutManager.setAgentConnected(connected, runtimeSettings())
+  }
+)
 const edgeHoverWatcher = new EdgeHoverWatcher(
   () => {
     const settings = runtimeSettings()
@@ -619,6 +649,7 @@ app.whenReady().then(() => {
   const runtime = runtimeSettings()
   sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
   globalShortcutManager.sync(runtime)
+  if (agentEnabled) agentClient.start()
   edgeHoverWatcher.sync()
   trayManager.setEnabled(shouldKeepRunning())
 
@@ -635,6 +666,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  agentClient.stop()
   globalShortcutManager.destroy()
   edgeHoverWatcher.stop()
   externalWatcher.destroy()

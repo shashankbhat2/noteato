@@ -12,6 +12,13 @@ files:
   - '!**/*.d.ts'
 asar: true
 afterPack: scripts/afterPack.cjs
+# NoteatoAgent lands at Noteato.app/Contents/Resources/NoteatoAgent. It is a
+# helper inside the one bundle rather than a second app: one signature, one
+# updater, and the existing release pipeline is untouched. Residency comes from
+# registering it as a login item, not from being the bundle's main executable.
+extraResources:
+  - from: resources/NoteatoAgent
+    to: NoteatoAgent
 electronLanguages:
   - en
 artifactName: '${productName}-${version}-${arch}.${ext}'

@@ -2,16 +2,14 @@
 //
 //   swift run -c release PanelBench [--budget 80] [--iterations 20] [--gate] [--json]
 //
-// Phase 0.5 measures the AppKit primitive: a borderless non-activating NSPanel
-// of the HUD's size and level. Phase 1 must repoint this at the agent's real
-// HUD type — it lives in this package so it can import it directly, which is
-// the whole reason the benchmark is a target here rather than a replica in
-// bench/.
+// Measures AgentCore.CaptureHUD — the real type the agent shows, not a replica.
+// That is the whole reason this benchmark is a target in this package.
 //
 // What this does NOT measure: the hotkey dispatch itself. RegisterEventHotKey
 // delivery was measured at well under a millisecond during the Phase 0 audit,
 // so the panel is the term that matters. If that assumption ever stops holding,
 // this benchmark will quietly under-report.
+import AgentCore
 import AppKit
 import QuartzCore
 
@@ -31,44 +29,6 @@ struct Args {
         gate = argv.contains("--gate")
         json = argv.contains("--json")
     }
-}
-
-/// A 64-bar waveform, so the panel is doing the HUD's real per-frame drawing
-/// rather than presenting an empty surface.
-final class WaveformView: NSView {
-    override var isOpaque: Bool { true }
-    override func draw(_ dirty: NSRect) {
-        NSColor(white: 0.1, alpha: 1).setFill()
-        dirty.fill()
-        NSColor.white.setFill()
-        let bars = 64
-        let w = bounds.width / CGFloat(bars)
-        for i in 0..<bars {
-            let h = bounds.height * (0.15 + 0.7 * abs(sin(CGFloat(i) * 0.4)))
-            NSRect(x: CGFloat(i) * w, y: (bounds.height - h) / 2, width: w * 0.6, height: h).fill()
-        }
-    }
-}
-
-@MainActor
-func makeHUD() -> NSPanel {
-    let panel = NSPanel(
-        contentRect: NSRect(x: 0, y: 0, width: 420, height: 90),
-        styleMask: [.borderless, .nonactivatingPanel],
-        backing: .buffered,
-        defer: false
-    )
-    panel.isFloatingPanel = true
-    panel.level = .statusBar
-    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-    panel.hasShadow = true
-    panel.isOpaque = true
-    panel.backgroundColor = NSColor(white: 0.1, alpha: 1)
-    panel.contentView = WaveformView(frame: NSRect(x: 0, y: 0, width: 420, height: 90))
-    if let screen = NSScreen.main {
-        panel.setFrameOrigin(NSPoint(x: screen.frame.midX - 210, y: screen.frame.midY - 45))
-    }
-    return panel
 }
 
 func ms(_ from: CFTimeInterval) -> Double { (CACurrentMediaTime() - from) * 1000 }
@@ -94,25 +54,26 @@ func residentMB() -> Double {
 func run(_ args: Args) -> Never {
     NSApplication.shared.setActivationPolicy(.accessory)
 
-    // Cold: first construction pays AppKit's one-time warm-up as well as the panel's.
+    // Cold: construction plus first show, paying AppKit's one-time warm-up.
+    // This is the path a user hits on the first capture after login.
     let coldStart = CACurrentMediaTime()
-    let panel = makeHUD()
-    panel.orderFrontRegardless()
+    let hud = CaptureHUD()
+    hud.show()
     CATransaction.flush()
     let coldMs = ms(coldStart)
 
-    // Warm: the case a user actually hits — the panel exists, hidden, and is shown.
+    // Warm: every subsequent capture, with the HUD already constructed.
     var warm: [Double] = []
     for _ in 0..<args.iterations {
-        panel.orderOut(nil)
+        hud.hide()
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         let start = CACurrentMediaTime()
-        panel.orderFrontRegardless()
+        hud.show()
         CATransaction.flush()
         warm.append(ms(start))
         RunLoop.current.run(until: Date().addingTimeInterval(0.03))
     }
-    panel.orderOut(nil)
+    hud.hide()
     warm.sort()
 
     let median = warm[warm.count / 2]
@@ -140,7 +101,7 @@ func run(_ args: Args) -> Never {
             withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
         print(String(data: data, encoding: .utf8)!)
     } else {
-        print("hotkey → HUD · NSPanel 420×90 · \(args.iterations) warm iterations")
+        print("hotkey → HUD · CaptureHUD · \(args.iterations) warm iterations")
         print("  cold (incl. AppKit warm-up)  \(round(coldMs)) ms")
         print("  warm median                  \(round(median)) ms")
         print("  warm p95                     \(round(p95)) ms")

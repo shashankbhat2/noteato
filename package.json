@@ -1,7 +1,7 @@
 {
   "name": "noteato",
   "version": "1.2.0",
-  "description": "A minimal, bloat-free, block-based note taking app for Mac — markdown, dictation, side-by-side panes. No accounts, no cloud, no lock-in.",
+  "description": "A minimal, bloat-free, block-based note taking app for Mac \u2014 markdown, dictation, side-by-side panes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",
   "license": "MIT",
@@ -17,9 +17,9 @@
     "build": "electron-vite build",
     "clean": "rm -rf dist out",
     "build:mac": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64",
-    "build:mac:arm64": "npm run clean && electron-vite build && electron-builder --mac --arm64",
+    "build:mac:arm64": "npm run clean && npm run build:agent:release && electron-vite build && electron-builder --mac --arm64",
     "build:mac:intel": "npm run clean && electron-vite build && electron-builder --mac --x64",
-    "release": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64 --publish always",
+    "release": "npm run clean && npm run build:agent:release && electron-vite build && electron-builder --mac --arm64 --publish always",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -30,7 +30,9 @@
     "bench:search": "node bench/search/run.mjs",
     "bench:panel": "swift run -c release --package-path agent PanelBench",
     "bench:memory": "electron bench/memory/main.cjs",
-    "bench": "npm run bench:panel && npm run bench:search && npm run bench:memory"
+    "bench": "npm run bench:panel && npm run bench:search && npm run bench:memory",
+    "build:agent:release": "bash scripts/build-agent.sh",
+    "dev:agent": "swift run --package-path agent NoteatoAgent"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
