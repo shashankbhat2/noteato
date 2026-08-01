@@ -7,8 +7,17 @@ import PackageDescription
 let package = Package(
     name: "NoteatoAgent",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // Swift-native Parakeet on the Apple Neural Engine (Apache 2.0).
+        // Chosen over parakeet-mlx because that path is Python, and a Python
+        // runtime cannot live inside a process capped at 150 MB resident.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4")
+    ],
     targets: [
-        .target(name: "AgentCore"),
+        .target(
+            name: "AgentCore",
+            dependencies: [.product(name: "FluidAudio", package: "FluidAudio")]
+        ),
         .executableTarget(
             name: "NoteatoAgent",
             dependencies: ["AgentCore"],
@@ -35,6 +44,21 @@ let package = Package(
         // failures that matter here (permission, device sample rate, encoder)
         // are environmental and invisible to unit tests. Shares the agent's
         // Info.plist so it can ask for the mic at all.
+        // Measures the transcription engine on *this* machine before anything
+        // depends on it: the vendor's realtime figure is an M4 Pro number on
+        // their audio, and §6 asks for latency-per-accuracy, not a claim.
+        .executableTarget(
+            name: "AsrBench",
+            dependencies: ["AgentCore"],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Sources/NoteatoAgent/Info.plist"
+                ])
+            ]
+        ),
         .executableTarget(
             name: "CaptureProbe",
             dependencies: ["AgentCore"],

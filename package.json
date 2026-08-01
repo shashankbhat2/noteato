@@ -33,7 +33,8 @@
     "bench": "npm run bench:panel && npm run bench:search && npm run bench:memory",
     "build:agent:release": "bash scripts/build-agent.sh",
     "dev:agent": "swift run --package-path agent NoteatoAgent",
-    "probe:capture": "swift run -c release --package-path agent CaptureProbe"
+    "probe:capture": "swift run -c release --package-path agent CaptureProbe",
+    "bench:asr": "swift run -c release --package-path agent AsrBench"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

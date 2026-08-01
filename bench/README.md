@@ -5,10 +5,21 @@ criteria, not aspirations — the point of keeping them in the repo is that a nu
 reproduce is a number nobody defends.
 
 ```
-npm run bench            # all three
+npm run bench            # the three §10 gates
 npm run bench:panel      # hotkey → HUD          budget 80 ms
 npm run bench:search     # search, 5k notes      budget 150 ms
 npm run bench:memory     # Electron idle floor   budget 150 MB
+npm run bench:asr        # transcription RTF     budget 0.3x
+npm run probe:capture    # mic → pre-roll → committed file, end to end
+```
+
+`bench:asr` takes `-- --file <audio>` to measure real speech; with no file it synthesises a tone,
+which exercises the pipeline but says nothing about accuracy. A quick way to get real speech with a
+known transcript:
+
+```
+say -v Samantha -o /tmp/speech.aiff "the sentence you want to check"
+npm run bench:asr -- --file /tmp/speech.aiff --json
 ```
 
 Add `-- --json` for machine-readable output, `-- --gate` to exit non-zero on a budget miss.
@@ -74,3 +85,32 @@ depends on a window server whose behaviour on hosted runners is not something to
 And **gate on a median of N runs, publishing the raw number as an artifact**, so drift is visible
 before it trips the gate rather than as a surprise. A gate that goes red for reasons nobody can act
 on protects nothing.
+
+## On-device ASR — measured 2026-08-01
+
+FluidAudio (Parakeet TDT v3) on the M2 reference machine.
+
+| | Measured | Budget | |
+|---|---|---|---|
+| Realtime factor, 5.7 s real speech | **0.02** (57×) | < 0.3 | pass |
+| Realtime factor, 206 s real speech | **0.01** (196×) | < 0.3 | pass |
+| Warm model load | **0.13 s** | — | |
+| Cold first run (incl. download) | **18.4 s** | — | one time |
+| Peak RSS while transcribing | **133 MB** | — | see below |
+| Model cache on disk | **461 MB** | — | not in the DMG |
+| Word-level timings | yes | required by §9 | |
+
+Accuracy on a known sentence was word-perfect, with `ten` rendered as `10` — inverse text
+normalization doing its job, and the right call for a note.
+
+**Two findings that shape the design, not just the score:**
+
+- **Peak memory is ~133 MB and does not scale with audio length** (206 s cost barely more than
+  30 s). But the agent already sits at 55 MB with the mic open, and §10 caps it at 150 MB. Holding
+  the model inside the agent therefore breaks the budget. Transcription belongs in a short-lived
+  helper process that exits when it is done — that keeps the resident agent lean by construction
+  rather than by remembering to unload.
+- **461 MB of model is a real first-run download.** §6 asks for it to be fetched rather than
+  bundled, which keeps the DMG small, but this is large enough to warrant a visible progress state
+  and an honest word before it starts. §9 also wants the app complete offline afterwards, so the
+  failure path when HuggingFace is unreachable needs to be legible rather than a silent hang.
