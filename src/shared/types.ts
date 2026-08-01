@@ -111,9 +111,6 @@ export interface Settings {
   anthropicApiKey: string
   openaiApiKey: string
   aiSelectionActions: boolean
-  aiAgentEnabled: boolean
-  /** Show the assistant chat on the Home view. */
-  homeAssistantEnabled: boolean
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
   /** Make the compact notes/reminders edge window available from the menu bar. */
@@ -162,3 +159,12 @@ export interface AiCompleteRequest {
   model?: string
   provider?: Exclude<AiProvider, 'none'>
 }
+
+/**
+ * The whole-note actions in the floating dock. Deliberately a closed set: AI
+ * acts on a note through explicit actions with visible output, not through a
+ * chat surface (revamp brief §9/§11).
+ */
+export type AiNoteAction = 'summarize' | 'improve' | 'extract' | 'proofread' | 'ask'
+
+

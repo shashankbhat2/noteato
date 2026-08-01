@@ -211,7 +211,7 @@ Ordered by how much they should change the plan.
  `electron-builder.signed.yml.disabled` are parked.
 
 **Correction to an earlier draft of this report, which claimed these permissions require a signed,**\
-** notarized binary. They do not.** Nothing in §3, §7 or §8 needs the Developer Program to *function*:
+ ** notarized binary. They do not.** Nothing in §3, §7 or §8 needs the Developer Program to *function*:
 
 | Capability                         | What it actually requires                                              |
 | ---------------------------------- | ---------------------------------------------------------------------- |
@@ -230,7 +230,7 @@ The entitlements in `build/entitlements.mac.plist` only matter under Hardened Ru
 **Where it does bite is distribution, and one consequence is easy to miss:** TCC keys permission\
  grants to the **cdhash** for ad-hoc binaries, but to the **Designated Requirement** (team ID +\
  bundle ID) for Developer ID binaries. Ad-hoc means every rebuild changes the cdhash, so **every**\
-** Noteato update re-prompts every user for Accessibility and Screen Recording.** Tolerable for today's\
+ ** Noteato update re-prompts every user for Accessibility and Screen Recording.** Tolerable for today's\
  mic-only app; corrosive for one whose pitch is "always resident, injects into your apps." Add that\
  macOS 15+ removed the right-click→Open bypass, and that unsigned + unnotarized + Accessibility +\
  Screen Recording + open mic is optically indistinguishable from malware — awkward for an app whose\
@@ -335,7 +335,7 @@ The architecture call in §2 is correct and the measurements support it independ
 Three things need your decision. They're product calls, not engineering ones, and two of them are\
  hard to reverse — but only the last two block code:
 
-1. **The chat assistants** (§5b) — delete both, keep the named-action AI surfaces, or keep one.
+1. **The chat assistants** (§5b) — delete both, keep the named-action AI surfacesHello. , or keep one.
 2. **Tags** (§5c) and **scratch notes** (§5i) — what happens to data already on users' disks.
 3. **Apple Developer Program enrollment** (§5a) — gates the *release* of Phases 1–4, not the
 

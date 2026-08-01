@@ -1,9 +1,5 @@
 import { useRef } from 'react'
-import {
-  IconLayoutSidebar as PanelLeft,
-  IconSettings as Settings,
-  IconSparkle as Sparkles
-} from '@tabler/icons-react'
+import { IconLayoutSidebar as PanelLeft, IconSettings as Settings } from '@tabler/icons-react'
 import ShortcutsHelp from './ShortcutsHelp'
 
 const DOUBLE_CLICK_MS = 400
@@ -11,24 +7,19 @@ const DOUBLE_CLICK_MS = 400
 interface Props {
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
-  onOpenAssistant: () => void
   onOpenSettings: () => void
-  assistantOpen: boolean
-  assistantAvailable: boolean
 }
 
 /**
  * The window's drag region. The sidebar toggle sits at the leading edge by the
  * traffic lights; the trailing end collects the things that aren't about any
- * one note — the assistant, settings, and the shortcut sheet.
+ * one note — settings and the shortcut sheet. Anything that acts *on* a note
+ * lives in that note's action bar instead.
  */
 export default function TitleBar({
   sidebarCollapsed,
   onToggleSidebar,
-  onOpenAssistant,
-  onOpenSettings,
-  assistantOpen,
-  assistantAvailable
+  onOpenSettings
 }: Props) {
   const isMac = window.electron.process.platform === 'darwin'
 
@@ -62,15 +53,6 @@ export default function TitleBar({
       </div>
 
       <div className="title-bar-trailing">
-        {assistantAvailable && (
-          <button
-            className={assistantOpen ? 'title-bar-btn active' : 'title-bar-btn'}
-            onClick={onOpenAssistant}
-            title="Assistant"
-          >
-            <Sparkles size={16} />
-          </button>
-        )}
         <button
           className="title-bar-btn"
           onClick={onOpenSettings}

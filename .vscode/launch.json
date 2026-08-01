@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Debug PanelBench (agent)",
+            "target": "PanelBench",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug PanelBench (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Release PanelBench (agent)",
+            "target": "PanelBench",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release PanelBench (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Debug NoteatoAgent (agent)",
+            "target": "NoteatoAgent",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug NoteatoAgent (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Release NoteatoAgent (agent)",
+            "target": "NoteatoAgent",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release NoteatoAgent (agent)"
+        }
+    ]
+}

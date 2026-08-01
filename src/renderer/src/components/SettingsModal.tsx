@@ -145,9 +145,7 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     accent,
     setAccent,
     aiSelectionActions,
-    setAiSelectionActions,
-    aiAgentEnabled,
-    setAiAgentEnabled
+    setAiSelectionActions
   } = useTheme()
   const [tab, setTab] = useState<SettingsTab>('general')
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -188,8 +186,9 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
       anthropicApiKey: settings.anthropicApiKey,
       openaiApiKey: settings.openaiApiKey
     })
+    // Clearing the last key leaves the note actions with nothing to run.
     if (!settings.anthropicApiKey.trim() && !settings.openaiApiKey.trim()) {
-      setAiAgentEnabled(false)
+      setAiSelectionActions(false)
     }
     window.dispatchEvent(new Event('noteato:ai-settings-changed'))
     setAiSaved(true)
@@ -466,23 +465,17 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
         </Group>
 
         <Group label="Features">
-          <Row label="Selection actions" description="Summarise, improve, and extract in place">
-            <Switch
-              checked={aiSelectionActions}
-              onToggle={() => setAiSelectionActions(!aiSelectionActions)}
-            />
-          </Row>
           <Row
-            label="Agent panel"
+            label="Note actions"
             description={
               hasAnyAiKey
-                ? 'Chat with and edit the active note'
+                ? 'Summarize, proofread and ask, from the bar under each note'
                 : 'Add an API key above to enable this'
             }
           >
             <Switch
-              checked={aiAgentEnabled}
-              onToggle={() => setAiAgentEnabled(!aiAgentEnabled)}
+              checked={aiSelectionActions}
+              onToggle={() => setAiSelectionActions(!aiSelectionActions)}
               disabled={!hasAnyAiKey}
             />
           </Row>

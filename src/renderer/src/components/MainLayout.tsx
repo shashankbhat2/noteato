@@ -9,6 +9,7 @@ import {
   type PaneView
 } from '../panes'
 import { useTheme } from '../theme'
+import NoteAiPanel, { type AiPanelSubject } from './NoteAiPanel'
 import { linkifyBlocks } from '../linkify'
 import { OPEN_NOTE_LINK_EVENT, type NoteatoEditor } from '../noteLink'
 import Sidebar from './Sidebar'
@@ -16,7 +17,6 @@ import TitleBar from './TitleBar'
 import PaneControls from './PaneControls'
 import TrashView from './TrashView'
 import HomeView from './HomeView'
-import AgentPanel from './AgentPanel'
 import NoteEditor from './NoteEditor'
 import SettingsModal from './SettingsModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -50,7 +50,7 @@ function readStoredPanes(): StoredPanes | null {
       (entry: unknown): entry is StoredPane =>
         typeof entry === 'object' &&
         entry !== null &&
-        ['note', 'home', 'assistant', 'trash'].includes((entry as StoredPane).view?.kind)
+        ['note', 'home', 'trash'].includes((entry as StoredPane).view?.kind)
     )
     return {
       panes,
@@ -81,7 +81,8 @@ const noteView = (note: OpenTarget): PaneView => ({
 })
 
 export default function MainLayout() {
-  const { aiAgentEnabled } = useTheme()
+  const { aiSelectionActions } = useTheme()
+  const [aiPanelError, setAiPanelError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [trash, setTrash] = useState<TrashEntry[]>([])
   // The working area, left to right. Always at least one pane: closing the
@@ -90,7 +91,7 @@ export default function MainLayout() {
   const [focusedKey, setFocusedKey] = useState<string>('')
   const [paneRatios, setPaneRatios] = useState<number[]>([1])
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
-  /** Id of the note pane focused most recently — the assistant's subject. */
+  /** Id of the note pane focused most recently — feeds Home's Recent cards. */
   const [lastNoteId, setLastNoteId] = useState<string | null>(null)
   const [draggingNote, setDraggingNote] = useState<NoteSummary | null>(null)
   const [recentIds, setRecentIds] = useState<string[]>(() => {
@@ -117,7 +118,22 @@ export default function MainLayout() {
     0,
     panes.findIndex((pane) => pane.key === focusedKey)
   )
+  useEffect(() => {
+    if (!aiPanelError) return undefined
+    const timer = setTimeout(() => setAiPanelError(null), 4000)
+    return () => clearTimeout(timer)
+  }, [aiPanelError])
+
   const focusedPane = panes[focusedIndex]
+  // The AI panel's subject: whichever note pane has focus. A non-note pane
+  // (Home, Trash) leaves it null, and the panel says so rather than quietly
+  // acting on the last note you happened to be in.
+  const aiSubject: AiPanelSubject | null =
+    focusedPane?.view.kind === 'note'
+      ? { id: focusedPane.view.id, title: focusedPane.view.title }
+      : null
+  const focusedEditor = (): NoteatoEditor | null =>
+    aiSubject ? (editorsRef.current.get(aiSubject.id) ?? null) : null
   const ratios =
     paneRatios.length === panes.length ? paneRatios : Array<number>(panes.length).fill(1 / panes.length)
 
@@ -132,36 +148,7 @@ export default function MainLayout() {
     else editorsRef.current.delete(id)
   }
 
-  const getAgentMarkdown = async (noteId: string): Promise<string | null> => {
-    const editor = editorsRef.current.get(noteId)
-    return editor ? editor.blocksToMarkdownLossy(editor.document) : null
-  }
 
-  const applyAgentMarkdown = async (noteId: string, markdown: string): Promise<string[]> => {
-    const editor = editorsRef.current.get(noteId)
-    if (!editor || !markdown.trim()) return []
-    const parsed = linkifyBlocks(await editor.tryParseMarkdownToBlocks(markdown))
-    if (parsed.length === 0) return []
-    const { insertedBlocks } = editor.replaceBlocks(editor.document, parsed)
-    const ids = insertedBlocks.map((block) => block.id)
-    window.requestAnimationFrame(() => {
-      for (const id of ids) {
-        const element = document.querySelector<HTMLElement>(
-          `[data-node-type="blockOuter"][data-id="${CSS.escape(id)}"]`
-        )
-        if (element) element.dataset.agentChanged = 'true'
-      }
-      window.setTimeout(() => {
-        for (const id of ids) {
-          const element = document.querySelector<HTMLElement>(
-            `[data-node-type="blockOuter"][data-id="${CSS.escape(id)}"]`
-          )
-          if (element) delete element.dataset.agentChanged
-        }
-      }, 2600)
-    })
-    return ids
-  }
 
   const toggleSidebar = (): void => {
     setSidebarCollapsed((prev) => {
@@ -481,16 +468,8 @@ export default function MainLayout() {
 
   // Create a note the agent asked for. The library is flat, so all it picks is
   // a title.
-  const handleAgentCreateNote = async (title: string, markdown: string): Promise<Note | null> => {
-    const clean = title.replace(/\.md$/i, '').trim() || 'Untitled'
-    const created = await window.api.notes.create(clean)
-    const saved = await window.api.notes.save(created.path, { title: clean, body: markdown })
-    await refresh()
-    return saved
-  }
 
-  // Feeds the Home view's Recent cards, and gives the assistant a subject that
-  // survives focus moving into the chat itself (see assistantContext).
+  // Feeds the Home view's Recent cards.
   useEffect(() => {
     if (focusedPane?.view.kind !== 'note') return
     const id = focusedPane.view.id
@@ -785,35 +764,6 @@ export default function MainLayout() {
     }
   }, [])
 
-  const assistantOpen = panes.some((pane) => pane.view.kind === 'assistant')
-
-  const toggleAssistant = (): void => {
-    const existing = panes.find((pane) => pane.view.kind === 'assistant')
-    if (existing) closePane(existing.key)
-    else openInNewPane({ kind: 'assistant' })
-  }
-
-  /**
-   * The notes the assistant is working on: whatever else is on screen. The
-   * focused note pane is the subject, and a second note pane rides along as
-   * read-only context. With nothing beside it there is no subject — better
-   * than guessing at a note the user can't see.
-   */
-  const assistantContext = (): { note: OpenTarget | null; splitNote: OpenTarget | null } => {
-    const others = panes
-      .map((pane) => pane.view)
-      .filter((view): view is Extract<PaneView, { kind: 'note' }> => view.kind === 'note')
-    // The last note pane you were in leads — not the currently focused pane,
-    // which is the assistant itself the moment you click into the chat. Using
-    // the live focus would silently switch the subject to whichever note
-    // happens to be leftmost as soon as you started typing.
-    const lead =
-      (lastNoteId ? others.find((view) => view.id === lastNoteId) : undefined) ??
-      others[0] ??
-      null
-    return { note: lead, splitNote: others.find((view) => view.id !== lead?.id) ?? null }
-  }
-
   const renderPaneBody = (pane: Pane, index: number): React.ReactNode => {
     const view = pane.view
     const controls = (
@@ -837,21 +787,6 @@ export default function MainLayout() {
             paneControls={controls}
           />
         )
-      case 'assistant': {
-        const { note, splitNote } = assistantContext()
-        return (
-          <AgentPanel
-            note={note}
-            splitNote={splitNote}
-            notes={notes}
-            getMarkdown={getAgentMarkdown}
-            applyMarkdown={applyAgentMarkdown}
-            createNote={handleAgentCreateNote}
-            onOpenNote={(target) => openInFocused(noteView(target))}
-            paneControls={controls}
-          />
-        )
-      }
       case 'trash':
         return (
           <TrashView
@@ -880,10 +815,7 @@ export default function MainLayout() {
       <TitleBar
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}
-        onOpenAssistant={toggleAssistant}
         onOpenSettings={() => setSettingsOpen(true)}
-        assistantOpen={assistantOpen}
-        assistantAvailable={aiAgentEnabled}
       />
       <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
         <Sidebar
@@ -927,7 +859,7 @@ export default function MainLayout() {
               )}
               <main
                 className={
-                  `editor-pane${pane.view.kind === 'assistant' ? ' fills-pane' : ''}` +
+                  'editor-pane' +
                   (pane.key === focusedKey && panes.length > 1 ? ' focused' : '')
                 }
                 style={{ flex: `${ratios[index]} 1 0%` }}
@@ -935,18 +867,11 @@ export default function MainLayout() {
                 onMouseDown={() => setFocusedKey(pane.key)}
               >
                 {/* A note's shell has to span the pane even when the note is
-                    short, so the dictation button docks to the pane's bottom
+                    short, so the action bar docks to the pane's bottom
                     rather than to the end of the text. A flex column is what
                     makes `flex: 1` on the shell resolve — a percentage height
-                    can't, since the wrapper's own height is auto. The assistant
-                    manages its own scrolling and needs a bounded height. */}
-                <div
-                  style={
-                    pane.view.kind === 'assistant'
-                      ? { height: '100%' }
-                      : { display: 'flex', flexDirection: 'column', minHeight: '100%' }
-                  }
-                >
+                    can't, since the wrapper's own height is auto. */}
+                <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
                   {renderPaneBody(pane, index)}
                 </div>
               </main>
@@ -1045,6 +970,16 @@ export default function MainLayout() {
           <span>{notionImportStatus}</span>
         </div>
       )}
+
+      {/* One dictation + AI panel for the whole layout, following the focused
+          note. Selection actions stay in the note's own bubble menu. */}
+      <NoteAiPanel
+        subject={aiSubject}
+        getEditor={focusedEditor}
+        aiEnabled={aiSelectionActions}
+        onError={setAiPanelError}
+      />
+      {aiPanelError && <div className="ai-error-toast">{aiPanelError}</div>}
     </div>
   )
 }

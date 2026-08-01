@@ -28,7 +28,13 @@ function isEditCommand(text: string): boolean {
   return EDIT_COMMAND_PATTERNS.some((re) => re.test(trimmed))
 }
 
-export function useDictation(editor: NoteatoEditor): {
+/**
+ * `editor` may be null — with one dictation control for the whole layout, there
+ * is nothing to dictate into until a note pane has focus. The editor is read at
+ * start(), so a recording keeps writing into the note it began in even if focus
+ * moves away mid-sentence.
+ */
+export function useDictation(editor: NoteatoEditor | null): {
   isRecording: boolean
   error: string | null
   analyser: AnalyserNode | null
@@ -60,6 +66,10 @@ export function useDictation(editor: NoteatoEditor): {
 
   const start = async (): Promise<void> => {
     setError(null)
+    if (!editor) {
+      setError('Open a note to dictate into first.')
+      return
+    }
     const settings = await window.api.settings.get()
     if (!settings.deepgramApiKey) {
       setError('Add a Deepgram API key in Settings to use dictation.')

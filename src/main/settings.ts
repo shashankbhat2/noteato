@@ -35,8 +35,6 @@ export function createSettingsStore(): JsonStore<Settings> {
     anthropicApiKey: '',
     openaiApiKey: '',
     aiSelectionActions: true,
-    aiAgentEnabled: false,
-    homeAssistantEnabled: true,
     keepInMenuBar: true,
     sidebarModeEnabled: true,
     sidebarPinned: true,

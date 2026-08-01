@@ -1,28 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  IconArrowUp as ArrowUp,
   IconBell as Bell,
-  IconBulb as Bulb,
-  IconChevronDown as ChevronDown,
   IconChevronLeft as ChevronLeft,
   IconChevronRight as ChevronRight,
   IconFileText as FileText,
   IconGripVertical as Grip,
-  IconListCheck as ListCheck,
-  IconPencil as Pencil,
   IconPin as Pin,
   IconPlus as Plus,
-  IconSparkle as Sparkles,
-  IconSquare as Square,
   IconX as X
 } from '@tabler/icons-react'
 import type { NoteSummary, Settings } from '../../../shared/types'
-import { aiStream } from '../ai/client'
-import { CHEAP_AI_MODELS } from '../ai/models'
-import MarkdownText from './MarkdownText'
 
-const CHAT_KEY = 'noteato:homeChat'
-const MODEL_KEY = 'noteato:homeModel'
 const ORDER_KEY = 'noteato:homeOrder'
 
 type SectionId = 'recent' | 'pinned' | 'reminders'
@@ -41,13 +29,7 @@ function readOrder(): SectionId[] {
     return DEFAULT_ORDER
   }
 }
-const MAX_STORED_MESSAGES = 40
 const RECENT_CARD_LIMIT = 6
-
-interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
 
 interface Props {
   notes: NoteSummary[]
@@ -57,36 +39,6 @@ interface Props {
   onSetReminder: (note: NoteSummary, reminderAt: string | null) => void
   /** This pane's move/close controls; empty when only one pane is open. */
   paneControls?: React.ReactNode
-}
-
-interface ModelOption {
-  id: string
-  label: string
-  provider: 'anthropic' | 'openai'
-}
-
-/**
- * Only models whose provider actually has a key on file — a picker that can
- * offer an unusable model is worse than no picker.
- */
-function availableModels(settings: Settings): ModelOption[] {
-  const out: ModelOption[] = []
-  if (settings.anthropicApiKey.trim()) {
-    for (const model of CHEAP_AI_MODELS.anthropic) out.push({ ...model, provider: 'anthropic' })
-  }
-  if (settings.openaiApiKey.trim()) {
-    for (const model of CHEAP_AI_MODELS.openai) out.push({ ...model, provider: 'openai' })
-  }
-  return out
-}
-
-function readStoredChat(): ChatMessage[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(CHAT_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
 }
 
 // Verb-flavoured greetings, bucketed by time of day; one is drawn at random
@@ -118,232 +70,6 @@ function dayKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
 }
 
-// --- Assistant panel --------------------------------------------------------
-
-const SUGGESTIONS: { icon: React.ReactNode; label: string }[] = [
-  { icon: <Pencil size={15} />, label: 'Help me outline a note' },
-  { icon: <Bulb size={15} />, label: 'Brainstorm ideas with me' },
-  { icon: <ListCheck size={15} />, label: 'Plan my day' }
-]
-
-/**
- * Composer docked to the bottom of the Home container. Collapsed it is just
- * the input; focusing it expands the chat upward from the same anchor, over a
- * blurred backdrop. The dock stays mounted while collapsed, so a reply can
- * keep streaming in the background, and the thread itself lives in
- * localStorage so leaving Home parks the conversation.
- */
-function AssistantDock({ settings }: { settings: Settings }) {
-  const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState<ChatMessage[]>(readStoredChat)
-  const [input, setInput] = useState('')
-  const [pending, setPending] = useState(false)
-  const [streamText, setStreamText] = useState('')
-  const cancelRef = useRef<(() => void) | null>(null)
-  const threadRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const name = settings.userName.trim()
-
-  const models = useMemo(() => availableModels(settings), [settings])
-  const [modelId, setModelId] = useState<string>(() => localStorage.getItem(MODEL_KEY) ?? '')
-  // A stored choice can outlive its key being removed — fall back rather than
-  // sending a request that is guaranteed to fail.
-  const activeModel = models.find((model) => model.id === modelId) ?? models[0] ?? null
-  const configured = Boolean(activeModel)
-
-  useEffect(() => {
-    localStorage.setItem(CHAT_KEY, JSON.stringify(messages.slice(-MAX_STORED_MESSAGES)))
-  }, [messages])
-
-  useEffect(() => {
-    const thread = threadRef.current
-    if (thread) thread.scrollTop = thread.scrollHeight
-  }, [messages, streamText, open])
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
-
-  // Leaving Home mid-stream resolves the request with what has streamed so
-  // far (see ai/client), rather than leaving it running headless. Collapsing
-  // the dock does not cancel — the dock stays mounted and keeps streaming.
-  useEffect(() => () => cancelRef.current?.(), [])
-
-  const send = async (text?: string): Promise<void> => {
-    const content = (text ?? input).trim()
-    if (!content || pending || !activeModel) return
-    setOpen(true)
-    const userMessage: ChatMessage = { role: 'user', content }
-    const history = [...messages, userMessage]
-    setMessages(history)
-    setInput('')
-    setPending(true)
-    setStreamText('')
-
-    const transcript = history
-      .slice(-12)
-      .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
-      .join('\n\n')
-    let streamed = ''
-    try {
-      const raw = await aiStream(
-        settings,
-        {
-          system:
-            'You are the Noteato home assistant: a concise, helpful general assistant inside a note-taking app. Answer in markdown. Keep replies short unless asked for depth.',
-          prompt: transcript,
-          maxTokens: 4096,
-          provider: activeModel.provider,
-          model: activeModel.id
-        },
-        (delta) => {
-          streamed += delta
-          setStreamText(streamed)
-        },
-        (cancel) => {
-          cancelRef.current = cancel
-        }
-      )
-      const reply = (raw || streamed).trim()
-      if (reply) setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
-    } catch (error) {
-      const partial = streamed.trim()
-      const message =
-        partial || (error instanceof Error ? error.message : 'Something went wrong — try again.')
-      setMessages((prev) => [...prev, { role: 'assistant', content: message }])
-    } finally {
-      cancelRef.current = null
-      setPending(false)
-      setStreamText('')
-    }
-  }
-
-  const empty = messages.length === 0 && !pending
-
-  return (
-    <>
-      {open && <div className="home-ai-backdrop" onClick={() => setOpen(false)} />}
-      <div className={open ? 'home-ai-dock open' : 'home-ai-dock'}>
-        {open && (
-          <div className="home-ai-expand">
-            <header className="home-ai-head">
-              <span className="home-ai-title">Assistant</span>
-              <span className="home-ai-head-actions">
-                {messages.length > 0 && (
-                  <button title="New chat" onClick={() => setMessages([])}>
-                    <Plus size={15} />
-                  </button>
-                )}
-                <button title="Collapse" onClick={() => setOpen(false)}>
-                  <ChevronDown size={15} />
-                </button>
-              </span>
-            </header>
-
-            {empty ? (
-              <div className="home-ai-hero">
-                <span className="home-ai-avatar">
-                  <Sparkles size={22} />
-                </span>
-                <div className="home-ai-greet">
-                  {timeOfDayLabel()}
-                  {name ? `, ${name}` : ''}
-                </div>
-                <div className="home-ai-sub">What can I do for you?</div>
-                <div className="home-ai-suggestions">
-                  {SUGGESTIONS.map((suggestion) => (
-                    <button
-                      key={suggestion.label}
-                      className="home-ai-suggestion"
-                      onClick={() => void send(suggestion.label)}
-                      disabled={!configured}
-                    >
-                      <span className="home-ai-suggestion-icon">{suggestion.icon}</span>
-                      <span>{suggestion.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="home-chat-thread home-ai-thread" ref={threadRef}>
-                {messages.map((message, index) => (
-                  <div key={index} className={`home-chat-msg ${message.role}`}>
-                    <MarkdownText text={message.content} />
-                  </div>
-                ))}
-                {pending && (
-                  <div className="home-chat-msg assistant">
-                    {streamText ? (
-                      <MarkdownText text={streamText} />
-                    ) : (
-                      <span className="home-chat-thinking">Thinking…</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="home-chat-inputwrap home-ai-inputwrap">
-          <Sparkles size={16} className="home-chat-glyph" />
-          <input
-            ref={inputRef}
-            value={input}
-            placeholder={configured ? 'Do anything with AI…' : 'Add an API key in Settings'}
-            disabled={!configured}
-            onFocus={() => setOpen(true)}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !pending) void send()
-            }}
-          />
-          {activeModel && models.length > 1 && (
-            <select
-              className="home-ai-model"
-              value={activeModel.id}
-              title="Model"
-              onChange={(event) => {
-                setModelId(event.target.value)
-                localStorage.setItem(MODEL_KEY, event.target.value)
-              }}
-            >
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label}
-                </option>
-              ))}
-            </select>
-          )}
-          {pending ? (
-            <button className="home-chat-send" title="Stop" onClick={() => cancelRef.current?.()}>
-              <Square size={13} />
-            </button>
-          ) : (
-            <button
-              className="home-chat-send"
-              title="Send"
-              disabled={!input.trim() || !configured}
-              onClick={() => void send()}
-            >
-              <ArrowUp size={15} />
-            </button>
-          )}
-        </div>
-      </div>
-    </>
-  )
-}
-
-// --- Calendar ---------------------------------------------------------------
-
-// Half-hour slots from 6am to 11:30pm — the range reminders realistically
-// land in, at the granularity people actually pick.
 const TIME_SLOTS: string[] = (() => {
   const out: string[] = []
   for (let hour = 6; hour <= 23; hour += 1) {
@@ -793,12 +519,6 @@ export default function HomeView({
   )
   const pinned = useMemo(() => notes.filter((note) => note.pinned), [notes])
 
-  const setAssistantEnabled = (enabled: boolean): void => {
-    if (!settings) return
-    setSettings({ ...settings, homeAssistantEnabled: enabled })
-    void window.api.settings.set({ homeAssistantEnabled: enabled })
-  }
-
   // While dragging, follow the pointer: work out which slot it is over from the
   // rendered midpoints and reorder immediately, so sections slide out of the
   // way as you move rather than only settling on release.
@@ -913,25 +633,11 @@ export default function HomeView({
           {name && <span className="home-greeting-name">, {name}</span>}
         </h1>
         <div className="view-header-actions">
-          <label className="home-assistant-toggle">
-            <span>Assistant</span>
-            <button
-              className={settings.homeAssistantEnabled ? 'settings-switch on' : 'settings-switch'}
-              role="switch"
-              aria-checked={settings.homeAssistantEnabled}
-              onClick={() => setAssistantEnabled(!settings.homeAssistantEnabled)}
-            >
-              <span className="settings-switch-knob" />
-            </button>
-          </label>
           {paneControls}
         </div>
       </header>
 
       {order.map(renderSection)}
-
-      {/* Disabling the assistant removes the composer entirely, input included. */}
-      {settings.homeAssistantEnabled && <AssistantDock settings={settings} />}
     </div>
   )
 }

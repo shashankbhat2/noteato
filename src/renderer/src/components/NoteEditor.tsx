@@ -34,7 +34,6 @@ import {
   type NoteatoBlock,
   type NoteatoEditor
 } from '../noteLink'
-import DictationPanel from './DictationPanel'
 import FindReplaceBar from './FindReplaceBar'
 import SelectionAiToolbar from './SelectionAiToolbar'
 import SelectionAiPopup from './SelectionAiPopup'
@@ -864,13 +863,6 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
         )}
       </div>
 
-      {/* Dictation floats over the bottom-right of the note card it writes
-          into, rather than sitting in the toolbar with the note's actions.
-          A sibling of .note-editor so it tracks the card's edge, not the
-          centred text column. */}
-      <div className="note-dictation-dock">
-        <DictationPanel editor={editor} />
-      </div>
 
       {aiError && <div className="ai-error-toast">{aiError}</div>}
       {ctxMenu && (
