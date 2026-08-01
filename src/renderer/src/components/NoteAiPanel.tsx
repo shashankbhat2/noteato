@@ -35,9 +35,9 @@ interface ChatTurn {
 }
 
 /**
- * The Chat tab for one note. It replaces the writing surface rather than
- * floating above it, while selection-level AI remains beside the selected
- * text in the editor's bubble menu.
+ * The collapsible Chat drawer for one note. It remains mounted while closed so
+ * its draft and thread survive, while selection-level AI stays beside the
+ * selected text in the editor's bubble menu.
  */
 export default function NoteAiPanel({
   subject,

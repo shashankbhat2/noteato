@@ -62,6 +62,8 @@ let package = Package(
                 ])
             ]
         ),
+        // Pins a dictation failure to a stage instead of "nothing appeared".
+        .executableTarget(name: "DictateProbe", dependencies: ["AgentCore"]),
         // Answers §8's screen-capture permission question, which only the OS can.
         .executableTarget(name: "MeetingProbe", dependencies: ["AgentCore"]),
         // Answers §7's compatibility question, which only a real app can.

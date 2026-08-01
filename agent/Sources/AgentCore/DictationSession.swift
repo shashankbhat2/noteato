@@ -26,6 +26,13 @@ public actor DictationSession {
 
     private var manager: SlidingWindowAsrManager?
     private var pump: Task<Void, Never>?
+    /// Audio arrives on the capture thread and must reach the decoder in the
+    /// order it was spoken. An unstructured `Task` per buffer does not promise
+    /// that — they race, and the sliding window reassembles scrambled audio
+    /// into confident nonsense. A single stream with one consumer is what makes
+    /// the ordering a property of the design rather than a hope.
+    private var feed: AsyncStream<[Float]>.Continuation?
+    private var feeder: Task<Void, Never>?
     private var state: State = .idle
     /// Everything injected so far this session, so spacing can be decided from
     /// what is actually in front of the caret rather than guessed.
@@ -66,6 +73,29 @@ public actor DictationSession {
             try await asr.startStreaming(source: .microphone)
             manager = asr
 
+            let (stream, continuation) = AsyncStream<[Float]>.makeStream(
+                bufferingPolicy: .bufferingNewest(64))
+            feed = continuation
+            let rate = captureSampleRate
+            feeder = Task {
+                for await samples in stream {
+                    guard !Task.isCancelled else { return }
+                    guard
+                        let format = AVAudioFormat(
+                            commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1,
+                            interleaved: false),
+                        let buffer = AVAudioPCMBuffer(
+                            pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
+                    else { continue }
+                    buffer.frameLength = AVAudioFrameCount(samples.count)
+                    samples.withUnsafeBufferPointer { src in
+                        buffer.floatChannelData![0].update(
+                            from: src.baseAddress!, count: samples.count)
+                    }
+                    await asr.streamAudio(buffer)
+                }
+            }
+
             pump = Task { [weak self] in
                 for await update in await asr.transcriptionUpdates {
                     guard !Task.isCancelled else { return }
@@ -79,27 +109,26 @@ public actor DictationSession {
         }
     }
 
-    /// Feed audio from the agent's existing microphone tap.
+    /// The rate the microphone is running at. Set before `start()`; the feeder
+    /// captures it once rather than trusting each buffer to carry it.
+    private var captureSampleRate: Double = 48_000
+
+    public func setSampleRate(_ rate: Double) {
+        captureSampleRate = rate
+    }
+
+    /// Hand audio to the decoder, in order.
     ///
     /// Takes samples rather than an `AVAudioPCMBuffer` because that class is
-    /// not `Sendable`: handing one across the actor boundary would be a real
-    /// race, not a compiler technicality — the audio thread reuses its buffers.
-    /// The caller copies on the audio thread, which is a memcpy, and this
-    /// rebuilds a buffer on the far side.
-    public func accept(samples: [Float], sampleRate: Double) async {
-        guard state == .listening, let manager else { return }
-        guard
-            let format = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1,
-                interleaved: false),
-            let buffer = AVAudioPCMBuffer(
-                pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
-        else { return }
-        buffer.frameLength = AVAudioFrameCount(samples.count)
-        samples.withUnsafeBufferPointer { src in
-            buffer.floatChannelData![0].update(from: src.baseAddress!, count: samples.count)
-        }
-        await manager.streamAudio(buffer)
+    /// not `Sendable` and the audio thread reuses its buffers — a real race,
+    /// not a compiler technicality. Yielding to a stream is non-blocking, so
+    /// this is safe to call from the capture callback.
+    public nonisolated func accept(samples: [Float]) {
+        Task { await self.enqueue(samples) }
+    }
+
+    private func enqueue(_ samples: [Float]) {
+        feed?.yield(samples)
     }
 
     private func handle(_ update: SlidingWindowTranscriptionUpdate) {
@@ -116,6 +145,13 @@ public actor DictationSession {
     /// Stop, flushing whatever the decoder was still holding.
     @discardableResult
     public func stop() async -> String {
+        feed?.finish()
+        feed = nil
+        // Let the feeder drain what it still holds before finish() is asked
+        // for the total — otherwise the tail is computed against audio the
+        // decoder has not seen yet.
+        await feeder?.value
+        feeder = nil
         pump?.cancel()
         pump = nil
 

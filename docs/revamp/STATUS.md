@@ -13,7 +13,7 @@ Last updated: 2026-08-01, end of Phase 3.
 |---|---|---|
 | **0 — Audit** | ✅ done | Report + measured baselines |
 | **0.5A — Test & benchmark groundwork** | ✅ done | Vitest, Swift package, 3 benchmarks, docs archived |
-| **0.5B — AI surface** | ✅ done | Per-note Chat tab; no floating dock |
+| **0.5B — AI surface** | ✅ done | Per-note bottom Chat drawer; no separate page surface |
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
 | **1.5 — Identity migration** | ✅ done | Notes keyed on id; renames no longer move a note out from under an open pane |
 | **2 — Capture path** | 🟨 mostly | Mic, pre-roll, commit to the §4.3 format. **Library migration not done** — see below |
@@ -38,10 +38,11 @@ npm install
 npm run dev
 ```
 
-Each note pane has **Note · Transcription · Chat** tabs above the title. Note is the block editor;
-Chat replaces it with a conversation and whole-note actions scoped to that note. Transcription is
-visible but disabled until Phases 2–3 provide recording and ASR state. Selection actions remain in
-the bubble menu except on the fixed title H1. AI needs an Anthropic or OpenAI key in Settings.
+Each note pane has **Note · Transcript** tabs below the title and before the date. Transcript remains
+disabled until recording and ASR state are exposed to the renderer. A gesture-style pill at the
+bottom opens a glass Chat drawer over the note; its conversation and whole-note actions stay scoped
+to that note. Selection actions remain in the bubble menu except on the fixed title H1. AI needs an
+Anthropic or OpenAI key in Settings.
 
 ### The agent (Phase 1)
 

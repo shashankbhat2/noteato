@@ -349,7 +349,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictating = true
         refreshStatusItem()
 
+        let micRate = mic.sampleRate
         Task { [dictation] in
+            await dictation.setSampleRate(micRate)
             await dictation.setHandlers(
                 onPhrase: { phrase in
                     DispatchQueue.main.async {
@@ -378,8 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let channels = pcm.floatChannelData, pcm.frameLength > 0 else { return }
             let samples = Array(
                 UnsafeBufferPointer(start: channels[0], count: Int(pcm.frameLength)))
-            let rate = pcm.format.sampleRate
-            Task { await dictation.accept(samples: samples, sampleRate: rate) }
+            dictation.accept(samples: samples)
         }
     }
 

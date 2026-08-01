@@ -82,7 +82,7 @@ struct DictationSessionTests {
         // The microphone tap is always running; dictation just is not always
         // listening to it.
         let session = DictationSession()
-        await session.accept(samples: [0.1, 0.2, 0.3], sampleRate: 48_000)
+        session.accept(samples: [0.1, 0.2, 0.3])
         #expect(await session.currentState() == .idle)
     }
 

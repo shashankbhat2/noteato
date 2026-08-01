@@ -22,7 +22,6 @@ import {
   IconFileText as FileText,
   IconMicrophone as Microphone,
   IconPhoto as Photo,
-  IconSparkle as Sparkle,
   IconStar as Star,
   IconStarFilled as StarFilled
 } from '@tabler/icons-react'
@@ -72,7 +71,7 @@ interface AiPopupState {
   position: { x: number; y: number } | null
 }
 
-type NoteSurface = 'note' | 'transcription' | 'chat'
+type NoteSurface = 'note' | 'transcription'
 
 const SAVE_DEBOUNCE_MS = 600
 
@@ -298,13 +297,24 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
   const [activeSurface, setActiveSurface] = useState<NoteSurface>('note')
+  const [chatOpen, setChatOpen] = useState(false)
   const [outlineVisible, setOutlineVisible] = useState(false)
   const [isSwitchingNote, setIsSwitchingNote] = useState(false)
 
   useEffect(() => {
     setActiveSurface('note')
+    setChatOpen(false)
     setOutlineVisible(false)
   }, [noteId])
+
+  useEffect(() => {
+    if (!chatOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setChatOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [chatOpen])
   const overflowBtnRef = useRef<HTMLButtonElement>(null)
   // The overflow menu is built at click time from these, not from the render
   // closure that happened to create the handler.
@@ -1183,8 +1193,32 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             />
           </div>
 
-          {/* The date stays below the title as a quiet document attribute. */}
+          {/* Document surfaces sit immediately below the title, followed by
+              the date as a quiet document attribute. */}
           <div ref={metadataRef} className="note-metadata-row">
+            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'note'}
+                className={activeSurface === 'note' ? 'active' : ''}
+                onClick={() => setActiveSurface('note')}
+              >
+                <span>Note</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'transcription'}
+                className={activeSurface === 'transcription' ? 'active' : ''}
+                disabled={!hasRecording}
+                title="Transcript becomes available when this note has a recording"
+                onClick={() => setActiveSurface('transcription')}
+              >
+                <Microphone size={12} />
+                <span>Transcript</span>
+              </button>
+            </div>
             <label
               className={note.external ? 'note-date-badge read-only' : 'note-date-badge'}
               title={note.external ? 'Date from linked file' : 'Change note date'}
@@ -1269,51 +1303,54 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         </div>
       </div>
 
-      <div className={activeSurface === 'chat' ? 'note-chat-slot active' : 'note-chat-slot'}>
-        <NoteAiPanel
-          subject={{ id: note.id, title: note.title, external: note.external }}
-          editor={editor}
-          active={activeSurface === 'chat'}
-          onError={setAiError}
-          onEditApplied={() => setActiveSurface('note')}
-        />
+      <div
+        className={
+          activeSurface === 'transcription'
+            ? 'note-transcription-surface active'
+            : 'note-transcription-surface'
+        }
+        role="tabpanel"
+      >
+        <div className="note-transcription-empty">
+          <Microphone size={18} />
+          <strong>Transcript</strong>
+          <span>The recording transcript will appear here.</span>
+        </div>
       </div>
 
-      <div
-        className="note-surface-tabs note-surface-tabs-floating"
-        role="tablist"
-        aria-label="Note surfaces"
-      >
+      {chatOpen && (
         <button
-          role="tab"
-          aria-selected={activeSurface === 'note'}
-          className={activeSurface === 'note' ? 'active' : ''}
-          title="Note"
-          onClick={() => setActiveSurface('note')}
-        >
-          <FileText size={13} />
-          <span>Note</span>
-        </button>
+          type="button"
+          className="note-chat-drawer-backdrop"
+          aria-label="Close Chat"
+          tabIndex={-1}
+          onClick={() => setChatOpen(false)}
+        />
+      )}
+
+      <div className={chatOpen ? 'note-chat-drawer open' : 'note-chat-drawer'}>
         <button
-          role="tab"
-          aria-selected={activeSurface === 'chat'}
-          className={activeSurface === 'chat' ? 'active' : ''}
-          title="Chat"
-          onClick={() => setActiveSurface('chat')}
+          type="button"
+          className="note-chat-drawer-handle"
+          aria-label={chatOpen ? 'Close Chat' : 'Open Chat'}
+          aria-expanded={chatOpen}
+          title={chatOpen ? 'Close Chat' : 'Chat with this note'}
+          onClick={() => setChatOpen((open) => !open)}
         >
-          <Sparkle size={13} />
-          <span>Chat</span>
+          <span className="note-chat-drawer-grip" />
         </button>
-        <button
-          role="tab"
-          aria-selected={activeSurface === 'transcription'}
-          className={activeSurface === 'transcription' ? 'active' : ''}
-          disabled={!hasRecording}
-          title="Transcription becomes available when this note has a recording"
-        >
-          <Microphone size={13} />
-          <span>Transcription</span>
-        </button>
+        <div className="note-chat-drawer-body" aria-hidden={!chatOpen}>
+          <NoteAiPanel
+            subject={{ id: note.id, title: note.title, external: note.external }}
+            editor={editor}
+            active={chatOpen}
+            onError={setAiError}
+            onEditApplied={() => {
+              setActiveSurface('note')
+              setChatOpen(false)
+            }}
+          />
+        </div>
       </div>
 
       {aiError && <div className="ai-error-toast">{aiError}</div>}
