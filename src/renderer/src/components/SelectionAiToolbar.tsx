@@ -71,10 +71,13 @@ export default function SelectionAiToolbar({ editor, aiActions, onOpen }: Props)
   return (
     <FormattingToolbarController
       formattingToolbar={() => {
-        // Selecting a divider (e.g. right after typing "---") has nothing to
-        // format or enhance — suppress the toolbar entirely.
+        // The first H1 is the note title, not a normal content heading. Its
+        // type is fixed by the document model, so it has no formatting bubble.
         const selected = editor.getSelection()?.blocks ?? []
         const target = selected.length ? selected : [editor.getTextCursorPosition().block]
+        const titleId = editor.document[0]?.id
+        if (target.some((block) => block.id === titleId)) return null
+        // A divider (e.g. right after typing "---") has nothing to format.
         if (target.every((block) => block.type === 'divider')) return null
         const allText = target.every((block) => TEXT_BLOCK_TYPES.has(block.type))
         return (

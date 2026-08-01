@@ -567,7 +567,7 @@ export class NoteStore {
     const meta: NoteMeta = {
       id: existing.id,
       title: options.title,
-      createdAt: existing.createdAt,
+      createdAt: options.createdAt ?? existing.createdAt,
       updatedAt: new Date().toISOString(),
       tags: options.tags ?? existing.tags,
       fullWidth: options.fullWidth ?? existing.fullWidth,

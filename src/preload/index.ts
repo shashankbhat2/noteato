@@ -1,5 +1,7 @@
 import { electronAPI } from '@electron-toolkit/preload'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { basename } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type {
   AiCompleteRequest,
   DeletedEntry,
@@ -31,6 +33,16 @@ export interface ContextMenuParams {
 }
 
 const api = {
+  images: {
+    chooseLocal: (): Promise<{ name: string; url: string } | null> =>
+      ipcRenderer.invoke('images:chooseLocal'),
+    linkDropped: (file: File): { name: string; url: string } | null => {
+      const filePath = webUtils.getPathForFile(file)
+      return filePath ? { name: basename(filePath), url: pathToFileURL(filePath).href } : null
+    },
+    resolveLocal: (fileUrl: string): Promise<string> =>
+      ipcRenderer.invoke('images:resolveLocal', fileUrl)
+  },
   notes: {
     list: () => ipcRenderer.invoke('notes:list'),
     read: (path: string) => ipcRenderer.invoke('notes:read', path),
@@ -147,6 +159,7 @@ const api = {
     }
   },
   app: {
+    getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
     closeWindow: () => ipcRenderer.invoke('app:closeWindow'),
     toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize'),
     spellcheckerLanguages: (): Promise<string[]> =>

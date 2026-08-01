@@ -21,21 +21,24 @@ Sizes are relative effort, not calendar: **S** ≈ a sitting, **M** ≈ a few da
 
 ## Decisions — resolved
 
-**1. AI: one floating panel for the whole layout, following the focused note.** Not a deletion — a
-reshape. The two chat surfaces (`AgentPanel` in a pane, and the second assistant in `HomeView`) are
-gone. In their place, a single panel holding dictation and the note-level AI, whose subject is
-whichever note pane has focus — and which names that note, because a surface acting on "the current
-note" has to say which one.
+**1. Note surfaces: Note / Transcription / Chat tabs in each note pane.** The two old chat surfaces
+(`AgentPanel` in a pane, and the second assistant in `HomeView`) and the later floating AI/dictation
+panel are gone. Each note owns three mutually exclusive surfaces in the bar above its title:
+
+- **Note** → the block editor.
+- **Transcription** → visible but disabled until that note has recording metadata from Phase 2 and a
+  transcript from Phase 3. It is UI scaffolding, not a second capture path.
+- **Chat** → the note-level AI conversation and whole-note actions, scoped to that note.
 
 - **Enhance** → the four whole-note actions, one result, Copy / Insert.
-- **Ask** → a conversation about the focused note, threaded per note.
-- **Selection actions stay in the bubble menu**, where the text being acted on is already visible.
+- **Ask** → a conversation about the current note, threaded per note.
+- **Selection actions stay in the bubble menu**, except on the fixed title H1.
 
-It is load-bearing later, not cosmetic: **this panel is the surface §9's traceability requirement
+It is load-bearing later, not cosmetic: **the Chat surface is where §9's traceability requirement
 lands on.** Summaries and action items carrying timestamp ranges back into the transcript need
 somewhere to be invoked from and somewhere to render.
 
-*Note on §11:* the brief rules out a chat surface outright. `Ask` is one, scoped and threaded per
+*Note on §11:* the brief rules out a chat surface outright. `Chat` is one, scoped and threaded per
 note. Built as decided; flagged here so it stays a decision rather than becoming drift.
 
 **2. Tags, scratch notes and the sidebar panel all stay.** They are shipped features with user data
@@ -90,10 +93,11 @@ Nothing here is a feature. All of it is a prerequisite for measuring anything.
 - Archive `plan.md`, `roadmap.md`, `tldraw-integration.md` → `docs/archive/`. They describe folders,
   iCloud sync and a hosted AI proxy; `roadmap.md` Phase 1 is literally the thing §11 forbids.
 
-### B. The AI panel · M — ✅ done (shipped as one floating panel, not a bar — see STATUS.md)
+### B. The AI surface · M — ✅ done (now the per-note Chat tab — see STATUS.md)
 
-- `NoteAiPanel`, mounted once in `MainLayout`: dictation + Enhance + Ask, floating over the layout.
-- Subject = the focused note pane; a non-note pane leaves it null and the panel says so.
+- `NoteAiPanel`, mounted inside each `NoteEditor`: Chat + whole-note actions replace the writing
+  surface when its tab is selected.
+- The Transcription tab is disabled until Phase 2/3 provide recording and transcript state.
 - `ai/client.ts` and the `ai:stream` IPC channel are reused unchanged.
 - Removed the assistant as a *pane type* (`AgentPanel` in `panes.ts`) and the `HomeView` assistant.
 - Collapsed three AI settings flags to one; dropped `ss/assistant.png`.
@@ -101,8 +105,8 @@ Nothing here is a feature. All of it is a prerequisite for measuring anything.
 **Sequencing note** — (B) landed before Phase 1.5, so `panes.ts` has one fewer case for the identity
 refactor to carry.
 
-**Proof** — verified in the running app: one panel, subject follows focus across panes, Ask opens a
-composer with no insert affordance, bubble menu intact. Tests and benchmarks green.
+**Proof** — Note and Chat switch within each pane, there is no bottom dock, the title has no bubble
+menu, and Transcription cannot imply unavailable recording infrastructure. Tests and benchmarks green.
 
 **Risk** — CI runs on shared `macos-latest` runners, where absolute timings are noisy. Recommend the
 gate assert the §10 ceiling (80 ms / 150 ms) on a **median of N runs**, and publish the raw number as

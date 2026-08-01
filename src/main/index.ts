@@ -36,6 +36,7 @@ import { SidebarModeManager } from './sidebarMode'
 import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
 import { AgentClient } from './agentClient'
+import { linkLocalImage, resolveLocalImage } from './localImages'
 
 const appDb = getAppDb()
 const settingsStore = createSettingsStore()
@@ -351,6 +352,37 @@ function openMainSettings(): void {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('images:chooseLocal', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Images',
+          extensions: [
+            'avif',
+            'bmp',
+            'gif',
+            'heic',
+            'heif',
+            'ico',
+            'jpeg',
+            'jpg',
+            'png',
+            'svg',
+            'tif',
+            'tiff',
+            'webp'
+          ]
+        }
+      ]
+    }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return null
+    return linkLocalImage(result.filePaths[0])
+  })
+  ipcMain.handle('images:resolveLocal', (_e, fileUrl: string) => resolveLocalImage(fileUrl))
   ipcMain.handle('notes:list', () => noteStore.list())
   ipcMain.handle('notes:read', (_e, path: string) => noteStore.read(path))
   ipcMain.handle('notes:create', (e, title?: string) => {

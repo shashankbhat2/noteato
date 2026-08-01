@@ -27,13 +27,25 @@ export function normalizeTag(raw: string): string {
 export default function TagBar({ tags, suggestions, onChange, readOnly }: Props) {
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
+  const [hovering, setHovering] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   // Which completion the arrow keys have landed on; -1 means "use what I typed".
   const [highlighted, setHighlighted] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (adding) inputRef.current?.focus()
   }, [adding])
+
+  useEffect(() => {
+    if (!expanded) return
+    const close = (event: PointerEvent): void => {
+      if (!barRef.current?.contains(event.target as Node)) setExpanded(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [expanded])
 
   const add = (raw: string): void => {
     const tag = normalizeTag(raw)
@@ -60,12 +72,21 @@ export default function TagBar({ tags, suggestions, onChange, readOnly }: Props)
   // Nothing to show and nothing to add — stay out of the way entirely.
   if (readOnly && tags.length === 0) return null
 
+  const visibleTags = tags.slice(0, 3)
+  const hiddenCount = Math.max(0, tags.length - visibleTags.length)
+  const showAllTags = hiddenCount > 0 && (hovering || expanded)
+
   return (
-    <div className="note-tags-bar">
+    <div
+      ref={barRef}
+      className="note-tags-bar"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+    >
       <span className="note-tags-icon" title="Tags">
         <Tag size={13} />
       </span>
-      {tags.map((tag) => (
+      {visibleTags.map((tag) => (
         <span key={tag} className="note-tag-chip">
           {tag}
           {!readOnly && (
@@ -75,6 +96,15 @@ export default function TagBar({ tags, suggestions, onChange, readOnly }: Props)
           )}
         </span>
       ))}
+      {hiddenCount > 0 && (
+        <button
+          className="note-tag-overflow-btn"
+          aria-expanded={showAllTags}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          +{hiddenCount}
+        </button>
+      )}
       {!readOnly &&
         (adding ? (
           <div className="note-tag-entry">
@@ -136,6 +166,27 @@ export default function TagBar({ tags, suggestions, onChange, readOnly }: Props)
             <span>{tags.length === 0 ? 'Add tags' : 'Add'}</span>
           </button>
         ))}
+      {showAllTags && (
+        <div className="note-tags-popover" role="group" aria-label="All note tags">
+          <span className="note-tags-popover-label">All tags</span>
+          <div className="note-tags-popover-list">
+            {tags.map((tag) => (
+              <span key={tag} className="note-tag-chip">
+                {tag}
+                {!readOnly && (
+                  <button
+                    className="note-tag-remove"
+                    title={`Remove “${tag}”`}
+                    onClick={() => remove(tag)}
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

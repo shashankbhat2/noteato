@@ -13,7 +13,7 @@ Last updated: 2026-08-01, end of Phase 1.
 |---|---|---|
 | **0 — Audit** | ✅ done | Report + measured baselines |
 | **0.5A — Test & benchmark groundwork** | ✅ done | Vitest, Swift package, 3 benchmarks, docs archived |
-| **0.5B — AI panel** | ✅ done | One floating panel, follows the focused note |
+| **0.5B — AI surface** | ✅ done | Per-note Chat tab; no floating dock |
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
 | **1.5 — Identity migration** | ⬜ next | Path-keyed → id-keyed. Pure refactor, no on-disk change |
 | **2 — Capture path** | ⬜ | Mic, pre-roll ring buffer, commit to the §4.3 note format |
@@ -35,10 +35,10 @@ npm install
 npm run dev
 ```
 
-Unchanged from before, except the AI surface: one floating panel at the bottom of the window with
-**mic · Enhance · Ask**, showing which note it is acting on. Enhance gives you a result with
-Copy/Insert; Ask is a conversation, threaded per note. Selection actions are still in the bubble
-menu. AI needs an Anthropic or OpenAI key in Settings.
+Each note pane has **Note · Transcription · Chat** tabs above the title. Note is the block editor;
+Chat replaces it with a conversation and whole-note actions scoped to that note. Transcription is
+visible but disabled until Phases 2–3 provide recording and ASR state. Selection actions remain in
+the bubble menu except on the fixed title H1. AI needs an Anthropic or OpenAI key in Settings.
 
 ### The agent (Phase 1)
 

@@ -76,9 +76,6 @@ function TurnIntoItems() {
 
   return (
     <>
-      <Components.Generic.Menu.Label className="bn-menu-label">
-        Turn into
-      </Components.Generic.Menu.Label>
       {TURN_INTO_OPTIONS.map((option) => (
         <Components.Generic.Menu.Item
           key={option.label}
@@ -95,7 +92,6 @@ function TurnIntoItems() {
           {option.label}
         </Components.Generic.Menu.Item>
       ))}
-      <Components.Generic.Menu.Divider className="bn-menu-divider" />
     </>
   )
 }

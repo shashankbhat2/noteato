@@ -11,6 +11,42 @@ import { IconFileText as FileText } from '@tabler/icons-react'
 import { NOTE_LINK_PREFIX } from '../../shared/noteLink'
 import { noteatoEditorExtension } from './editorExtensions'
 
+type CodeHighlighter = Awaited<ReturnType<typeof codeBlockOptions.createHighlighter>>
+
+// BlockNote's Shiki integration otherwise picks the first loaded theme once and
+// writes those colours inline. Emit both palettes so a note remains legible when
+// the app theme changes without recreating the editor.
+async function createThemeAwareCodeHighlighter(): Promise<CodeHighlighter> {
+  const highlighter = await codeBlockOptions.createHighlighter()
+
+  return new Proxy(highlighter, {
+    get(target, property) {
+      if (property === 'codeToTokens') {
+        return (code: string, options: Record<string, unknown> = {}) => {
+          const { theme: _theme, themes: _themes, ...rest } = options
+
+          return target.codeToTokens(code, {
+            ...rest,
+            themes: {
+              light: 'github-light',
+              dark: 'github-dark'
+            },
+            defaultColor: 'light'
+          } as never)
+        }
+      }
+
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+  })
+}
+
+const themeAwareCodeBlockOptions = {
+  ...codeBlockOptions,
+  createHighlighter: createThemeAwareCodeHighlighter
+}
+
 // Note mentions are stored in markdown as "[Title](#note/<id>)". Ids survive
 // the target being moved or renamed (paths don't), and a fragment href passes
 // BlockNote's link protocol allowlist — a custom "note:" scheme would be
@@ -61,8 +97,9 @@ const NoteLinkMention = createReactInlineContentSpec(
 export const noteatoSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
-    // Shiki-backed syntax highlighting with the full language list.
-    codeBlock: createCodeBlockSpec(codeBlockOptions)
+    // Shiki-backed syntax highlighting with the full language list and a
+    // palette that follows the app theme.
+    codeBlock: createCodeBlockSpec(themeAwareCodeBlockOptions)
   },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
@@ -77,6 +114,11 @@ export function createNoteatoEditor(initialContent?: NoteatoBlock[]): NoteatoEdi
   return BlockNoteEditor.create({
     schema: noteatoSchema,
     initialContent,
+    // Stored file:// URLs remain lightweight markdown links. Their previews
+    // resolve through the main process because the renderer cannot read local
+    // files directly.
+    resolveFileUrl: (url) =>
+      url.startsWith('file:') ? window.api.images.resolveLocal(url) : Promise.resolve(url),
     extensions: [noteatoEditorExtension]
   })
 }

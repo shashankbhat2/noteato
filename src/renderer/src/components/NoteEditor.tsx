@@ -1,23 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BlockNoteView } from '@blocknote/mantine'
 import {
+  DragHandleButton,
   SideMenu,
   SideMenuController,
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
-  type DefaultReactSuggestionItem
+  type DefaultReactSuggestionItem,
+  useBlockNoteEditor,
+  useExtensionState
 } from '@blocknote/react'
 import { filterSuggestionItems } from '@blocknote/core'
-import { SideMenuExtension } from '@blocknote/core/extensions'
+import { SideMenuExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { TextSelection } from '@tiptap/pm/state'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
 import {
-  IconArrowsMaximize as UnfoldHorizontal,
-  IconArrowsMinimize as FoldHorizontal,
-  IconBell as Bell,
+  IconCalendar as Calendar,
+  IconDots as Dots,
   IconFilePlus as FilePlus,
   IconFileText as FileText,
+  IconMicrophone as Microphone,
+  IconPhoto as Photo,
+  IconSparkle as Sparkle,
   IconStar as Star,
   IconStarFilled as StarFilled
 } from '@tabler/icons-react'
@@ -26,8 +31,8 @@ import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
+import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
 import { ensureTitleBlock, enforceTitleBlock, titleFromMarkdown } from '../titleBlock'
-import { formatReminderAt } from '../reminderPresets'
 import {
   createNoteatoEditor,
   emitOpenNoteLink,
@@ -40,7 +45,8 @@ import SelectionAiPopup from './SelectionAiPopup'
 import BlockDragMenu, { stripIds } from './BlockDragMenu'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
-import TableOfContents from './TableOfContents'
+import NoteOutline from './NoteOutline'
+import NoteAiPanel from './NoteAiPanel'
 import TagBar from './TagBar'
 
 interface Props {
@@ -60,7 +66,36 @@ interface AiPopupState {
   position: { x: number; y: number } | null
 }
 
+type NoteSurface = 'note' | 'transcription' | 'chat'
+
 const SAVE_DEBOUNCE_MS = 600
+
+const REVEAL_LABEL =
+  window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
+
+function dateInputValue(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function noteDateLabel(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'Set date'
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function createdAtWithDate(iso: string, value: string): string | null {
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) return null
+  const next = new Date(iso)
+  if (Number.isNaN(next.getTime())) return null
+  next.setFullYear(year, month - 1, day)
+  return next.toISOString()
+}
 
 // Blocks whose main content is editable prose — right-clicking these gets the
 // text context menu (spelling, look up, search, cut/copy/paste); anything else
@@ -143,14 +178,15 @@ function findSiblingGroup(blocks: NoteatoBlock[], id: string): NoteatoBlock[] | 
 function slashMenuItems(
   editor: NoteatoEditor,
   note: Note,
-  query: string
+  query: string,
+  onImagePickerStateChange: (picking: boolean) => void,
+  onImageInserted: () => void
 ): DefaultReactSuggestionItem[] {
   const newPage: DefaultReactSuggestionItem = {
     title: 'New page',
-    subtext: 'Create a page linked from here',
     aliases: ['page', 'subpage', 'newpage', 'create'],
-    group: 'Pages',
-    icon: <FilePlus size={18} />,
+    size: 'small',
+    icon: <FilePlus size={14} />,
     onItemClick: () => {
       void (async () => {
         const created = await window.api.notes.create('Untitled')
@@ -162,7 +198,82 @@ function slashMenuItems(
       })()
     }
   }
-  return filterSuggestionItems([...getDefaultReactSlashMenuItems(editor), newPage], query)
+  const imageTitle = editor.dictionary.slash_menu.image.title
+  const hiddenMediaTitles = new Set([
+    editor.dictionary.slash_menu.audio.title,
+    editor.dictionary.slash_menu.video.title,
+    editor.dictionary.slash_menu.file.title
+  ])
+  const localImage: DefaultReactSuggestionItem = {
+    title: imageTitle,
+    aliases: ['image', 'photo', 'picture', 'media'],
+    icon: <Photo size={14} />,
+    size: 'small',
+    onItemClick: () => {
+      onImagePickerStateChange(true)
+      // Create the block while the editor still owns focus. Native dialogs can
+      // move the text selection, but the returned path can always update this
+      // concrete block id.
+      const imageBlock = insertOrUpdateBlockForSlashMenu(editor, { type: 'image' })
+      const restoreParagraph = (): void => {
+        const block = editor.getBlock(imageBlock.id)
+        if (block?.type === 'image' && !block.props.url) {
+          editor.updateBlock(imageBlock.id, { type: 'paragraph' })
+        }
+      }
+      void window.api.images
+        .chooseLocal()
+        .then((linked) => {
+          if (!linked || !editor.getBlock(imageBlock.id)) {
+            restoreParagraph()
+            onImagePickerStateChange(false)
+            return
+          }
+          editor.updateBlock(imageBlock.id, {
+            type: 'image',
+            props: { name: linked.name, url: linked.url }
+          })
+          onImagePickerStateChange(false)
+          onImageInserted()
+        })
+        .catch((error) => {
+          restoreParagraph()
+          onImagePickerStateChange(false)
+          console.error('Unable to link local image', error)
+        })
+    }
+  }
+  const blockTypes = getDefaultReactSlashMenuItems(editor)
+    .filter((item) => item.title !== imageTitle && !hiddenMediaTitles.has(item.title))
+    .map((item) => ({
+      ...item,
+      group: undefined,
+      subtext: undefined,
+      badge: undefined,
+      size: 'small' as const
+    }))
+  return filterSuggestionItems([...blockTypes, localImage, newPage], query)
+}
+
+/** The first H1 is the note title, not a movable content block. */
+function NoteSideMenu(props: React.ComponentProps<typeof SideMenu>) {
+  const editor = useBlockNoteEditor() as unknown as NoteatoEditor
+  const hoveredBlock = useExtensionState(SideMenuExtension, {
+    editor,
+    selector: (state) => state?.block
+  }) as NoteatoBlock | undefined
+  const firstBlock = editor.document[0]
+  const isTitle =
+    hoveredBlock?.id === firstBlock?.id &&
+    firstBlock.type === 'heading' &&
+    Number((firstBlock.props as { level?: number }).level) === 1
+
+  if (isTitle) return null
+  return (
+    <SideMenu {...props}>
+      <DragHandleButton dragHandleMenu={BlockDragMenu} />
+    </SideMenu>
+  )
 }
 
 export default function NoteEditor({ path, onSaved, onEditorReady, paneControls }: Props) {
@@ -179,6 +290,18 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
+  const [activeSurface, setActiveSurface] = useState<NoteSurface>('note')
+  const [outlineVisible, setOutlineVisible] = useState(false)
+
+  useEffect(() => {
+    setActiveSurface('note')
+    setOutlineVisible(false)
+  }, [path])
+  const overflowBtnRef = useRef<HTMLButtonElement>(null)
+  // The overflow menu is built at click time from these, not from the render
+  // closure that happened to create the handler.
+  const reminderAtRef = useRef<string | null>(null)
+  const fullWidthRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // Tags change through their own save; a body autosave scheduled before that
   // must not write the pre-edit list back, so saves read the tags from here
@@ -188,8 +311,12 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   // so it drifts from the `path` prop the tab was opened with.
   const livePathRef = useRef<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const metadataRef = useRef<HTMLDivElement>(null)
   const reminderBtnRef = useRef<HTMLButtonElement>(null)
   const aiStreamingRef = useRef(false)
+  // Native pickers blur the app. Do not persist the temporary empty image
+  // block or the cleared slash query while the picker owns focus.
+  const imagePickingRef = useRef(false)
   // True while an on-disk change is being applied to the editor — those
   // programmatic block swaps must not trigger a save of their own.
   const applyingExternalRef = useRef(false)
@@ -222,7 +349,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
 
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
-        ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
+        ? restoreImageWidths(linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body)))
         : scratch.document
       // The first block is the title; notes from before the title lived in the
       // body (or created empty) get their stored title prepended as an H1.
@@ -251,6 +378,52 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     return createNoteatoEditor(initialBlocks)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialBlocks])
+
+  // The date is a sibling of BlockNote so it cannot become editable document
+  // content. Measure the live H1 and place it below the title; the first block
+  // reserves enough space to keep the body comfortably below the badge.
+  useLayoutEffect(() => {
+    const container = rootRef.current?.querySelector<HTMLElement>('.note-editor')
+    const metadata = metadataRef.current
+    if (!container || !metadata || !editor) return
+
+    const observed = new Set<Element>()
+    const resizeObserver = new ResizeObserver(() => sync())
+    const observe = (element: Element): void => {
+      if (observed.has(element)) return
+      observed.add(element)
+      resizeObserver.observe(element)
+    }
+    const sync = (): void => {
+      const title = container.querySelector<HTMLElement>(
+        '.bn-editor > .bn-block-group > .bn-block-outer:first-child h1'
+      )
+      if (!title) return
+      observe(title)
+      observe(metadata)
+      const containerRect = container.getBoundingClientRect()
+      const titleRect = title.getBoundingClientRect()
+      if (titleRect.width === 0) return
+      const metadataHeight = metadata.getBoundingClientRect().height
+      container.style.setProperty(
+        '--note-metadata-top',
+        `${Math.max(0, titleRect.bottom - containerRect.top + 18)}px`
+      )
+      container.style.setProperty('--note-metadata-space', `${metadataHeight + 34}px`)
+    }
+    const mutationObserver = new MutationObserver(sync)
+    mutationObserver.observe(container, { childList: true, subtree: true })
+    window.addEventListener('resize', sync)
+    sync()
+
+    return () => {
+      resizeObserver.disconnect()
+      mutationObserver.disconnect()
+      window.removeEventListener('resize', sync)
+      container.style.removeProperty('--note-metadata-top')
+      container.style.removeProperty('--note-metadata-space')
+    }
+  }, [editor, note?.id])
 
   // Expose the active editor so the app menu's Undo/Redo can drive its history.
   useEffect(() => {
@@ -354,12 +527,17 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   }
 
   // The title is the body's leading `# …` line.
-  const save = async (markdown: string, nextFullWidth: boolean): Promise<Note | undefined> => {
+  const save = async (
+    markdown: string,
+    nextFullWidth: boolean,
+    nextCreatedAt?: string
+  ): Promise<Note | undefined> => {
     if (!note) return undefined
     const saved = await window.api.notes.save(note.path, {
       title: titleFromMarkdown(markdown) || 'Untitled',
       body: markdown,
       tags: tagsRef.current,
+      createdAt: nextCreatedAt,
       fullWidth: nextFullWidth
     })
     livePathRef.current = saved.path
@@ -370,7 +548,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   }
 
   const currentMarkdown = async (): Promise<string> => {
-    return editor ? editor.blocksToMarkdownLossy(editor.document) : ''
+    return editor ? editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document)) : ''
   }
 
   const persist = async (nextFullWidth: boolean): Promise<Note | undefined> => {
@@ -402,6 +580,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   useEffect(() => {
     const flushOnWindowBlur = (): void => {
       if (!rootRef.current || rootRef.current.offsetParent === null) return
+      if (imagePickingRef.current) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
       void persist(fullWidth)
     }
@@ -417,6 +596,52 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     } else {
       scheduleSave()
     }
+  }
+
+  /** The path this pane is actually showing — a rename moves it off `path`. */
+  const currentPath = (): string => livePathRef.current ?? path
+
+  /**
+   * Everything the header used to show as a permanent glyph. These are real
+   * actions, but occasional ones — a row of icons for each is the header
+   * competing with the document it frames.
+   */
+  const openOverflowMenu = (): void => {
+    const rect = overflowBtnRef.current?.getBoundingClientRect()
+    const x = rect ? rect.right - 210 : 0
+    const y = rect ? rect.bottom + 6 : 80
+    setCtxMenu({
+      x,
+      y,
+      items: [
+        {
+          label: reminderAtRef.current ? 'Change reminder…' : 'Set reminder…',
+          onClick: () => setReminderPopover({ x, y })
+        },
+        ...(reminderAtRef.current
+          ? [{ label: 'Clear reminder', onClick: () => void handleSetReminder(null) }]
+          : []),
+        { separator: true, label: '' },
+        {
+          label: fullWidthRef.current ? 'Use narrow width' : 'Use full width',
+          onClick: () => toggleFullWidth()
+        },
+        {
+          label: outlineVisible ? 'Hide outline' : 'Show outline',
+          onClick: () => setOutlineVisible((visible) => !visible)
+        },
+        {
+          label: 'Find in note…',
+          onClick: () => {
+            setFindOpen(true)
+            setFindFocusTick((t) => t + 1)
+          }
+        },
+        { separator: true, label: '' },
+        { label: 'Copy path', onClick: () => void window.api.notes.copyPath(currentPath()) },
+        { label: REVEAL_LABEL, onClick: () => void window.api.notes.revealInFinder(currentPath()) }
+      ]
+    })
   }
 
   const toggleFullWidth = (): void => {
@@ -442,14 +667,14 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
         } catch {
           return
         }
-        const current = await editor.blocksToMarkdownLossy(editor.document)
+        const current = await editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document))
         if (latest.body.trim() === current.trim()) {
           setNote((prev) => (prev ? { ...prev, updatedAt: latest.updatedAt } : prev))
           return
         }
         const scratch = createNoteatoEditor()
         const blocks = latest.body.trim()
-          ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(latest.body))
+          ? restoreImageWidths(linkifyBlocks(await scratch.tryParseMarkdownToBlocks(latest.body)))
           : scratch.document
         applyingExternalRef.current = true
         try {
@@ -553,6 +778,17 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     void refreshTagSuggestions()
   }
 
+  const handleSetDate = async (value: string): Promise<void> => {
+    if (!note || note.external) return
+    const createdAt = createdAtWithDate(note.createdAt, value)
+    if (!createdAt) return
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = undefined
+    }
+    await save(await currentMarkdown(), fullWidth, createdAt)
+  }
+
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -588,13 +824,80 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   // BlockNote drags the whole unit.
   const handleDragStartCapture = (event: React.DragEvent): void => {
     if (!editor) return
-    if (!(event.target as HTMLElement).closest?.('.bn-side-menu')) return
+    const target = event.target as HTMLElement
+    const image = target.closest?.('[data-content-type="image"] .bn-visual-media')
+    if (image) {
+      const blockId = image.closest<HTMLElement>('[data-node-type="blockOuter"]')?.dataset.id
+      const block = blockId ? editor.getBlock(blockId) : undefined
+      if (block?.type === 'image') {
+        editor.getExtension(SideMenuExtension)?.blockDragStart(event, block)
+      }
+      return
+    }
+    if (!target.closest?.('.bn-side-menu')) return
     try {
       const sideMenu = editor.getExtension(SideMenuExtension)
       const block = (sideMenu?.store?.state as { block?: NoteatoBlock } | undefined)?.block
       if (block) selectHeadingSection(block)
     } catch {
       /* side menu extension unavailable — plain single-block drag */
+    }
+  }
+
+  const handleImagePointerDownCapture = (event: React.PointerEvent): void => {
+    const image = (event.target as HTMLElement).closest?.<HTMLImageElement>(
+      '[data-content-type="image"] .bn-visual-media'
+    )
+    if (image) image.draggable = true
+  }
+
+  const handleDragEndCapture = (event: React.DragEvent): void => {
+    if (!editor) return
+    if (!(event.target as HTMLElement).closest?.('[data-content-type="image"] .bn-visual-media')) {
+      return
+    }
+    editor.getExtension(SideMenuExtension)?.blockDragEnd()
+  }
+
+  const handleDropCapture = (event: React.DragEvent): void => {
+    if (
+      !editor ||
+      event.dataTransfer.types.includes('blocknote/html') ||
+      event.dataTransfer.files.length === 0
+    ) {
+      return
+    }
+    const imageFiles = Array.from(event.dataTransfer.files).filter(
+      (file) =>
+        file.type.startsWith('image/') ||
+        /\.(?:avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i.test(file.name)
+    )
+    if (imageFiles.length === 0) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    try {
+      const linked = imageFiles
+        .map((file) => window.api.images.linkDropped(file))
+        .filter((value): value is { name: string; url: string } => value !== null)
+      if (linked.length === 0) throw new Error('Dropped images did not expose local paths')
+
+      const hit = document.elementFromPoint(event.clientX, event.clientY)
+      const blockId = hit?.closest<HTMLElement>('[data-node-type="blockOuter"]')?.dataset.id
+      const anchor = (blockId ? editor.getBlock(blockId) : undefined) ?? editor.document.at(-1)
+      if (!anchor) return
+      const rect = hit?.closest<HTMLElement>('[data-node-type="blockOuter"]')?.getBoundingClientRect()
+      let placement: 'before' | 'after' = rect && event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+      if (anchor.id === editor.document[0]?.id) placement = 'after'
+
+      editor.insertBlocks(
+        linked.map(({ name, url }) => ({ type: 'image', props: { name, url } })),
+        anchor,
+        placement
+      )
+    } catch (error) {
+      console.error('Unable to link dropped image', error)
+      setAiError('Could not add the dropped image.')
     }
   }
 
@@ -641,11 +944,26 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     if (!editor) return
     if (!(event.target as HTMLElement).closest?.('.bn-editor')) return
 
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+      event.preventDefault()
+      event.stopPropagation()
+      setOutlineVisible((visible) => !visible)
+      return
+    }
+
     if (event.key === 'Backspace') {
       try {
         const view = editor.prosemirrorView
         if (!view.state.selection.empty || !view.endOfTextblock('backward')) return
         const cursor = editor.getTextCursorPosition()
+        // The title is permanently an H1. BlockNote normally demotes a heading
+        // when Backspace is pressed at its start; restoring it on the next
+        // transaction caused the visible paragraph/H1 flicker.
+        if (cursor.block.id === editor.document[0]?.id) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         const isFormatted =
           cursor.block.type !== 'paragraph' &&
           cursor.block.type !== 'codeBlock' &&
@@ -745,10 +1063,21 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
 
   if (!editor || !note) return <div className="empty-state">Loading…</div>
 
+  // Only the parent, never the whole path. The full location stays reachable
+  // through Copy path / Reveal in Finder in the overflow menu — a filesystem
+  // breadcrumb over every document is IDE furniture, not writing furniture.
   const segments = note.path.split('/')
-  const fileLabel = segments[segments.length - 1].replace(/\.md$/, '')
-  const folderSegments = segments.slice(0, -1)
+  const parentLabel = note.external
+    ? segments[segments.length - 2] || ''
+    : segments.length > 1
+      ? segments[segments.length - 2]
+      : ''
   const reminderAt = note.reminderAt
+  // Phase 2 will attach recording metadata to notes. Until then there is no
+  // honest source of truth for a transcript, so the tab is present but locked.
+  const hasRecording = false
+  reminderAtRef.current = reminderAt
+  fullWidthRef.current = fullWidth
 
   return (
     <div
@@ -756,113 +1085,189 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
       className="note-editor-shell"
       onKeyDownCapture={handleEditorKeyDown}
       onKeyDown={handleEditorKeyDownBubble}
+      onPointerDownCapture={handleImagePointerDownCapture}
       onDragStartCapture={handleDragStartCapture}
+      onDragEndCapture={handleDragEndCapture}
+      onDropCapture={handleDropCapture}
     >
       {/* Spans the card and stays put while the note scrolls beneath it. */}
       <div className="note-editor-toolbar">
-        <div className="note-breadcrumb" title={note.path}>
-          {folderSegments.map((seg, i) => (
-            <span key={i} className="breadcrumb-seg">
-              {seg}
-              <span className="breadcrumb-sep">/</span>
+        <div className="note-toolbar-leading">
+          <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
+            <button
+              role="tab"
+              aria-selected={activeSurface === 'note'}
+              className={activeSurface === 'note' ? 'active' : ''}
+              title="Note"
+              onClick={() => setActiveSurface('note')}
+            >
+              <FileText size={13} />
+              <span>Note</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected={activeSurface === 'chat'}
+              className={activeSurface === 'chat' ? 'active' : ''}
+              title="Chat"
+              onClick={() => setActiveSurface('chat')}
+            >
+              <Sparkle size={13} />
+              <span>Chat</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected={activeSurface === 'transcription'}
+              className={activeSurface === 'transcription' ? 'active' : ''}
+              disabled={!hasRecording}
+              title="Transcription becomes available when this note has a recording"
+            >
+              <Microphone size={13} />
+              <span>Transcription</span>
+            </button>
+          </div>
+          {parentLabel && (
+            <span className="note-location" title={note.path}>
+              {parentLabel}
             </span>
-          ))}
-          <span className="breadcrumb-file">{fileLabel}</span>
+          )}
         </div>
         <div className="toolbar-actions">
           <button
-            className={note.pinned ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
+            className={
+              note.pinned
+                ? 'icon-toggle-btn note-favourite-btn active'
+                : 'icon-toggle-btn note-favourite-btn'
+            }
             onClick={() => void handleTogglePin()}
             title={note.pinned ? 'Remove from favourites' : 'Add to favourites'}
           >
             {note.pinned ? <StarFilled size={15} /> : <Star size={15} />}
           </button>
           <button
-            ref={reminderBtnRef}
-            className={reminderAt ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
-            onClick={() => {
-              if (reminderPopover) {
-                setReminderPopover(null)
-                return
-              }
-              const rect = reminderBtnRef.current?.getBoundingClientRect()
-              setReminderPopover(rect ? { x: rect.left, y: rect.bottom + 6 } : { x: 0, y: 80 })
-            }}
-            title={reminderAt ? `Reminder: ${formatReminderAt(reminderAt)}` : 'Set reminder'}
+            ref={overflowBtnRef}
+            className="icon-toggle-btn note-more-btn"
+            onClick={openOverflowMenu}
+            title="More…"
           >
-            <Bell size={15} />
-          </button>
-          <button
-            className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
-            onClick={toggleFullWidth}
-            title={fullWidth ? 'Use narrow width' : 'Use full width'}
-          >
-            {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
+            <Dots size={15} />
           </button>
           {paneControls}
         </div>
       </div>
 
-      <TableOfContents editor={editor} />
+      <div
+        className={
+          activeSurface === 'note' ? 'note-writing-surface active' : 'note-writing-surface'
+        }
+      >
+        {outlineVisible && <NoteOutline editor={editor} />}
 
-      <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
-        {findOpen && (
-          <FindReplaceBar
+        <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
+          {findOpen && (
+            <FindReplaceBar
+              editor={editor}
+              focusTick={findFocusTick}
+              onClose={() => setFindOpen(false)}
+            />
+          )}
+
+          {/* Tags sit above the title but remain outside contentEditable. */}
+          <div className="note-title-tags">
+            <TagBar
+              tags={note.tags}
+              suggestions={tagSuggestions}
+              readOnly={note.external}
+              onChange={(tags) => void handleSetTags(tags)}
+            />
+          </div>
+
+          {/* The date stays below the title as a quiet document attribute. */}
+          <div ref={metadataRef} className="note-metadata-row">
+            <label
+              className={note.external ? 'note-date-badge read-only' : 'note-date-badge'}
+              title={note.external ? 'Date from linked file' : 'Change note date'}
+            >
+              <Calendar size={12} />
+              <span>{noteDateLabel(note.createdAt)}</span>
+              {!note.external && (
+                <input
+                  type="date"
+                  aria-label="Note date"
+                  value={dateInputValue(note.createdAt)}
+                  onChange={(event) => void handleSetDate(event.target.value)}
+                />
+              )}
+            </label>
+          </div>
+
+          <BlockNoteView
             editor={editor}
-            focusTick={findFocusTick}
-            onClose={() => setFindOpen(false)}
-          />
-        )}
-
-        {/* Sits inside the note card so it lines up with the title below it.
-            Linked files keep their frontmatter untouched, so their tags (if the
-            owning tool wrote any) are shown but not editable here. */}
-        <TagBar
-          tags={note.tags}
-          suggestions={tagSuggestions}
-          readOnly={note.external}
-          onChange={(tags) => void handleSetTags(tags)}
-        />
-
-        <BlockNoteView
-          editor={editor}
-          onChange={() => {
-            if (applyingExternalRef.current) return
-            // Linked files are shown exactly as they are on disk — a title
-            // heading is never forced into someone else's markdown.
-            if (!note.external) scheduleTitleFix()
-            if (!aiStreamingRef.current) scheduleSave()
-          }}
-          theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
-          formattingToolbar={false}
-          sideMenu={false}
-          slashMenu={false}
-        >
-          <SelectionAiToolbar editor={editor} aiActions={aiSelectionActions} onOpen={setAiPopup} />
-          <SuggestionMenuController
-            triggerCharacter="/"
-            getItems={async (query) => slashMenuItems(editor, note, query)}
-          />
-          <SuggestionMenuController
-            triggerCharacter="@"
-            getItems={(query) => noteLinkItems(editor, note.id, query)}
-          />
-          <SideMenuController
-            sideMenu={(props) => <SideMenu {...props} dragHandleMenu={BlockDragMenu} />}
-          />
-        </BlockNoteView>
-        {aiPopup && (
-          <SelectionAiPopup
-            editor={editor}
-            blocks={aiPopup.blocks}
-            position={aiPopup.position}
-            onError={setAiError}
-            onStreamingChange={handleAiStreamingChange}
-            onClose={() => setAiPopup(null)}
-          />
-        )}
+            onChange={() => {
+              if (applyingExternalRef.current) return
+              if (imagePickingRef.current) return
+              // Linked files are shown exactly as they are on disk — a title
+              // heading is never forced into someone else's markdown.
+              if (!note.external) scheduleTitleFix()
+              if (!aiStreamingRef.current) scheduleSave()
+            }}
+            theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
+            formattingToolbar={false}
+            sideMenu={false}
+            slashMenu={false}
+          >
+            <SelectionAiToolbar
+              editor={editor}
+              aiActions={aiSelectionActions}
+              onOpen={setAiPopup}
+            />
+            <SuggestionMenuController
+              triggerCharacter="/"
+              getItems={async (query) =>
+                slashMenuItems(
+                  editor,
+                  note,
+                  query,
+                  (picking) => {
+                    imagePickingRef.current = picking
+                    if (picking && saveTimer.current) {
+                      clearTimeout(saveTimer.current)
+                      saveTimer.current = undefined
+                    }
+                  },
+                  scheduleSave
+                )
+              }
+            />
+            <SuggestionMenuController
+              triggerCharacter="@"
+              getItems={(query) => noteLinkItems(editor, note.id, query)}
+            />
+            <SideMenuController
+              sideMenu={NoteSideMenu}
+              floatingUIOptions={{ useFloatingOptions: { placement: 'right-start' } }}
+            />
+          </BlockNoteView>
+          {aiPopup && (
+            <SelectionAiPopup
+              editor={editor}
+              blocks={aiPopup.blocks}
+              position={aiPopup.position}
+              onError={setAiError}
+              onStreamingChange={handleAiStreamingChange}
+              onClose={() => setAiPopup(null)}
+            />
+          )}
+        </div>
       </div>
 
+      <div className={activeSurface === 'chat' ? 'note-chat-slot active' : 'note-chat-slot'}>
+        <NoteAiPanel
+          subject={{ id: note.id, title: note.title }}
+          editor={editor}
+          active={activeSurface === 'chat'}
+          onError={setAiError}
+        />
+      </div>
 
       {aiError && <div className="ai-error-toast">{aiError}</div>}
       {ctxMenu && (

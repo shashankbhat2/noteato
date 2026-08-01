@@ -149,6 +149,8 @@ export interface SaveOptions {
   title: string
   body: string
   tags?: string[]
+  /** User-selected calendar date for the note, stored in frontmatter. */
+  createdAt?: string
   fullWidth?: boolean
 }
 
@@ -166,5 +168,4 @@ export interface AiCompleteRequest {
  * chat surface (revamp brief §9/§11).
  */
 export type AiNoteAction = 'summarize' | 'improve' | 'extract' | 'proofread' | 'ask'
-
 

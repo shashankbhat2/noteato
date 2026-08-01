@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   IconBell as Bell,
-  IconHome as Home,
+  IconDots as Dots,
   IconLink as Link,
-  IconStar as Star,
-  IconDownload as Download,
   IconPlus as Plus,
   IconSearch as Search,
-  IconTrash as Trash2,
-  IconX as X
+  IconStar as Star,
+  IconStarFilled as StarFilled
 } from '@tabler/icons-react'
 import type { NoteSummary } from '../../../shared/types'
+import appPackage from '../../../../package.json'
 import { REMINDER_PRESETS } from '../reminderPresets'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
@@ -19,6 +18,20 @@ const REVEAL_LABEL =
   window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
 
 const MODIFIER_HINT = window.electron.process.platform === 'darwin' ? '⌘' : 'Ctrl'
+
+/** Coarse and short — the row is a way back to a note, not a changelog. */
+function relativeTime(iso: string): string {
+  const then = new Date(iso)
+  if (Number.isNaN(then.getTime())) return ''
+  const minutes = Math.floor((Date.now() - then.getTime()) / 60000)
+  if (minutes < 1) return 'now'
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d`
+  return then.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 interface Props {
   notes: NoteSummary[]
@@ -39,10 +52,12 @@ interface Props {
   onNoteDragStart: (note: NoteSummary) => void
   onNoteDragEnd: () => void
   onOpenTrash: () => void
-  onOpenHome: () => void
   onOpenImport: () => void
   onSearch: () => void
   onCreateNote: () => void
+  onOpenSettings: () => void
+  onOpenStorageLocation: () => void
+  onOpenHelp: () => void
 }
 
 export default function Sidebar({
@@ -62,10 +77,12 @@ export default function Sidebar({
   onNoteDragStart,
   onNoteDragEnd,
   onOpenTrash,
-  onOpenHome,
   onOpenImport,
   onSearch,
-  onCreateNote
+  onCreateNote,
+  onOpenSettings,
+  onOpenStorageLocation,
+  onOpenHelp
 }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [reminderPopover, setReminderPopover] = useState<{
@@ -75,6 +92,18 @@ export default function Sidebar({
   } | null>(null)
   const [renaming, setRenaming] = useState<{ note: NoteSummary; initial: string } | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [utilityMenu, setUtilityMenu] = useState<{ x: number; y: number } | null>(null)
+  const [version, setVersion] = useState(appPackage.version)
+
+  useEffect(() => {
+    let cancelled = false
+    void window.api.app.getVersion().then((value) => {
+      if (!cancelled) setVersion(value)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // One flat list, pinned notes first — the only grouping left, and it earns
   // its place by keeping the notes you always want at the top where they are.
@@ -185,38 +214,35 @@ export default function Sidebar({
       >
         <div className="note-item-main">
           <div className="note-title">
-            {note.pinned && <Star size={11} className="note-pin-icon" />}
             {note.reminderAt && <Bell size={11} className="note-reminder-icon" />}
             {note.external && <Link size={11} className="note-linked-icon" />}
-            {note.title || 'Untitled'}
+            <span className="note-title-text">{note.title || 'Untitled'}</span>
           </div>
+          <div className="note-item-meta">{relativeTime(note.updatedAt)}</div>
         </div>
+        {/* Favourite is state, so it stays visible when set; everything else is
+            an action and waits for hover or a right-click. */}
         <div className="note-item-actions">
           <button
-            className="row-icon-btn"
+            className={note.pinned ? 'row-icon-btn favourite on' : 'row-icon-btn favourite'}
             title={note.pinned ? 'Remove from favourites' : 'Add to favourites'}
             onClick={(e) => {
               e.stopPropagation()
               onTogglePin(note)
             }}
           >
-            <Star size={13} />
+            {note.pinned ? <StarFilled size={13} /> : <Star size={13} />}
           </button>
-          {/* Folder-sourced notes have no link of their own; unlink via the
-              context menu instead. */}
-          {!(note.external && note.fromFolder) && (
-            <button
-              className={note.external ? 'row-icon-btn' : 'row-icon-btn danger'}
-              title={note.external ? 'Remove from Noteato' : 'Delete'}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (note.external) onRemoveNote(note)
-                else onDeleteNote(note)
-              }}
-            >
-              {note.external ? <X size={13} /> : <Trash2 size={13} />}
-            </button>
-          )}
+          <button
+            className="row-icon-btn"
+            title="More…"
+            onClick={(e) => {
+              e.stopPropagation()
+              openNoteMenu(e, note)
+            }}
+          >
+            <Dots size={14} />
+          </button>
         </div>
       </li>
     )
@@ -224,33 +250,25 @@ export default function Sidebar({
 
   return (
     <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
-      {/* What you do *to* the library, above the library itself. */}
-      <nav className="sidebar-rail">
-        <button className="sidebar-rail-btn" onClick={onOpenHome} title="Home">
-          <Home size={17} />
-        </button>
-        <button
-          className="sidebar-rail-btn"
-          onClick={onSearch}
-          title={`Search notes · ${MODIFIER_HINT}K`}
-        >
-          <Search size={17} />
-        </button>
-        <button
-          className="sidebar-rail-btn"
-          onClick={onCreateNote}
-          title={`New note · ${MODIFIER_HINT}T`}
-        >
-          <Plus size={17} />
-        </button>
-        <button className="sidebar-rail-btn" onClick={onOpenImport} title="Import">
-          <Download size={17} />
-        </button>
-        <button className="sidebar-rail-btn" onClick={onOpenTrash} title="Trash">
-          <Trash2 size={17} />
-          {trashCount > 0 && <span className="sidebar-trash-dot" />}
-        </button>
-      </nav>
+      {/* The two things the sidebar is for, named rather than drawn as glyphs
+          you have to hover to identify. */}
+      <div className="sidebar-head">
+        <div className="sidebar-head-row">
+          <button className="sidebar-search" onClick={onSearch}>
+            <Search size={15} />
+            <span>Search notes…</span>
+            <kbd>{MODIFIER_HINT}K</kbd>
+          </button>
+          <button
+            className="sidebar-new"
+            onClick={onCreateNote}
+            title={`New note · ${MODIFIER_HINT}N`}
+          >
+            <Plus size={15} />
+            <span>New</span>
+          </button>
+        </div>
+      </div>
 
       <div className="sidebar-scroll">
         {notes.length === 0 && <p className="sidebar-empty">No notes yet.</p>}
@@ -271,8 +289,40 @@ export default function Sidebar({
         )}
       </div>
 
+      {/* Utilities: reachable, but not competing with the library above them. */}
+      <div className="sidebar-foot">
+        {version && <span className="sidebar-version">v{version}</span>}
+        <button
+          className="sidebar-foot-btn icon-only"
+          title="More…"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            setUtilityMenu({ x: rect.left, y: rect.top })
+          }}
+        >
+          <Dots size={15} />
+          {trashCount > 0 && <span className="sidebar-trash-dot" />}
+        </button>
+      </div>
+
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />
+      )}
+      {utilityMenu && (
+        <ContextMenu
+          x={utilityMenu.x}
+          y={utilityMenu.y}
+          items={[
+            { label: 'Import…', onClick: onOpenImport },
+            { label: `Trash${trashCount > 0 ? ` (${trashCount})` : ''}`, onClick: onOpenTrash },
+            { separator: true, label: '' },
+            { label: 'Storage location…', onClick: onOpenStorageLocation },
+            { label: 'Settings…', onClick: onOpenSettings },
+            { separator: true, label: '' },
+            { label: 'Keyboard shortcuts', onClick: onOpenHelp }
+          ]}
+          onClose={() => setUtilityMenu(null)}
+        />
       )}
       {reminderPopover && (
         <ReminderPopover

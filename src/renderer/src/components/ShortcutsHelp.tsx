@@ -1,20 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
-import { IconKeyboard as Keyboard } from '@tabler/icons-react'
+import { useEffect, useRef } from 'react'
 import { SIDEBAR_MODE_ACCELERATOR, shortcutDisplay } from '../../../shared/globalShortcuts'
 
 const APP_SHORTCUTS: [string, string][] = [
-  ['⌘T', 'New note'],
+  ['⌘N', 'New note'],
   ['⌘K', 'Search notes'],
+  ['⌘⇧F', 'Find in note'],
+  ['⌘⇧O', 'Toggle outline'],
+  ['⌘/', 'Toggle sidebar'],
   ['⌘O', 'Open markdown'],
   ['⌘W', 'Close pane'],
-  ['⌘\\', 'Toggle sidebar'],
   ['⌘,', 'Settings'],
   ['↵', 'In title: jump to note body']
 ]
 
-export default function ShortcutsHelp() {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+/**
+ * A controlled sheet rather than a button with its own popup: the shortcut
+ * reference is reached from the sidebar's utility menu now, so the trigger and
+ * the panel no longer live together.
+ */
+export default function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
   const platform = window.electron.process.platform
   const shortcuts: [string, string][] = [
     [shortcutDisplay(SIDEBAR_MODE_ACCELERATOR, platform), 'Sidebar notes (global)'],
@@ -22,38 +27,31 @@ export default function ShortcutsHelp() {
   ]
 
   useEffect(() => {
-    if (!open) return
     const handleClick = (e: MouseEvent): void => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    const handleKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
     }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [open])
+    document.addEventListener('keydown', handleKey)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKey)
+    }
+  }, [onClose])
 
   return (
-    <div className="shortcuts-help" ref={containerRef}>
-      {open && (
-        <div className="shortcuts-popup">
-          <h3>Shortcuts</h3>
-          <ul>
-            {shortcuts.map(([key, label]) => (
-              <li key={label}>
-                <span>{label}</span>
-                <kbd>{key}</kbd>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <button
-        className="shortcuts-toggle-btn"
-        onClick={() => setOpen((v) => !v)}
-        title="Keyboard shortcuts"
-      >
-        <Keyboard size={16} />
-      </button>
+    <div className="shortcuts-sheet" ref={ref}>
+      <h3>Keyboard shortcuts</h3>
+      <ul>
+        {shortcuts.map(([key, label]) => (
+          <li key={label}>
+            <span>{label}</span>
+            <kbd>{key}</kbd>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

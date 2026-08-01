@@ -8,8 +8,7 @@ import {
   type Pane,
   type PaneView
 } from '../panes'
-import { useTheme } from '../theme'
-import NoteAiPanel, { type AiPanelSubject } from './NoteAiPanel'
+import ShortcutsHelp from './ShortcutsHelp'
 import { linkifyBlocks } from '../linkify'
 import { OPEN_NOTE_LINK_EVENT, type NoteatoEditor } from '../noteLink'
 import Sidebar from './Sidebar'
@@ -81,8 +80,6 @@ const noteView = (note: OpenTarget): PaneView => ({
 })
 
 export default function MainLayout() {
-  const { aiSelectionActions } = useTheme()
-  const [aiPanelError, setAiPanelError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [trash, setTrash] = useState<TrashEntry[]>([])
   // The working area, left to right. Always at least one pane: closing the
@@ -103,6 +100,7 @@ export default function MainLayout() {
     }
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
@@ -118,22 +116,7 @@ export default function MainLayout() {
     0,
     panes.findIndex((pane) => pane.key === focusedKey)
   )
-  useEffect(() => {
-    if (!aiPanelError) return undefined
-    const timer = setTimeout(() => setAiPanelError(null), 4000)
-    return () => clearTimeout(timer)
-  }, [aiPanelError])
-
   const focusedPane = panes[focusedIndex]
-  // The AI panel's subject: whichever note pane has focus. A non-note pane
-  // (Home, Trash) leaves it null, and the panel says so rather than quietly
-  // acting on the last note you happened to be in.
-  const aiSubject: AiPanelSubject | null =
-    focusedPane?.view.kind === 'note'
-      ? { id: focusedPane.view.id, title: focusedPane.view.title }
-      : null
-  const focusedEditor = (): NoteatoEditor | null =>
-    aiSubject ? (editorsRef.current.get(aiSubject.id) ?? null) : null
   const ratios =
     paneRatios.length === panes.length ? paneRatios : Array<number>(panes.length).fill(1 / panes.length)
 
@@ -840,8 +823,14 @@ export default function MainLayout() {
             setDropSide(null)
           }}
           onOpenTrash={() => openInFocused({ kind: 'trash' })}
-          onOpenHome={() => openInFocused({ kind: 'home' })}
           onOpenImport={() => setImportOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenStorageLocation={() => {
+            void window.api.notes.chooseFolder().then((dir) => {
+              if (dir) void refresh()
+            })
+          }}
+          onOpenHelp={() => setHelpOpen(true)}
           onSearch={() => setSearchOpen(true)}
           onCreateNote={() => void handleCreate()}
         />
@@ -866,12 +855,9 @@ export default function MainLayout() {
                 onFocusCapture={() => setFocusedKey(pane.key)}
                 onMouseDown={() => setFocusedKey(pane.key)}
               >
-                {/* A note's shell has to span the pane even when the note is
-                    short, so the action bar docks to the pane's bottom
-                    rather than to the end of the text. A flex column is what
-                    makes `flex: 1` on the shell resolve — a percentage height
-                    can't, since the wrapper's own height is auto. */}
-                <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+                {/* A note's shell spans the pane so its Note / Transcription /
+                    Chat surfaces all switch inside the same stable frame. */}
+                <div className="pane-content">
                   {renderPaneBody(pane, index)}
                 </div>
               </main>
@@ -912,6 +898,7 @@ export default function MainLayout() {
           )}
         </div>
       </div>
+      {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
       {settingsOpen && (
         <SettingsModal onClose={() => setSettingsOpen(false)} onNotesDirChanged={refresh} />
       )}
@@ -970,16 +957,6 @@ export default function MainLayout() {
           <span>{notionImportStatus}</span>
         </div>
       )}
-
-      {/* One dictation + AI panel for the whole layout, following the focused
-          note. Selection actions stay in the note's own bubble menu. */}
-      <NoteAiPanel
-        subject={aiSubject}
-        getEditor={focusedEditor}
-        aiEnabled={aiSelectionActions}
-        onError={setAiPanelError}
-      />
-      {aiPanelError && <div className="ai-error-toast">{aiPanelError}</div>}
     </div>
   )
 }

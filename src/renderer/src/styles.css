@@ -11,9 +11,10 @@ body,
 
 :root {
   --titlebar-leading-w: 252px;
-  /* The title bar is chrome, not content — it gets its own quiet row height
-     rather than the taller one the sidebar rows share. */
-  --tab-h: 24px;
+  /* Both rows share the traffic-light centerline, but only the note needs the
+     extra depth that carries its bottom fade. */
+  --window-header-h: 38px;
+  --note-header-h: 54px;
   /* Gutter between the floating panes. */
   --pane-gap: 10px;
   /* Distance every sidebar row and control keeps from the panel edges. */
@@ -31,65 +32,95 @@ body,
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-fast: 120ms;
   --dur: 220ms;
-  --sidebar-expanded-w: var(--titlebar-leading-w);
-  /* Neutral greyscale. The note card (and every floating surface) is pure
-     white; the window chrome behind it — tab bar, sidebar, pane gutters — is
-     grey, so the open tab reads as a sheet of paper laid on the desk. */
-  --bg: #ffffff;
-  --sidebar-bg: #ededed;
-  --sidebar-hover: #e5e5e5;
-  --bg-secondary: #f4f4f4;
-  --bg-tertiary: #e5e5e5;
+  --sidebar-expanded-w: calc(var(--titlebar-leading-w) + 50px);
+  /* Gray/silver scale. The note stays the brightest plane while the chrome
+     steps through clean metallic neutrals without a beige or blue cast. */
+  --bg: #fcfcfd;
+  --sidebar-bg: #eff0f2;
+  --sidebar-hover: #e4e6e9;
+  --bg-secondary: #f5f6f7;
+  --bg-tertiary: #e9eaec;
   /* Regions vs objects.
      App chrome (sidebar, tab bar, panel seams) is borderless — it separates by
      tone and whitespace. Objects that float or take input (modals, menus,
      popovers, fields, buttons) keep a hairline over a --surface fill, and their
      internal dividers stay too. That split is what keeps the mix deliberate
      rather than arbitrary. --rule is for content the user inserts (dividers). */
-  --border: #e4e4e4;
-  --border-strong: #d5d5d5;
-  --surface: #e7e7e7;
-  --surface-hover: #dedede;
-  --rule: #e5e5e5;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.16);
-  --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.13);
+  --border: #dfe1e4;
+  --border-strong: #caccd1;
+  --surface: #f5f6f7;
+  --surface-hover: #e9eaec;
+  --rule: #dfe1e4;
+  --shadow-1: 0 1px 2px rgba(24, 24, 27, 0.04), 0 2px 8px rgba(24, 24, 27, 0.05);
+  --shadow-2: 0 12px 36px rgba(24, 24, 27, 0.14);
+  --shadow-inset: inset 0 1px 3px rgba(24, 24, 27, 0.1);
   --radius-sm: 7px;
   --radius-md: 10px;
   --radius-lg: 14px;
-  --text: #232323;
-  --text-muted: #8b8b8b;
+  --text: #292b2f;
+  --text-muted: #6b6f76;
   --accent: #a1523c;
-  --accent-soft: rgba(161, 82, 60, 0.12);
+  --accent-soft: rgba(161, 82, 60, 0.1);
   /* Selected-item wash — one value for the active tab and the active note. */
   --accent-active: color-mix(in srgb, var(--accent) 15%, transparent);
   --danger: #b3452f;
   --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
 }
 
-/* Dark sits higher up the greyscale than a near-black would: the window is a
-   real grey, and the pane a clearly lighter one, so the two read apart at a
-   glance instead of merging into one dark field. Every step above them is
-   spaced to match. */
+/* Dark follows the same silver-neutral direction. The window is graphite and
+   the note is one clear step brighter, without a navy undertone. */
 :root[data-theme='dark'] {
-  --bg: #262626;
-  --sidebar-bg: #1a1a1a;
-  --sidebar-hover: #2f2f2f;
-  --bg-secondary: #2e2e2e;
-  --bg-tertiary: #383838;
-  --border: #3a3a3a;
-  --border-strong: #4c4c4c;
-  --surface: #2e2e2e;
-  --surface-hover: #383838;
-  --rule: #3f3f3f;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32), 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.55);
-  --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.45);
-  --text: #ededed;
-  --text-muted: #9d9d9d;
+  --bg: #222426;
+  --sidebar-bg: #18191b;
+  --sidebar-hover: #2b2d30;
+  --bg-secondary: #27292c;
+  --bg-tertiary: #323438;
+  --border: #393c40;
+  --border-strong: #4d5056;
+  --surface: #27292c;
+  --surface-hover: #323438;
+  --rule: #3b3e42;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.27);
+  --shadow-2: 0 12px 36px rgba(0, 0, 0, 0.5);
+  --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  --text: #e7e8ea;
+  --text-muted: #989ca2;
   --accent: #d98a70;
-  --accent-soft: rgba(217, 138, 112, 0.16);
+  --accent-soft: rgba(217, 138, 112, 0.14);
   --danger: #e0806c;
+}
+
+
+/* Semantic tokens. These are the names to reach for in new work; the shorter
+   legacy names above are what the existing rules use, and the two are aliases
+   of one another rather than two systems. Both themes define every token —
+   dark is not an inversion of light, it is its own set of values. */
+:root {
+  --windowBackground: var(--sidebar-bg);
+  --sidebarBackground: var(--sidebar-bg);
+  --editorBackground: var(--bg);
+  --elevatedSurface: var(--bg);
+  --hoverSurface: var(--sidebar-hover);
+  --selectedSurface: color-mix(in srgb, var(--accent) 9%, transparent);
+  --primaryText: var(--text);
+  --secondaryText: #595d64;
+  --mutedText: var(--text-muted);
+  --borderColor: var(--border-strong);
+  --subtleBorder: var(--border);
+  --accentForeground: #ffffff;
+  --codeBackground: #f1f2f3;
+  --inlineCodeBackground: rgba(75, 78, 84, 0.1);
+  --selection: color-mix(in srgb, var(--accent) 22%, transparent);
+  --focusRing: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+:root[data-theme='dark'] {
+  --secondaryText: #babdc2;
+  --selectedSurface: color-mix(in srgb, var(--accent) 15%, transparent);
+  --accentForeground: #202224;
+  --codeBackground: #282a2d;
+  --inlineCodeBackground: rgba(230, 231, 233, 0.09);
+  --selection: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 /* Accent presets — override only --accent/--accent-soft so they compose with
@@ -726,6 +757,7 @@ button {
    rounded cards. Reading order comes from elevation rather than from dividers,
    which is what lets the chrome stay borderless while content stays crisp. */
 .app-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -735,13 +767,29 @@ button {
 /* Title bar — the window's drag region and the three global actions.
    No tabs: a pane shows one thing, and these act on whichever has focus. */
 .title-bar {
+  position: absolute;
+  z-index: 30;
+  top: 0;
+  left: 0;
   display: flex;
-  align-items: center;
-  height: calc(var(--tab-h) + 12px);
+  align-items: flex-start;
+  width: var(--sidebar-expanded-w);
+  height: var(--window-header-h);
+  padding-top: 5px;
   flex-shrink: 0;
   background: var(--sidebar-bg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: none;
   -webkit-app-region: drag;
+  transition:
+    width var(--dur) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+/* Keep the window controls reachable when the library is hidden without
+   restoring a full-width strip above the document. */
+.title-bar.collapsed {
+  width: 160px;
+  background: var(--editorBackground);
 }
 
 /* Cleared of the macOS traffic lights, which sit in the same strip. */
@@ -751,28 +799,6 @@ button {
   gap: 2px;
   padding: 0 8px 0 92px;
   -webkit-app-region: no-drag;
-}
-
-/* Pushed to the far end; everything between stays a drag region. */
-.title-bar-trailing {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  padding-right: 10px;
-  -webkit-app-region: no-drag;
-}
-
-.title-bar-trailing .shortcuts-toggle-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 5px;
-  color: var(--text-muted);
-}
-
-.title-bar-trailing .shortcuts-toggle-btn:hover {
-  color: var(--text);
-  background: var(--bg-tertiary);
 }
 
 .title-bar-btn {
@@ -805,6 +831,7 @@ button {
   display: flex;
   flex: 1;
   min-height: 0;
+  height: 100%;
 }
 
 .sidebar {
@@ -812,20 +839,20 @@ button {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+  padding-top: var(--window-header-h);
   background: transparent;
-  border-right: 1px solid var(--border);
+  border-right: none;
   overflow: hidden;
   transition:
     width var(--dur) var(--ease),
     opacity var(--dur-fast) linear,
-    border-color var(--dur-fast) linear,
     background-color 0.2s ease;
 }
 
 .sidebar.collapsed {
   width: 0;
+  padding-top: 0;
   opacity: 0;
-  border-right-color: transparent;
 }
 
 /* --- Trash tab ------------------------------------------------------------ */
@@ -986,11 +1013,23 @@ button {
    room to breathe instead of colliding with the sidebar's sides. */
 .sidebar-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  /* The generous top inset is the gap under the rail — it separates what you
-     do to the library from the library itself, which is otherwise the only
-     thing telling you they're different kinds of row. */
-  padding: 18px var(--sidebar-inset) 14px;
+  padding: 14px var(--sidebar-inset) 18px;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 18px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 18px),
+    transparent 100%
+  );
 }
 
 .sidebar-empty {
@@ -1021,41 +1060,142 @@ button {
 /* Everything that isn't a note. Icons only: these are five fixed destinations
    and their glyphs carry them, where five more labelled rows would compete
    with the note list for attention. */
-.sidebar-rail {
+/* Two named controls, not a row of glyphs you hover to identify. */
+.sidebar-head {
+  flex-shrink: 0;
+  padding: 4px 16px;
+  border-bottom: none;
+}
+
+.sidebar-head-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-search {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-sm);
+  background: var(--elevatedSurface);
+  color: var(--mutedText);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.sidebar-search span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-search:hover {
+  color: var(--primaryText);
+  border-color: var(--borderColor);
+}
+
+.sidebar-search kbd {
+  font: inherit;
+  font-size: 10.5px;
+  color: var(--mutedText);
+  opacity: 0.8;
+}
+
+.sidebar-new {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--primaryText);
+  border-radius: var(--radius-sm);
+  background: var(--primaryText);
+  color: var(--editorBackground);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+.sidebar-new:hover {
+  color: var(--editorBackground);
+  border-color: color-mix(in srgb, var(--primaryText) 86%, var(--editorBackground));
+  background: color-mix(in srgb, var(--primaryText) 86%, var(--editorBackground));
+}
+
+/* Utilities, at the foot: reachable without competing with the library. */
+.sidebar-foot {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-around;
   gap: 2px;
-  min-height: calc(var(--row-h) + 12px);
-  padding: 6px var(--sidebar-inset);
-  border-bottom: 1px solid var(--border);
+  min-height: 42px;
+  padding: 7px 16px 8px;
+  border-top: none;
+  background: var(--sidebar-bg);
+  box-shadow: none;
 }
 
-.sidebar-rail-btn {
+.sidebar-version {
+  width: fit-content;
+  padding: 1px 5px;
+  color: var(--secondaryText);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.035em;
+  opacity: 0.68;
+  text-shadow: 0 1px color-mix(in srgb, white 62%, transparent);
+}
+
+:root[data-theme='dark'] .sidebar-version {
+  text-shadow: 0 -1px rgba(0, 0, 0, 0.7);
+}
+
+.sidebar-foot-btn {
   position: relative;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--mutedText);
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
   transition:
-    color 0.12s ease,
-    background-color 0.12s ease;
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
-.sidebar-rail-btn:hover {
-  color: var(--text);
-  background: var(--sidebar-hover);
+.sidebar-foot-btn.icon-only {
+  margin-left: auto;
+  padding: 0 7px;
 }
 
-.sidebar-rail-btn.active {
-  color: var(--accent);
-  background: var(--accent-soft);
+.sidebar-foot-btn:hover {
+  color: var(--primaryText);
+  background: var(--hoverSurface);
 }
 
 /* A count would be noise at this size — that the trash has anything in it is
@@ -1094,7 +1234,7 @@ button {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
 }
 
 .note-item {
@@ -1102,17 +1242,18 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: var(--row-h);
-  padding: 0 12px 0 10px;
+  min-height: 40px;
+  padding: 5px 8px 5px 10px;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: background-color 0.12s ease;
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
 .note-item:hover {
   background: var(--sidebar-hover);
 }
 
+/* Accent wash only: shape and spacing already identify the row. */
 .note-item.active {
   background: var(--accent-active);
 }
@@ -1120,6 +1261,9 @@ button {
 .note-item-main {
   min-width: 0;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .note-title {
@@ -1128,53 +1272,73 @@ button {
   gap: 5px;
   font-size: 13px;
   font-weight: 500;
+  min-width: 0;
+  color: var(--secondaryText);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.note-title-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-muted);
-  transition: color 0.15s ease;
 }
 
-.note-pin-icon {
-  color: var(--accent);
-  flex-shrink: 0;
+.note-item-meta {
+  font-size: 11px;
+  color: var(--mutedText);
+  opacity: 0.85;
 }
 
-.note-reminder-icon {
-  color: var(--text-muted);
+.note-reminder-icon,
+.note-linked-icon {
+  color: var(--mutedText);
   flex-shrink: 0;
 }
 
 .note-item.active .note-title {
-  color: var(--text);
+  color: var(--primaryText);
   font-weight: 600;
 }
 
 .note-item-actions {
-  display: none;
+  display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   flex-shrink: 0;
 }
 
-.note-item:hover .note-item-actions {
-  display: flex;
+/* Favourite is state and stays visible once set; the rest is action and waits
+   to be asked for. */
+.note-item-actions .row-icon-btn:not(.on) {
+  opacity: 0;
+}
+
+.note-item:hover .note-item-actions .row-icon-btn,
+.note-item:focus-within .note-item-actions .row-icon-btn {
+  opacity: 1;
 }
 
 .row-icon-btn {
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--mutedText);
   cursor: pointer;
   display: flex;
   align-items: center;
-  padding: 2px;
+  padding: 3px;
   border-radius: 4px;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 
 .row-icon-btn:hover {
-  color: var(--text);
-  background: var(--bg-tertiary);
+  color: var(--primaryText);
+  background: var(--hoverSurface);
+}
+
+.row-icon-btn.favourite.on {
+  color: var(--accent);
 }
 
 .row-icon-btn.danger:hover {
@@ -1189,13 +1353,17 @@ button {
   position: relative;
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   background: var(--bg);
+  overflow: hidden;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
 }
 
 .editor-pane {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg);
@@ -1205,10 +1373,23 @@ button {
   container-name: pane;
 }
 
+.pane-content {
+  display: flex;
+  height: 100%;
+  min-height: 100%;
+  flex-direction: column;
+}
+
 /* A pane whose view scrolls internally (the assistant) rather than growing the
    pane the way a note does. */
 .editor-pane.fills-pane {
   overflow: hidden;
+}
+
+/* A note owns its scroll inside the active surface. Pane chrome never scrolls,
+   so the surface header and its scrollbar cannot overlap each other. */
+.editor-pane:has(.note-editor-shell) {
+  overflow-y: hidden;
 }
 
 /* With no tab strip, the focused pane has to say so itself — the sidebar and
@@ -1331,19 +1512,23 @@ body.resizing-panes .editor-pane {
   pointer-events: none;
 }
 
+/* The measure. ~740px of text column is the comfortable range for long-form
+   reading; the padding is what centres it, not a wrapper. */
 .note-editor {
+  --note-editor-gutter: 40px;
+  --note-metadata-space: 40px;
   flex: 1 0 auto;
+  position: relative;
   width: 100%;
-  max-width: 860px;
+  max-width: 820px;
   margin: 0 auto;
-  padding: 20px 48px 112px;
-  transition: max-width 0.2s ease;
+  padding: 28px var(--note-editor-gutter) 120px;
+  transition: max-width var(--dur) var(--ease);
 }
 
 .note-editor.full-width {
+  --note-editor-gutter: 72px;
   max-width: none;
-  padding-left: 72px;
-  padding-right: 72px;
 }
 
 /* BlockNote reserves 54px on each side by default for its drag-handle
@@ -1355,17 +1540,89 @@ body.resizing-panes .editor-pane {
   padding-inline: 2px;
 }
 
-/* --- Note tags -------------------------------------------------------------
-   A metadata strip at the top of the note card, aligned with the title block
-   below it (it lives inside .note-editor, so it inherits that alignment). */
+/* --- Note metadata ---------------------------------------------------------
+   Tags precede the title in normal flow. The date remains measured against
+   the live H1 so neither control can become editable document content. */
 
-.note-tags-bar {
+.note-title-tags {
+  position: relative;
+  z-index: 4;
+  min-height: 24px;
+  margin: 0 2px 16px;
+}
+
+.note-title-tags:empty {
+  display: none;
+}
+
+.note-metadata-row {
+  position: absolute;
+  z-index: 3;
+  top: var(--note-metadata-top, 64px);
+  right: calc(var(--note-editor-gutter) - 2px);
+  left: calc(var(--note-editor-gutter) + 2px);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  pointer-events: none;
+}
+
+.note-tags-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-height: 24px;
-  padding-inline: 2px;
+  min-width: 0;
+  pointer-events: auto;
+}
+
+.note-date-badge {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 2px 8px;
+  overflow: hidden;
+  border: 1px solid var(--subtleBorder);
+  border-radius: 999px;
+  background: var(--elevatedSurface);
+  color: var(--mutedText);
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+.note-date-badge:hover {
+  border-color: var(--borderColor);
+  background: var(--surface);
+  color: var(--secondaryText);
+}
+
+.note-date-badge:focus-within {
+  outline: 2px solid var(--focusRing);
+  outline-offset: 1px;
+}
+
+.note-date-badge.read-only {
+  cursor: default;
+}
+
+.note-date-badge input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 
 /* The title is the first block, so BlockNote's heading lead-in padding — there
@@ -1385,6 +1642,16 @@ body.resizing-panes .editor-pane {
   > .bn-block
   > .bn-block-content[data-content-type='heading'] {
   padding-top: 0;
+}
+
+/* The metadata occupies real document rhythm even though it is outside the
+   editor DOM. Its measured height lets several tags wrap without colliding
+   with the first body block. */
+.note-editor
+  .bn-editor
+  > .bn-block-group
+  > .bn-block-outer:first-child {
+  margin-bottom: var(--note-metadata-space);
 }
 
 /* BlockNote renders an empty block's placeholder in italic. On the title that
@@ -1425,6 +1692,57 @@ body.resizing-panes .editor-pane {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.note-tag-overflow-btn {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--mutedText);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.note-tag-overflow-btn:hover,
+.note-tag-overflow-btn[aria-expanded='true'] {
+  border-color: var(--borderColor);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.note-tags-popover {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 7px);
+  left: 18px;
+  display: flex;
+  width: min(360px, calc(100vw - 80px));
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  background: var(--elevatedSurface);
+  box-shadow: var(--shadow-2);
+}
+
+.note-tags-popover-label {
+  color: var(--mutedText);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.note-tags-popover-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .note-tag-remove {
@@ -1562,11 +1880,8 @@ body.resizing-panes .editor-pane {
   border-top-color: var(--rule);
 }
 
-/* Code blocks. BlockNote hardcodes a near-black card that disappears against
-   the dark app background — pick up shiki's theme background when available
-   (set as --prosemirror-highlight-bg by the highlight plugin) and give the
-   block a visible edge in dark mode. Tokens are colored inline by shiki
-   (github-dark), so the canvas stays dark in both app themes. */
+/* Code blocks. The highlighter exposes both light and dark token palettes;
+   the final code-block rules below provide the app-native surface. */
 .note-editor .bn-block-content[data-content-type='codeBlock'] {
   background-color: var(--prosemirror-highlight-bg, rgb(24 25 28));
   color: var(--prosemirror-highlight, #e6edf3);
@@ -1631,9 +1946,9 @@ body.resizing-panes .editor-pane {
   font-size: inherit;
 }
 
-/* Breathing room between a block's text and its side actions (drag/plus). */
+/* The note exposes only a drag handle, parked beyond the block's right edge. */
 .note-editor .bn-side-menu {
-  margin-left: -10px;
+  margin-left: 8px;
 }
 
 /* Hide BlockNote's indent guide line on nested list items. */
@@ -1691,7 +2006,7 @@ body.resizing-panes .editor-pane {
 
 /* Every item is this tall, so the strip's padding reads as equal all round. */
 .bn-toolbar {
-  --bn-item-h: 26px;
+  --bn-item-h: 28px;
 }
 
 /* `.bn-mantine .bn-toolbar` is what the library sets the frame with — one class
@@ -1761,23 +2076,110 @@ body.resizing-panes .editor-pane {
   height: 16px;
 }
 
-/* The block-type dropdown's trigger is a button like any other — without this
-   it keeps Mantine's taller metrics and makes the strip look bottom-heavy.
-
-   Only the trigger is touched. `.bn-select` is the menu's wrapper, and giving
-   *that* a height (or letting it overflow) pushes the open dropdown out of the
-   toolbar instead of leaving it to the popover's own positioning. */
-.bn-toolbar .bn-select .mantine-Button-root {
+/* Mantine's Menu.Target clones the trigger directly into the toolbar. The
+   `.bn-select` class belongs to the dropdown, not a wrapper around this button. */
+.bn-formatting-toolbar > .mantine-Button-root:first-child {
+  width: 128px;
   height: var(--bn-item-h);
+  min-width: 0;
+  justify-content: flex-start;
+  padding: 0 7px;
+}
+
+.bn-formatting-toolbar > .mantine-Button-root:first-child .mantine-Button-inner {
+  display: grid;
+  width: 100%;
+  height: var(--bn-item-h);
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr) 14px;
+  align-items: center;
+  column-gap: 6px;
+}
+
+/* Mantine reduces padding when a button has side sections, then gives those
+   sections wide default margins. Normalize both so the block-type control is
+   optically aligned with every icon button beside it. */
+.bn-formatting-toolbar
+  > .mantine-Button-root:first-child
+  .mantine-Button-section[data-position='left'] {
+  display: flex;
+  width: 16px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.bn-formatting-toolbar
+  > .mantine-Button-root:first-child
+  .mantine-Button-section[data-position='right'] {
+  display: flex;
+  width: 14px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
 }
 
 /* A long block-type name ("Numbered List") must not stretch the trigger — it
    truncates instead, which is what keeps the strip's width stable. */
-.bn-toolbar .bn-select .mantine-Button-root .mantine-Button-label {
+.bn-formatting-toolbar > .mantine-Button-root:first-child .mantine-Button-label {
+  display: flex;
+  height: 100%;
   min-width: 0;
+  align-items: center;
   overflow: hidden;
+  line-height: 16px;
+  text-align: left;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* The block-type menu is a vertical icon / label / selected-mark list. This
+   explicitly reverses the old trigger rule that accidentally flattened it. */
+.bn-select.mantine-Menu-dropdown {
+  display: flex;
+  width: 206px;
+  height: auto;
+  max-height: min(420px, 70vh);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.bn-select .mantine-Menu-item {
+  display: grid;
+  min-height: 32px;
+  grid-template-columns: 18px minmax(0, 1fr) 14px;
+  align-items: center;
+  column-gap: 9px;
+  padding: 5px 8px;
+}
+
+.bn-select .mantine-Menu-itemSection {
+  display: grid;
+  width: 18px;
+  place-items: center;
+  margin: 0;
+}
+
+.bn-select .mantine-Menu-itemSection[data-position='right'] {
+  width: 14px;
+}
+
+.bn-select .mantine-Menu-itemLabel {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.2;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bn-select .mantine-Menu-item svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* --- Dropdowns, submenus and suggestion menus ------------------------------
@@ -1840,6 +2242,24 @@ body.resizing-panes .editor-pane {
   text-overflow: ellipsis;
 }
 
+/* The slash picker is one flat icon-and-label list. The items opt into
+   BlockNote's small mode in code; these metrics keep that mode genuinely
+   compact after the app-wide menu defaults above. */
+.bn-suggestion-menu .bn-suggestion-menu-item-small {
+  min-height: 26px;
+  padding: 3px 7px;
+  gap: 7px;
+}
+
+.bn-suggestion-menu-item-small .bn-mt-suggestion-menu-item-body {
+  padding-right: 6px;
+}
+
+.bn-suggestion-menu-item-small .bn-mt-suggestion-menu-item-title {
+  font-size: 12px;
+  line-height: 18px;
+}
+
 /* The toolbar's own dropdowns opt out of the library's shorter row height so
    they match every other menu in the app. */
 .bn-toolbar .mantine-Menu-item {
@@ -1886,7 +2306,19 @@ body.resizing-panes .editor-pane {
 
 /* Drag-handle block menu (Notion-style vertical menu). */
 .bn-drag-handle-menu {
-  min-width: 190px;
+  min-width: 156px;
+}
+
+.bn-drag-handle-menu .mantine-Menu-item {
+  min-height: 26px;
+  padding: 2px 7px;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.bn-drag-handle-menu .mantine-Menu-item svg {
+  width: 13px;
+  height: 13px;
 }
 
 .bn-drag-handle-menu .bn-menu-item-danger,
@@ -2005,17 +2437,145 @@ body.resizing-panes .editor-pane {
 }
 
 .note-editor-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
   position: sticky;
   top: 0;
   z-index: 5;
-  min-height: calc(var(--row-h) + 12px);
-  padding: 6px 20px;
-  background: var(--bg);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 var(--note-header-h);
+  min-height: var(--note-header-h);
+  padding: 3px 8px 19px 4px;
+  border-bottom: none;
+  background: var(--editorBackground);
+  transition: padding-left var(--dur) var(--ease);
+}
+
+/* In collapsed mode the compact window rail shares the first pane's top row;
+   move only that pane's note controls past it instead of sacrificing height. */
+.app-body.sidebar-collapsed
+  .editor-area
+  > .editor-pane:first-of-type
+  .note-editor-toolbar {
+  padding-left: 160px;
+}
+
+/* Continue the header fill into the content fade without applying blur. */
+.note-editor-toolbar::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 42px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--editorBackground) 0%,
+    color-mix(in srgb, var(--editorBackground) 58%, transparent) 22%,
+    color-mix(in srgb, var(--editorBackground) 18%, transparent) 62%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.58) 48%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.58) 48%,
+    transparent 100%
+  );
+}
+
+.note-toolbar-leading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Notes flatten their pane-control wrapper so More can sit immediately before
+   Close. Other views keep PaneControls as its normal grouped unit. */
+.note-editor-toolbar .toolbar-actions {
+  gap: 1px;
+}
+
+.note-editor-toolbar .pane-controls {
+  display: contents;
+}
+
+.note-editor-toolbar .note-favourite-btn {
+  margin-right: 7px;
+}
+
+.note-editor-toolbar .pane-control-btn {
+  order: 10;
+}
+
+.note-editor-toolbar .note-more-btn {
+  order: 20;
+}
+
+.note-editor-toolbar .pane-close-btn {
+  order: 21;
+}
+
+.note-surface-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.note-surface-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--mutedText);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
+.note-surface-tabs button:hover:not(:disabled) {
+  color: var(--primaryText);
+  background: color-mix(in srgb, var(--hoverSurface) 60%, transparent);
+}
+
+.note-surface-tabs button.active {
+  background: var(--accent);
+  color: var(--accentForeground);
+  box-shadow: none;
+}
+
+.note-surface-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.note-toolbar-leading > .note-location {
+  padding-left: 10px;
+  border-left: 1px solid var(--subtleBorder);
 }
 
 /* Fills the pane, and lets the note body absorb the slack, so anything after
@@ -2025,8 +2585,467 @@ body.resizing-panes .editor-pane {
   position: relative;
   display: flex;
   flex-direction: column;
-  flex: 1 0 auto;
+  flex: 1 1 auto;
+  height: 100%;
   min-height: 100%;
+  overflow: hidden;
+}
+
+.note-writing-surface,
+.note-chat-slot {
+  display: none;
+}
+
+.note-writing-surface.active {
+  display: block;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.42) 11px,
+    rgba(0, 0, 0, 0.8) 26px,
+    #000 42px
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.42) 11px,
+    rgba(0, 0, 0, 0.8) 26px,
+    #000 42px
+  );
+}
+
+.note-chat-slot.active {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.42) 11px,
+    rgba(0, 0, 0, 0.8) 26px,
+    #000 42px
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    rgba(0, 0, 0, 0.42) 11px,
+    rgba(0, 0, 0, 0.8) 26px,
+    #000 42px
+  );
+}
+
+/* --- Per-note Chat surface ------------------------------------------------ */
+
+.note-chat-surface {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--editorBackground);
+  animation: fade-in var(--dur-fast) var(--ease);
+}
+
+.note-chat-header {
+  display: flex;
+  width: min(820px, 100%);
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 auto;
+  padding: 48px 40px 30px;
+}
+
+.note-chat-header > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.note-chat-kicker {
+  color: var(--mutedText);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.note-chat-header strong {
+  overflow: hidden;
+  color: var(--primaryText);
+  font-size: 17px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.note-chat-actions button,
+.note-chat-result footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-sm);
+  background: var(--elevatedSurface);
+  color: var(--secondaryText);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.note-chat-actions button:hover:not(:disabled),
+.note-chat-result footer button:hover {
+  border-color: var(--borderColor);
+  color: var(--primaryText);
+  background: var(--surface);
+}
+
+.note-chat-actions button:disabled {
+  opacity: 0.4;
+}
+
+.note-chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px max(40px, calc((100% - 740px) / 2));
+}
+
+.note-chat-empty {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--mutedText);
+  text-align: center;
+}
+
+.note-chat-empty strong {
+  color: var(--secondaryText);
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.note-chat-empty span {
+  font-size: 12px;
+}
+
+.note-chat-turn {
+  width: fit-content;
+  max-width: min(82%, 660px);
+  margin-bottom: 18px;
+  color: var(--primaryText);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.note-chat-turn.user {
+  margin-left: auto;
+  padding: 8px 12px;
+  border-radius: 13px 13px 4px 13px;
+  background: var(--accent);
+  color: var(--accentForeground);
+  white-space: pre-wrap;
+}
+
+.note-chat-turn.assistant {
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.note-chat-loader {
+  color: var(--accent);
+}
+
+.note-chat-result {
+  max-width: 720px;
+  margin: 20px auto 0;
+  overflow: hidden;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  background: var(--elevatedSurface);
+}
+
+.note-chat-result-label {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--subtleBorder);
+  color: var(--mutedText);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.note-chat-result-body {
+  padding: 14px 16px;
+  color: var(--primaryText);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.note-chat-result footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--subtleBorder);
+}
+
+.note-chat-result footer button.primary {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--subtleBorder));
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.note-chat-composer {
+  width: min(740px, calc(100% - 80px));
+  margin: 0 auto 30px;
+  padding-top: 14px;
+}
+
+.note-chat-composer-field {
+  display: flex;
+  min-height: 106px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px 12px 10px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-lg);
+  background: var(--elevatedSurface);
+  box-shadow: none;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.note-chat-composer-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focusRing);
+}
+
+.note-chat-composer textarea {
+  min-width: 0;
+  flex: 1;
+  min-height: 46px;
+  max-height: 132px;
+  resize: none;
+  padding: 2px 3px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--primaryText);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.note-chat-composer textarea:focus {
+  box-shadow: none;
+}
+
+.note-chat-composer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.note-chat-composer-trailing {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.note-chat-tool-btn,
+.note-chat-send-btn {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--mutedText);
+  cursor: pointer;
+}
+
+.note-chat-send-btn {
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accentForeground);
+}
+
+.note-chat-tool-btn:hover:not(:disabled) {
+  background: var(--hoverSurface);
+  color: var(--primaryText);
+}
+
+.note-chat-tool-btn:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.note-chat-tool-btn.recording {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--subtleBorder));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.note-chat-send-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.note-chat-model-select {
+  position: relative;
+  display: inline-flex;
+  max-width: 190px;
+  align-items: center;
+  color: var(--mutedText);
+}
+
+.note-chat-model-trigger {
+  display: inline-flex;
+  max-width: 190px;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.note-chat-model-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-chat-model-trigger svg {
+  flex: 0 0 auto;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.note-chat-model-trigger[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.note-chat-model-trigger:hover:not(:disabled),
+.note-chat-model-trigger[aria-expanded='true'] {
+  background: var(--hoverSurface);
+  color: var(--primaryText);
+}
+
+.note-chat-model-trigger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.note-chat-model-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 7px);
+  z-index: 30;
+  display: flex;
+  width: 204px;
+  max-height: 286px;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  background: var(--elevatedSurface);
+  box-shadow: var(--shadow-2);
+  animation: fade-in-up var(--dur-fast) var(--ease);
+}
+
+.note-chat-model-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 31px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--secondaryText);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.note-chat-model-menu button:hover,
+.note-chat-model-menu button[aria-selected='true'] {
+  background: var(--hoverSurface);
+  color: var(--primaryText);
+}
+
+.note-chat-model-menu button[aria-selected='true'] svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+@container pane (max-width: 430px) {
+  .note-surface-tabs button {
+    padding-inline: 9px;
+  }
+
+  .note-surface-tabs button span,
+  .note-toolbar-leading > .note-location {
+    display: none;
+  }
+
+  .note-chat-header {
+    width: 100%;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 36px 20px 24px;
+  }
+
+  .note-chat-actions {
+    justify-content: flex-start;
+  }
+
+  .note-chat-scroll {
+    padding-inline: 20px;
+  }
+
+  .note-chat-composer {
+    width: calc(100% - 40px);
+  }
 }
 
 .toolbar-actions {
@@ -2034,6 +3053,7 @@ body.resizing-panes .editor-pane {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  padding-top: 1px;
 }
 
 .note-breadcrumb {
@@ -5914,13 +6934,11 @@ body.is-reordering * {
    something that still reads as a title without breaking every other word. */
 @container pane (max-width: 560px) {
   .note-editor {
-    padding-left: 24px;
-    padding-right: 24px;
+    --note-editor-gutter: 24px;
   }
 
   .note-editor.full-width {
-    padding-left: 24px;
-    padding-right: 24px;
+    --note-editor-gutter: 24px;
   }
 
   /* BlockNote carries the heading level in the inner tag, not an attribute on
@@ -5938,5 +6956,466 @@ body.is-reordering * {
 
   .note-editor .bn-editor .bn-block-content:has(> h3) {
     font-size: 1.25rem !important;
+  }
+}
+
+/* --- Document typography ---------------------------------------------------
+   Hierarchy from size and space rather than weight and rules. More air before
+   a heading than after it, so sections separate without dividers doing it. */
+
+.note-editor .bn-editor {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--primaryText);
+}
+
+/* BlockNote sizes headings through a `--level` custom property, consumed by a
+   rule more specific than anything sane to write here. Setting `--level` is
+   therefore the supported override; setting `font-size` directly loses. Weight
+   needs matching specificity separately, since it is set alongside font-size.
+
+   The title is part of the document — it leads into the body rather than
+   sitting in chrome above it. */
+.note-editor
+  .bn-editor
+  > .bn-block-group
+  > .bn-block-outer:first-child
+  > .bn-block
+  > .bn-block-content[data-content-type='heading'] {
+  --level: 37px;
+  letter-spacing: -0.021em;
+  line-height: 1.18;
+  padding-bottom: 8px;
+}
+
+.note-editor .bn-block-content[data-content-type='heading'] {
+  --level: 28px;
+  letter-spacing: -0.014em;
+  line-height: 1.3;
+  /* More air before a heading than after it: that asymmetry is what groups a
+     section with its own text instead of the one above. */
+  padding-top: 34px;
+  padding-bottom: 4px;
+}
+
+.note-editor .bn-block-content[data-content-type='heading'][data-level='2'] {
+  --level: 22px;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  padding-top: 28px;
+}
+
+.note-editor .bn-block-content[data-content-type='heading'][data-level='3'] {
+  --level: 17.5px;
+  letter-spacing: 0;
+  line-height: 1.4;
+  padding-top: 22px;
+}
+
+/* Semibold, not bold. Size and space carry the hierarchy; 700 across every
+   heading just makes the page shout. Specificity here has to match the
+   BlockNote rule that sets weight next to font-size. */
+.note-editor .bn-editor .bn-block-outer > .bn-block > .bn-block-content[data-content-type='heading'],
+.note-editor
+  .bn-editor
+  .bn-block-outer
+  > .bn-block
+  > div[data-type='modification']
+  > div[data-type='modification']
+  > .bn-block-content[data-content-type='heading'] {
+  font-weight: 600;
+}
+
+/* --- Inline code -----------------------------------------------------------
+   A neutral surface, not an accent one. Inline code sits mid-sentence: colour
+   it and every paragraph containing a symbol becomes a rash of highlights. */
+
+.note-editor .bn-editor code.bn-inline-content,
+.note-editor .bn-editor :not(pre) > code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.875em;
+  background: var(--inlineCodeBackground);
+  color: var(--primaryText);
+  border-radius: 4px;
+  padding: 1.5px 4.5px;
+}
+
+/* --- Code blocks -----------------------------------------------------------
+   A step away from the page, in the same direction as the page: light in light
+   mode, dark in dark mode. A near-black slab on a light document is a hole. */
+
+.note-editor .bn-block-content[data-content-type='codeBlock'] {
+  background: var(--codeBackground);
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin: 6px 0;
+}
+
+.note-editor .bn-block-content[data-content-type='codeBlock'] > pre {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--primaryText);
+}
+
+/* Shiki writes its light token colour inline and keeps the dark equivalent in
+   a custom property. The explicit override is needed only in dark mode because
+   inline token styles otherwise outrank the app theme. */
+:root[data-theme='dark']
+  .note-editor
+  .bn-block-content[data-content-type='codeBlock']
+  span.shiki {
+  color: var(--shiki-dark, var(--primaryText)) !important;
+  background-color: var(--shiki-dark-bg, transparent) !important;
+  font-style: var(--shiki-dark-font-style, inherit) !important;
+  font-weight: var(--shiki-dark-font-weight, inherit) !important;
+  text-decoration: var(--shiki-dark-text-decoration, inherit) !important;
+}
+
+/* The language picker is an edit affordance: quiet until the block is hovered
+   or focused. */
+.note-editor .bn-block-content[data-content-type='codeBlock'] > div > select {
+  opacity: 0;
+  color: var(--mutedText);
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+.note-editor .bn-block-content[data-content-type='codeBlock']:hover > div > select,
+.note-editor .bn-block-content[data-content-type='codeBlock']:focus-within > div > select {
+  opacity: 1;
+}
+
+/* --- Tables ----------------------------------------------------------------
+   Part of the note, not a spreadsheet embedded in it: soft separators, no
+   heavy outer frame, a header that differs by weight more than by fill. */
+
+.note-editor .bn-editor [data-content-type='table'] table {
+  width: 100% !important;
+  max-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.note-editor .bn-editor [data-content-type='table'],
+.note-editor .bn-editor [data-content-type='table'] .tableWrapper,
+.note-editor .bn-editor [data-content-type='table'] .tableWrapper-inner {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* BlockNote persists pixel widths on col elements. For fit-to-width tables,
+   the note measure owns the width and columns share the available space. */
+.note-editor .bn-editor [data-content-type='table'] col {
+  width: auto !important;
+}
+
+.note-editor .bn-editor [data-content-type='table'] th,
+.note-editor .bn-editor [data-content-type='table'] td {
+  min-width: 0 !important;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--subtleBorder);
+  padding: 7px 11px;
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+
+.note-editor .bn-editor [data-content-type='table'] th {
+  background: var(--surface);
+  font-weight: 600;
+  text-align: left;
+}
+
+/* Images can be repositioned by grabbing the media itself; resize handles
+   retain their horizontal-resize cursor and behavior. */
+.note-editor .bn-editor [data-content-type='image'] .bn-visual-media {
+  cursor: grab;
+  -webkit-user-drag: element;
+  user-select: none;
+}
+
+.note-editor .bn-editor [data-content-type='image'] .bn-visual-media:active {
+  cursor: grabbing;
+}
+
+/* --- Links -----------------------------------------------------------------
+   One restrained accent, underlined on approach rather than always. */
+
+.note-editor .bn-editor a {
+  color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 2px;
+}
+
+.note-editor .bn-editor a:hover {
+  text-decoration-color: var(--accent);
+}
+
+.note-editor .bn-editor ::selection {
+  background: var(--selection);
+}
+
+/* --- Outline ---------------------------------------------------------------
+   A Notion-like dash rail pinned inside the note's own scroller. Hovering or
+   keyboard focus opens the labels as a card without shifting the document. */
+
+.note-outline {
+  position: sticky;
+  top: 20px;
+  z-index: 12;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+
+.note-outline-body {
+  position: absolute;
+  top: 0;
+  right: 14px;
+  display: flex;
+  width: 43px;
+  max-height: min(62vh, 440px);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  box-shadow: none;
+  pointer-events: auto;
+  transition:
+    width var(--dur) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
+}
+
+.note-outline-body::-webkit-scrollbar {
+  display: none;
+}
+
+.note-outline:hover .note-outline-body,
+.note-outline:focus-within .note-outline-body {
+  width: 244px;
+  border-color: var(--subtleBorder);
+  background: var(--elevatedSurface);
+  box-shadow: var(--shadow-2);
+}
+
+.note-outline-item {
+  display: flex;
+  width: 100%;
+  min-height: 25px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  padding: 3px 4px;
+  overflow: hidden;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--mutedText);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.note-outline-item:hover {
+  background: var(--hoverSurface);
+  color: var(--primaryText);
+}
+
+.note-outline:hover .note-outline-item,
+.note-outline:focus-within .note-outline-item {
+  gap: 8px;
+}
+
+.note-outline-label {
+  min-width: 0;
+  max-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  opacity: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    max-width var(--dur) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
+.note-outline:hover .note-outline-label,
+.note-outline:focus-within .note-outline-label {
+  max-width: 196px;
+  opacity: 1;
+}
+
+/* Mirror the document structure instead of presenting every heading as a
+   flat list. Indentation only appears in the open card, so the compact rail
+   remains a clean stack of right-aligned dashes. */
+.note-outline:hover .note-outline-item[data-level='2'] .note-outline-label,
+.note-outline:focus-within .note-outline-item[data-level='2'] .note-outline-label {
+  padding-inline-start: 12px;
+}
+
+.note-outline:hover .note-outline-item[data-level='3'] .note-outline-label,
+.note-outline:focus-within .note-outline-item[data-level='3'] .note-outline-label {
+  padding-inline-start: 24px;
+}
+
+.note-outline-dash,
+.note-outline-empty i {
+  flex: 0 0 auto;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--mutedText);
+  opacity: 0.45;
+  transition:
+    opacity var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+.note-outline-item[data-level='1'] .note-outline-dash {
+  width: 20.5px;
+}
+
+.note-outline-item[data-level='2'] .note-outline-dash {
+  width: 15.5px;
+}
+
+.note-outline-item[data-level='3'] .note-outline-dash {
+  width: 11.5px;
+}
+
+.note-outline-item:hover .note-outline-dash,
+.note-outline-item.active .note-outline-dash {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.note-outline-item.active .note-outline-label {
+  color: var(--accent);
+  font-weight: 550;
+}
+
+.note-outline:hover .note-outline-item.active,
+.note-outline:focus-within .note-outline-item.active {
+  background: var(--hoverSurface);
+}
+
+.note-outline-empty {
+  display: flex;
+  min-height: 25px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 3px 4px;
+  color: var(--mutedText);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.note-outline-empty span {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-width var(--dur) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
+.note-outline:hover .note-outline-empty span,
+.note-outline:focus-within .note-outline-empty span {
+  max-width: 170px;
+  opacity: 1;
+}
+
+.note-outline-empty i {
+  width: 20.5px;
+}
+
+.note-writing-surface [data-node-type='blockOuter']:has(h1, h2, h3) {
+  scroll-margin-top: 24px;
+}
+
+/* --- Location label --------------------------------------------------------
+   The parent folder, not the filesystem path. */
+
+.note-location {
+  font-size: 11.5px;
+  color: var(--mutedText);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 2px;
+}
+
+/* --- Shortcut sheet --------------------------------------------------------- */
+
+.shortcuts-sheet {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 90;
+  width: 320px;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: var(--radius-lg);
+  background: var(--elevatedSurface);
+  box-shadow: var(--shadow-2);
+  animation: fade-in-up var(--dur-fast) var(--ease);
+}
+
+.shortcuts-sheet h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primaryText);
+}
+
+.shortcuts-sheet ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shortcuts-sheet li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 12.5px;
+  color: var(--secondaryText);
+}
+
+.shortcuts-sheet kbd {
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--mutedText);
+  padding: 1px 5px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+/* The whole interface honours this, not just the panels that animate most. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

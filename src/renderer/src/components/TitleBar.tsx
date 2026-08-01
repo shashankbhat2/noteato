@@ -1,6 +1,5 @@
 import { useRef } from 'react'
 import { IconLayoutSidebar as PanelLeft, IconSettings as Settings } from '@tabler/icons-react'
-import ShortcutsHelp from './ShortcutsHelp'
 
 const DOUBLE_CLICK_MS = 400
 
@@ -11,10 +10,8 @@ interface Props {
 }
 
 /**
- * The window's drag region. The sidebar toggle sits at the leading edge by the
- * traffic lights; the trailing end collects the things that aren't about any
- * one note — settings and the shortcut sheet. Anything that acts *on* a note
- * lives in that note's action bar instead.
+ * The sidebar's window drag region. Global controls stay beside the traffic
+ * lights while anything that acts on a note remains in that note's own header.
  */
 export default function TitleBar({
   sidebarCollapsed,
@@ -41,18 +38,11 @@ export default function TitleBar({
   }
 
   return (
-    <div className="title-bar" onMouseDown={handleMouseDown}>
+    <div
+      className={sidebarCollapsed ? 'title-bar collapsed' : 'title-bar'}
+      onMouseDown={handleMouseDown}
+    >
       <div className="title-bar-actions">
-        <button
-          className="title-bar-btn"
-          onClick={onToggleSidebar}
-          title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar · ${isMac ? '⌘\\' : 'Ctrl+\\'}`}
-        >
-          <PanelLeft size={16} />
-        </button>
-      </div>
-
-      <div className="title-bar-trailing">
         <button
           className="title-bar-btn"
           onClick={onOpenSettings}
@@ -60,7 +50,13 @@ export default function TitleBar({
         >
           <Settings size={16} />
         </button>
-        <ShortcutsHelp />
+        <button
+          className="title-bar-btn"
+          onClick={onToggleSidebar}
+          title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar · ${isMac ? '⌘\\' : 'Ctrl+\\'}`}
+        >
+          <PanelLeft size={16} />
+        </button>
       </div>
     </div>
   )

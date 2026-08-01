@@ -27,6 +27,11 @@ export interface ContextMenuParams {
 }
 
 interface NoteatoApi {
+  images: {
+    chooseLocal: () => Promise<{ name: string; url: string } | null>
+    linkDropped: (file: File) => { name: string; url: string } | null
+    resolveLocal: (fileUrl: string) => Promise<string>
+  }
   notes: {
     list: () => Promise<NoteSummary[]>
     read: (path: string) => Promise<Note>
@@ -92,6 +97,7 @@ interface NoteatoApi {
     ) => Promise<string>
   }
   app: {
+    getVersion: () => Promise<string>
     closeWindow: () => Promise<void>
     toggleMaximize: () => Promise<void>
     spellcheckerLanguages: () => Promise<string[]>

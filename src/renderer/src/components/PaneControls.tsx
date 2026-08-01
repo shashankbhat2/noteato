@@ -69,7 +69,7 @@ export default function PaneControls({
       )}
       {canClose && (
         <button
-          className="pane-control-btn"
+          className="pane-control-btn pane-close-btn"
           onClick={onClose}
           title={count > 1 ? 'Close pane' : 'Close'}
         >

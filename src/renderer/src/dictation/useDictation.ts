@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { NoteatoEditor } from '../noteLink'
 
 interface DeepgramMessage {
@@ -28,18 +28,27 @@ function isEditCommand(text: string): boolean {
   return EDIT_COMMAND_PATTERNS.some((re) => re.test(trimmed))
 }
 
-/**
- * `editor` may be null — with one dictation control for the whole layout, there
- * is nothing to dictate into until a note pane has focus. The editor is read at
- * start(), so a recording keeps writing into the note it began in even if focus
- * moves away mid-sentence.
- */
-export function useDictation(editor: NoteatoEditor | null): {
+interface SpeechToTextOptions {
+  onTranscript: (text: string) => void
+  onUndo?: () => void
+  enabled?: boolean
+  unavailableMessage?: string
+}
+
+export interface SpeechToTextState {
   isRecording: boolean
   error: string | null
   analyser: AnalyserNode | null
   toggle: () => void
-} {
+}
+
+/** Deepgram streaming STT with a destination supplied by the caller. */
+export function useSpeechToText({
+  onTranscript,
+  onUndo,
+  enabled = true,
+  unavailableMessage = 'Voice input is not available here.'
+}: SpeechToTextOptions): SpeechToTextState {
   const [isRecording, setIsRecording] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -47,8 +56,10 @@ export function useDictation(editor: NoteatoEditor | null): {
   const streamRef = useRef<MediaStream | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
-
-  const utteranceLogRef = useRef<Utterance[]>([])
+  const onTranscriptRef = useRef(onTranscript)
+  const onUndoRef = useRef(onUndo)
+  onTranscriptRef.current = onTranscript
+  onUndoRef.current = onUndo
 
   const stop = (): void => {
     recorderRef.current?.stop()
@@ -57,17 +68,30 @@ export function useDictation(editor: NoteatoEditor | null): {
     streamRef.current = null
     wsRef.current?.close()
     wsRef.current = null
-    audioCtxRef.current?.close()
+    void audioCtxRef.current?.close()
     audioCtxRef.current = null
     analyserRef.current = null
-    utteranceLogRef.current = []
     setIsRecording(false)
   }
 
+  useEffect(
+    () => () => {
+      recorderRef.current?.stop()
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      if (wsRef.current) {
+        wsRef.current.onclose = null
+        wsRef.current.onerror = null
+        wsRef.current.close()
+      }
+      void audioCtxRef.current?.close()
+    },
+    []
+  )
+
   const start = async (): Promise<void> => {
     setError(null)
-    if (!editor) {
-      setError('Open a note to dictate into first.')
+    if (!enabled) {
+      setError(unavailableMessage)
       return
     }
     const settings = await window.api.settings.get()
@@ -75,7 +99,6 @@ export function useDictation(editor: NoteatoEditor | null): {
       setError('Add a Deepgram API key in Settings to use dictation.')
       return
     }
-    utteranceLogRef.current = []
 
     let stream: MediaStream
     try {
@@ -111,35 +134,15 @@ export function useDictation(editor: NoteatoEditor | null): {
       const msg: DeepgramMessage = JSON.parse(event.data)
       const transcript = msg.channel?.alternatives?.[0]?.transcript
       if (!transcript || !msg.is_final) return
-
-      if (isEditCommand(transcript)) {
-        const last = utteranceLogRef.current.pop()
-        if (last) {
-          try {
-            editor.updateBlock(last.blockId, { content: last.contentBefore })
-          } catch {
-            // Block may no longer exist.
-          }
-        }
-        return
-      }
-
-      const cursor = editor.getTextCursorPosition()
-      utteranceLogRef.current.push({ blockId: cursor.block.id, contentBefore: cursor.block.content })
-
-      editor.insertInlineContent([{ type: 'text', text: `${transcript} `, styles: {} }])
-
-      // Keep the block receiving dictation in view as the note grows.
-      document
-        .querySelector(`[data-node-type="blockOuter"][data-id="${CSS.escape(cursor.block.id)}"]`)
-        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if (isEditCommand(transcript)) onUndoRef.current?.()
+      else onTranscriptRef.current(transcript)
     }
 
     ws.onopen = () => {
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          e.data.arrayBuffer().then((buf) => ws.send(buf))
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+          void event.data.arrayBuffer().then((buffer) => ws.send(buffer))
         }
       }
       recorder.start(250)
@@ -151,13 +154,55 @@ export function useDictation(editor: NoteatoEditor | null): {
       setError('Deepgram connection error.')
       stop()
     }
-    ws.onclose = () => setIsRecording(false)
+    ws.onclose = () => {
+      if (wsRef.current === ws) stop()
+    }
   }
 
   const toggle = (): void => {
     if (isRecording) stop()
-    else start()
+    else void start()
   }
 
   return { isRecording, error, analyser: analyserRef.current, toggle }
+}
+
+/**
+ * `editor` may be null — with one dictation control for the whole layout, there
+ * is nothing to dictate into until a note pane has focus. The editor is read at
+ * start(), so a recording keeps writing into the note it began in even if focus
+ * moves away mid-sentence.
+ */
+export function useDictation(editor: NoteatoEditor | null): {
+  isRecording: boolean
+  error: string | null
+  analyser: AnalyserNode | null
+  toggle: () => void
+} {
+  const utteranceLogRef = useRef<Utterance[]>([])
+  return useSpeechToText({
+    enabled: editor !== null,
+    unavailableMessage: 'Open a note to dictate into first.',
+    onTranscript: (transcript) => {
+      if (!editor) return
+      const cursor = editor.getTextCursorPosition()
+      utteranceLogRef.current.push({ blockId: cursor.block.id, contentBefore: cursor.block.content })
+      editor.insertInlineContent([{ type: 'text', text: `${transcript} `, styles: {} }])
+      // Keep the block receiving dictation in view as the note grows.
+      document
+        .querySelector(`[data-node-type="blockOuter"][data-id="${CSS.escape(cursor.block.id)}"]`)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    },
+    onUndo: () => {
+      if (!editor) return
+      const last = utteranceLogRef.current.pop()
+      if (last) {
+        try {
+          editor.updateBlock(last.blockId, { content: last.contentBefore })
+        } catch {
+          // Block may no longer exist.
+        }
+      }
+    }
+  })
 }
