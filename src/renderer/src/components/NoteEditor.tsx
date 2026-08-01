@@ -1270,10 +1270,11 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
 
       <div className={activeSurface === 'chat' ? 'note-chat-slot active' : 'note-chat-slot'}>
         <NoteAiPanel
-          subject={{ id: note.id, title: note.title }}
+          subject={{ id: note.id, title: note.title, external: note.external }}
           editor={editor}
           active={activeSurface === 'chat'}
           onError={setAiError}
+          onEditApplied={() => setActiveSurface('note')}
         />
       </div>
 

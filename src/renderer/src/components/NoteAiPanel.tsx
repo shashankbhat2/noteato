@@ -5,24 +5,33 @@ import {
   IconChevronDown as ChevronDown,
   IconLoader2 as Loader2,
   IconMicrophone as Microphone,
+  IconPencil as Pencil,
   IconSquare as Square
 } from '@tabler/icons-react'
 import type { Settings } from '../../../shared/types'
+import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
+import { parseChatOutput } from '../../../shared/chatEdits'
 import type { NoteatoEditor } from '../noteLink'
 import { AiNotConfiguredError, aiStream, isAiConfigured } from '../ai/client'
 import { AI_MODELS, DEFAULT_CHAT_MODELS } from '../ai/models'
 import { noteActionSpec } from '../ai/noteActions'
+import { linkifyBlocks } from '../linkify'
+import { ensureTitleBlock } from '../titleBlock'
 import { useSpeechToText } from '../dictation/useDictation'
 import MarkdownText from './MarkdownText'
 
 export interface AiPanelSubject {
   id: string
   title: string
+  external?: boolean
 }
 
 interface ChatTurn {
   role: 'user' | 'assistant'
   content: string
+  proposedMarkdown?: string
+  sourceMarkdown?: string
+  editApplied?: boolean
 }
 
 /**
@@ -34,12 +43,14 @@ export default function NoteAiPanel({
   subject,
   editor,
   active,
-  onError
+  onError,
+  onEditApplied
 }: {
   subject: AiPanelSubject
   editor: NoteatoEditor
   active: boolean
   onError: (message: string) => void
+  onEditApplied: () => void
 }) {
   const [input, setInput] = useState('')
   const [threads, setThreads] = useState<Record<string, ChatTurn[]>>({})
@@ -47,6 +58,7 @@ export default function NoteAiPanel({
   const [aiSettings, setAiSettings] = useState<Settings | null>(null)
   const [selectedModel, setSelectedModel] = useState('')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [applyingEditIndex, setApplyingEditIndex] = useState<number | null>(null)
   const cancelRef = useRef<(() => void) | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -100,6 +112,7 @@ export default function NoteAiPanel({
 
   useEffect(() => {
     dictatedChunksRef.current = []
+    setApplyingEditIndex(null)
   }, [subject.id])
 
   useEffect(() => {
@@ -147,19 +160,8 @@ export default function NoteAiPanel({
 
   useEffect(() => () => cancelRef.current?.(), [])
 
-  const noteText = (): string =>
-    editor.document
-      .map((block) => {
-        const content = (block as { content?: unknown }).content
-        if (!Array.isArray(content)) return ''
-        return content
-          .map((piece) =>
-            piece && typeof piece === 'object' && 'text' in piece ? String(piece.text ?? '') : ''
-          )
-          .join('')
-      })
-      .filter(Boolean)
-      .join('\n')
+  const noteMarkdown = (): string =>
+    editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document))
 
   const stream = async (
     system: string,
@@ -201,6 +203,15 @@ export default function NoteAiPanel({
   const send = async (): Promise<void> => {
     const question = input.trim()
     if (!question || pending || !chatEnabled) return
+
+    let sourceMarkdown: string
+    try {
+      sourceMarkdown = noteMarkdown()
+    } catch {
+      onError('Could not read the current note for Chat.')
+      return
+    }
+
     if (isRecording) toggleDictation()
     dictatedChunksRef.current = []
     setInput('')
@@ -210,20 +221,75 @@ export default function NoteAiPanel({
     const transcript = history
       .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
       .join('\n\n')
-    const prompt = `Note "${subject.title}":\n\n${noteText()}\n\n---\n\n${transcript}`
+    const prompt = `CURRENT NOTE — preserve this Markdown when proposing edits:\n\n${sourceMarkdown}\n\n--- CONVERSATION ---\n\n${transcript}`
 
     let live = ''
     const final = await stream(noteActionSpec('ask').system, prompt, (text) => {
       live = text
+      const parsed = parseChatOutput(text)
       setThreads((previous) => ({
         ...previous,
-        [subject.id]: [...history, { role: 'assistant', content: text }]
+        [subject.id]: [
+          ...history,
+          {
+            role: 'assistant',
+            content: parsed.message || 'Preparing an edit…',
+            ...(parsed.proposedMarkdown
+              ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
+              : {})
+          }
+        ]
       }))
     })
+    const parsed = parseChatOutput(final ?? live)
+    if (parsed.hasEditMarker && !parsed.proposedMarkdown) {
+      onError('The proposed edit was incomplete. Try asking for a smaller change.')
+    }
     setThreads((previous) => ({
       ...previous,
-      [subject.id]: [...history, { role: 'assistant', content: final ?? live }]
+      [subject.id]: [
+        ...history,
+        {
+          role: 'assistant',
+          content: parsed.message || 'I could not complete that response.',
+          ...(parsed.proposedMarkdown
+            ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
+            : {})
+        }
+      ]
     }))
+  }
+
+  const applyProposedEdit = async (index: number, turn: ChatTurn): Promise<void> => {
+    if (!turn.proposedMarkdown || applyingEditIndex !== null) return
+    setApplyingEditIndex(index)
+    try {
+      const currentMarkdown = noteMarkdown()
+      if (currentMarkdown.trim() !== turn.sourceMarkdown?.trim()) {
+        throw new Error('The note changed after this edit was prepared. Ask Chat to update it again.')
+      }
+
+      const parsed = restoreImageWidths(
+        linkifyBlocks(await editor.tryParseMarkdownToBlocks(turn.proposedMarkdown))
+      )
+      if (parsed.length === 0) throw new Error('The proposed edit did not contain editable content.')
+      const nextBlocks = subject.external ? parsed : ensureTitleBlock(parsed, subject.title)
+      editor.replaceBlocks(
+        editor.document.map((block) => block.id),
+        nextBlocks
+      )
+      setThreads((previous) => ({
+        ...previous,
+        [subject.id]: (previous[subject.id] ?? []).map((entry, entryIndex) =>
+          entryIndex === index ? { ...entry, editApplied: true } : entry
+        )
+      }))
+      onEditApplied()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Could not apply that edit to the note.')
+    } finally {
+      setApplyingEditIndex(null)
+    }
   }
 
   const modelOptions =
@@ -263,7 +329,38 @@ export default function NoteAiPanel({
             )}
             {thread.map((turn, index) => (
               <div key={index} className={`note-chat-turn ${turn.role}`}>
-                {turn.role === 'assistant' ? <MarkdownText text={turn.content} /> : turn.content}
+                {turn.role === 'assistant' ? (
+                  <>
+                    <MarkdownText text={turn.content} />
+                    {turn.proposedMarkdown && (
+                      <div className="note-chat-edit-actions">
+                        <button
+                          type="button"
+                          className={turn.editApplied ? 'applied' : undefined}
+                          disabled={turn.editApplied || applyingEditIndex !== null}
+                          onClick={() => void applyProposedEdit(index, turn)}
+                        >
+                          {turn.editApplied ? (
+                            <Check size={13} />
+                          ) : applyingEditIndex === index ? (
+                            <Loader2 size={13} className="spin" />
+                          ) : (
+                            <Pencil size={13} />
+                          )}
+                          <span>
+                            {turn.editApplied
+                              ? 'Applied to note'
+                              : applyingEditIndex === index
+                                ? 'Applying…'
+                                : 'Apply to note'}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  turn.content
+                )}
               </div>
             ))}
             {pending && thread[thread.length - 1]?.role === 'user' && (

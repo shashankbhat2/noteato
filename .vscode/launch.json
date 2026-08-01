@@ -39,6 +39,26 @@
             "target": "NoteatoAgent",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release NoteatoAgent (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Debug CaptureProbe (agent)",
+            "target": "CaptureProbe",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug CaptureProbe (agent)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:noteato-desktop}/agent",
+            "name": "Release CaptureProbe (agent)",
+            "target": "CaptureProbe",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release CaptureProbe (agent)"
         }
     ]
 }

@@ -2818,6 +2818,43 @@ body.resizing-panes .editor-pane {
   background: var(--surface);
 }
 
+.note-chat-edit-actions {
+  display: flex;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--subtleBorder);
+}
+
+.note-chat-edit-actions button {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.note-chat-edit-actions button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.note-chat-edit-actions button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.note-chat-edit-actions button.applied {
+  color: var(--secondaryText);
+  background: transparent;
+}
+
 .note-chat-loader {
   color: var(--accent);
 }
