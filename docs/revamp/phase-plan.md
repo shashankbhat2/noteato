@@ -268,7 +268,7 @@ discovering the trade later.
 
 ---
 
-## Phase 4 — Retrieval · L — ⬜ NEXT
+## Phase 4 — Retrieval · L — ⏭️ SKIPPED FOR NOW (blocks the ship set)
 
 This is a fix, not an enhancement. The audit measured the current search at **190 ms median on 5,000
 notes with a warm cache** — already over the 150 ms budget, with 1.5 KB bodies and no transcripts.
@@ -304,7 +304,7 @@ follows after.
 
 ---
 
-## Phase 5 — Dictation mode · M
+## Phase 5 — Dictation mode · M — 🟨 BUILT (compatibility matrix partly verified)
 
 The first feature that needs **Accessibility** permission, and per the brief's own strategic note,
 the one that makes the agent a daily habit. Treat it as a headline feature.
@@ -328,7 +328,7 @@ the behaviour people notice and resent.
 
 ---
 
-## Phase 6 — Meeting mode · L
+## Phase 6 — Meeting mode · L — ⬜ NEXT
 
 The first feature that needs **Screen Recording** permission.
 

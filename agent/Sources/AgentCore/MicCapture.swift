@@ -50,6 +50,13 @@ public final class MicCapture: @unchecked Sendable {
 
     public var onStateChange: (@Sendable (State) -> Void)?
 
+    /// Raw buffers, as they arrive. Dictation listens here rather than opening
+    /// a second AVAudioEngine — two engines contending for the same input
+    /// device is a fight neither wins, and the mic is already open anyway.
+    ///
+    /// Called on the audio thread. Anything expensive belongs elsewhere.
+    public var onAudio: (@Sendable (AVAudioPCMBuffer) -> Void)?
+
     public init(preRollSeconds: Double = 10) {
         self.preRollSeconds = preRollSeconds
         self.buffer = PreRollBuffer(
@@ -214,6 +221,11 @@ public final class MicCapture: @unchecked Sendable {
             captured.append(contentsOf: mono)
         }
         buffer.write(mono)
+        let listener = onAudio
         lock.unlock()
+
+        // Outside the lock: a listener that blocked would stall the audio
+        // thread and drop frames for the pre-roll buffer too.
+        listener?(pcm)
     }
 }

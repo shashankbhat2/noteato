@@ -1132,6 +1132,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             </span>
           )}
         </div>
+        <div className="note-toolbar-drag-space" aria-hidden="true" />
         <div className="toolbar-actions">
           <button
             className={

@@ -788,6 +788,10 @@ export default function MainLayout() {
 
   return (
     <div className="app-shell">
+      <div
+        className={sidebarCollapsed ? 'window-drag-edge sidebar-collapsed' : 'window-drag-edge'}
+        aria-hidden="true"
+      />
       <TitleBar
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}

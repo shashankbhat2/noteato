@@ -44,15 +44,19 @@ export default function TitleBar({
     >
       <div className="title-bar-actions">
         <button
+          type="button"
           className="title-bar-btn"
           onClick={onOpenSettings}
+          aria-label="Open settings"
           title={`Settings · ${isMac ? '⌘,' : 'Ctrl+,'}`}
         >
           <Settings size={16} />
         </button>
         <button
+          type="button"
           className="title-bar-btn"
           onClick={onToggleSidebar}
+          aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'}
           title={`${sidebarCollapsed ? 'Show' : 'Hide'} sidebar · ${isMac ? '⌘\\' : 'Ctrl+\\'}`}
         >
           <PanelLeft size={16} />

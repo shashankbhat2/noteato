@@ -62,6 +62,8 @@ let package = Package(
                 ])
             ]
         ),
+        // Answers §7's compatibility question, which only a real app can.
+        .executableTarget(name: "InjectProbe", dependencies: ["AgentCore"]),
         .executableTarget(
             name: "CaptureProbe",
             dependencies: ["AgentCore"],

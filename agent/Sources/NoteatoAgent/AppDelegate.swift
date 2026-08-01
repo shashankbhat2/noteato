@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let server = SocketServer()
     private let launcher = LibraryLauncher()
     private let mic = MicCapture()
+    private let dictation = DictationSession()
+    private var dictating = false
 
     /// The user's own pause, distinct from "the mic happens to be closed".
     /// Screen lock does not set this, so unlocking restores listening — but it
@@ -36,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let capture = hotkeys.register(.capture) { [weak self] in self?.toggleCapture() }
         let sidebar = hotkeys.register(.sidebar) { [weak self] in self?.toggleSidebar() }
         let library = hotkeys.register(.library) { [weak self] in self?.openLibrary() }
+        let dictate = hotkeys.register(.dictate) { [weak self] in self?.toggleDictation() }
+        _ = dictate
         if capture == nil || sidebar == nil || library == nil {
             // Another app already owns the combination. Not fatal — the menu
             // bar still works — but the user needs to know why their key does
@@ -226,6 +230,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    // MARK: - Dictation
+
+    private func toggleDictation() {
+        if dictating { stopDictation() } else { startDictation() }
+    }
+
+    private func startDictation() {
+        // Accessibility is what lets this type into another app. Asking at the
+        // moment the feature is first used — rather than at launch — is what
+        // makes the request legible: the user just pressed the dictation key.
+        guard TextInjector.hasAccessibilityPermission else {
+            TextInjector.requestAccessibilityPermission()
+            explainAccessibility()
+            return
+        }
+        guard mic.state != .idle || mic.startListening() else {
+            reportDictationFailure("The microphone is not available.")
+            return
+        }
+
+        dictating = true
+        refreshStatusItem()
+
+        Task { [dictation] in
+            await dictation.setHandlers(
+                onPhrase: { phrase in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated { _ = TextInjector.insert(phrase) }
+                    }
+                },
+                onStateChange: { state in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            if case .failed(let message) = state {
+                                self.dictating = false
+                                self.reportDictationFailure(message)
+                                self.refreshStatusItem()
+                            }
+                        }
+                    }
+                }
+            )
+            await dictation.start()
+        }
+
+        // Feed the session from the microphone that is already open. Samples
+        // are copied here, on the audio thread, because AVAudioPCMBuffer is
+        // not safe to hand across an actor boundary.
+        mic.onAudio = { [dictation] pcm in
+            guard let channels = pcm.floatChannelData, pcm.frameLength > 0 else { return }
+            let samples = Array(
+                UnsafeBufferPointer(start: channels[0], count: Int(pcm.frameLength)))
+            let rate = pcm.format.sampleRate
+            Task { await dictation.accept(samples: samples, sampleRate: rate) }
+        }
+    }
+
+    private func stopDictation() {
+        dictating = false
+        mic.onAudio = nil
+        refreshStatusItem()
+        Task { [dictation] in _ = await dictation.stop() }
+    }
+
+    private func explainAccessibility() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Noteato needs Accessibility to type for you"
+        alert.informativeText =
+            "Dictation puts text into whatever app you are using, which macOS only allows with Accessibility permission.\n\nOpen System Settings › Privacy & Security › Accessibility and turn on Noteato, then press the dictation key again."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Not now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn,
+            let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+        {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func reportDictationFailure(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Dictation could not start"
+        alert.informativeText = message
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
     // MARK: - Menu bar
 
     private func setUpStatusItem() {
@@ -246,6 +340,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .recording:
             symbol = "record.circle"
             description = "Noteato — recording"
+        case .listening where dictating:
+            symbol = "text.cursor"
+            description = "Noteato — dictating into the frontmost app"
         case .listening:
             symbol = "waveform"
             description = "Noteato — listening · last \(Int(settings.preRollSeconds))s buffered"
@@ -271,6 +368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
 
         add(menu, "Capture   ⌥⌘Space", #selector(menuCapture))
+        add(menu, dictating ? "Stop dictation   ⌥⌘D" : "Dictate   ⌥⌘D", #selector(menuDictate))
         let pause = add(
             menu, pausedByUser ? "Resume listening" : "Pause listening", #selector(togglePause))
         pause.state = pausedByUser ? .on : .off
@@ -295,6 +393,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuCapture() { toggleCapture() }
+    @objc private func menuDictate() { toggleDictation() }
     @objc private func menuOpenLibrary() { openLibrary() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 

@@ -35,6 +35,13 @@ public final class HotkeyManager {
         public static let library = Shortcut(
             keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(optionKey | cmdKey | shiftKey))
 
+        /// ⌥⌘D — dictation. A separate key from capture on purpose (§7): they
+        /// are different jobs with different mental models, and one key that
+        /// sometimes writes a note and sometimes types into Slack would be
+        /// worse than either.
+        public static let dictate = Shortcut(
+            keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey | cmdKey))
+
         // Live only while the HUD is up. Registered globally because a
         // non-activating panel never becomes key and so cannot receive these
         // as ordinary key events — and unregistered the moment the HUD closes,

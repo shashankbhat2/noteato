@@ -18,8 +18,11 @@ Last updated: 2026-08-01, end of Phase 3.
 | **1.5 — Identity migration** | ✅ done | Notes keyed on id; renames no longer move a note out from under an open pane |
 | **2 — Capture path** | 🟨 mostly | Mic, pre-roll, commit to the §4.3 format. **Library migration not done** — see below |
 | **3 — On-device ASR** | ✅ done | FluidAudio (Parakeet on ANE), in a helper process that exits |
-| **4 — Retrieval** | ⬜ next | Hybrid index, type-to-search, result → audio seek |
-| **5–7** | ⬜ | Dictation, meetings, tier gating |
+
+| **4 — Retrieval** | ⏭️ skipped for now | Search still 197 ms; no type-to-search. **Blocks the ship set** |
+| **5 — Dictation** | 🟨 built | ⌥⌘D, streaming, injects into any app. Compatibility matrix partly verified |
+| **6 — Meetings** | ⬜ next | ScreenCaptureKit dual-stream |
+| **7 — Tier gating** | ⬜ | |
 | **Signing (parallel track)** | ⬜ not started | Gates the *release* of 1–4, blocks no development |
 
 ---
@@ -148,6 +151,26 @@ src/main/agentClient.ts      the Electron side of the socket
   rather than gates there; the gate is meaningful locally.
 
 ---
+
+## Dictation — what is verified, and what is not
+
+`⌥⌘D` starts and stops dictation. It streams from the microphone the agent already has open and
+types confirmed text into whatever app is in front.
+
+**Verified:** injection into TextEdit via the pasteboard route, with the clipboard's previous
+contents restored exactly (checked with a sentinel value). Only *confirmed* decoder output is
+injected, so text lands once and is never retroactively revised — §7's "no silent editorializing".
+
+**Not verified:** the rest of §7's compatibility matrix — Slack, Mail, Safari, Chrome, Terminal,
+iTerm, VS Code. `npm run probe:inject "some text"` injects into whatever is frontmost and reports
+which route worked; running it once per app is the matrix, and it should be recorded here rather
+than claimed.
+
+**Worth knowing about permissions:** TCC attributes a command-line binary to the terminal that
+launched it, so in development dictation inherits the terminal's Accessibility grant and appears to
+work with no prompt. The shipped app needs its own grant, and ad-hoc signing means that grant is
+keyed to the binary's hash — so it is re-requested on every rebuild until the signing track lands.
+Development is therefore *easier* than production here, which is the direction that hides problems.
 
 ## What Phase 2 left undone, deliberately
 

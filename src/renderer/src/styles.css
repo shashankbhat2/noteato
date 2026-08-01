@@ -772,6 +772,25 @@ button {
   background: var(--sidebar-bg);
 }
 
+/* Keep a continuous grab target across the physical top edge even though the
+   visible title bar intentionally stops at the sidebar. It sits beneath the
+   sidebar title bar, so its controls and the macOS traffic lights keep their
+   native hit areas. */
+.window-drag-edge {
+  position: absolute;
+  z-index: 29;
+  top: 0;
+  right: 0;
+  left: var(--sidebar-expanded-w);
+  height: 7px;
+  -webkit-app-region: drag;
+  transition: left var(--dur) var(--ease);
+}
+
+.window-drag-edge.sidebar-collapsed {
+  left: 160px;
+}
+
 /* Title bar — the window's drag region and the three global actions.
    No tabs: a pane shows one thing, and these act on whichever has focus. */
 .title-bar {
@@ -802,14 +821,19 @@ button {
 
 /* Cleared of the macOS traffic lights, which sit in the same strip. */
 .title-bar-actions {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 8px 0 92px;
+  pointer-events: auto;
   -webkit-app-region: no-drag;
 }
 
 .title-bar-btn {
+  position: relative;
+  z-index: 1;
   border: none;
   background: transparent;
   border-radius: 5px;
@@ -820,6 +844,12 @@ button {
   justify-content: center;
   cursor: pointer;
   color: var(--text-muted);
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.title-bar-btn svg {
+  pointer-events: none;
 }
 
 .title-bar-btn:hover {
@@ -2458,14 +2488,38 @@ body.resizing-panes .editor-pane {
   z-index: 5;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   flex: 0 0 var(--note-header-h);
   min-height: var(--note-header-h);
   padding: 4px 8px 6px 10px;
   border-bottom: none;
   background: var(--editorBackground);
+  -webkit-app-region: no-drag;
   transition: padding-left var(--dur) var(--ease);
+}
+
+/* The title and dedicated flexible gap are the note header's drag targets.
+   The toolbar itself stays no-drag so it cannot sit underneath and cancel the
+   compact global controls when the sidebar is closed. */
+.note-toolbar-leading,
+.note-toolbar-drag-space {
+  -webkit-app-region: drag;
+}
+
+.note-toolbar-drag-space {
+  min-width: 12px;
+  align-self: stretch;
+  flex: 1 1 auto;
+}
+
+.note-editor-toolbar button,
+.note-editor-toolbar a,
+.note-editor-toolbar input,
+.note-editor-toolbar select,
+.note-editor-toolbar textarea,
+.note-editor-toolbar [role='button'] {
+  -webkit-app-region: no-drag;
 }
 
 /* In collapsed mode the compact window rail shares the first pane's top row;
