@@ -163,7 +163,7 @@ export function importNotionExport(noteStore: NoteStore, sourceRoot: string): No
         skipped.push(item.origRelPath)
         continue
       }
-      const saved = noteStore.save(note.path, { title: item.title!, body: rewrittenBody })
+      const saved = noteStore.save(note.id, { title: item.title!, body: rewrittenBody })
       created.push(saved)
     } catch {
       skipped.push(item.origRelPath)

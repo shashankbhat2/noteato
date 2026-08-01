@@ -50,7 +50,7 @@ const externalWatcher = new ExternalWatcher((rootPath, kind) => {
     return
   }
   try {
-    broadcastNoteChange({ kind: 'upsert', note: noteStore.read(rootPath) })
+    broadcastNoteChange({ kind: 'upsert', note: noteStore.readByPath(rootPath) })
   } catch {
     broadcastNoteChange({ kind: 'refresh' })
   }
@@ -384,58 +384,54 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('images:resolveLocal', (_e, fileUrl: string) => resolveLocalImage(fileUrl))
   ipcMain.handle('notes:list', () => noteStore.list())
-  ipcMain.handle('notes:read', (_e, path: string) => noteStore.read(path))
+  ipcMain.handle('notes:read', (_e, id: string) => noteStore.read(id))
   ipcMain.handle('notes:create', (e, title?: string) => {
     const created = noteStore.create(title)
     broadcastNoteChange({ kind: 'upsert', note: created }, e.sender.id)
     return created
   })
-  ipcMain.handle('notes:save', (e, path: string, options: SaveOptions) => {
+  ipcMain.handle('notes:save', (e, id: string, options: SaveOptions) => {
     // An external save writes the watched file itself — flag it so the change
     // doesn't echo back as an "edited outside Noteato" reload.
-    if (path.startsWith('/')) externalWatcher.markSelfWrite(path)
-    const saved = noteStore.save(path, options)
+    const notePath = noteStore.resolvePath(id)
+    if (notePath.startsWith('/')) externalWatcher.markSelfWrite(notePath)
+    const saved = noteStore.save(id, options)
     reminderScheduler.reschedule(saved)
     broadcastNoteChange({ kind: 'upsert', note: saved }, e.sender.id)
     return saved
   })
-  ipcMain.handle('notes:setPinned', (e, path: string, pinned: boolean) => {
-    const result = noteStore.setPinned(path, pinned)
+  ipcMain.handle('notes:setPinned', (e, id: string, pinned: boolean) => {
+    const result = noteStore.setPinned(id, pinned)
     if (result) broadcastNoteChange({ kind: 'upsert', note: result }, e.sender.id)
     return result
   })
-  ipcMain.handle('notes:setReminder', (e, path: string, reminderAt: string | null) => {
-    const result = noteStore.setReminder(path, reminderAt)
+  ipcMain.handle('notes:setReminder', (e, id: string, reminderAt: string | null) => {
+    const result = noteStore.setReminder(id, reminderAt)
     if (result) {
       reminderScheduler.reschedule(result)
       broadcastNoteChange({ kind: 'upsert', note: result }, e.sender.id)
     }
     return result
   })
-  ipcMain.handle('notes:delete', (e, path: string) => {
-    let id: string | null = null
-    try {
-      id = noteStore.read(path).id
-    } catch {
-      /* already gone */
-    }
-    const result = noteStore.delete(path)
-    if (id) reminderScheduler.unschedule(id)
-    if (id) broadcastNoteChange({ kind: 'remove', id }, e.sender.id)
+  ipcMain.handle('notes:delete', (e, id: string) => {
+    const result = noteStore.delete(id)
+    reminderScheduler.unschedule(id)
+    broadcastNoteChange({ kind: 'remove', id }, e.sender.id)
     return result
   })
-  ipcMain.handle('notes:removeExternal', (e, path: string) => {
-    let id: string | null = null
-    try {
-      id = noteStore.read(path).id
-    } catch {
-      /* already gone */
-    }
-    const result = noteStore.removeExternal(path)
+  ipcMain.handle('notes:removeLinkedFolder', (e, rootPath: string) => {
+    const result = noteStore.removeLinkedFolder(rootPath)
     externalWatcher.sync(noteStore.listOpenedRoots())
-    if (id) reminderScheduler.unschedule(id)
+    reminderScheduler.rebuildAll()
     // Unlinking a folder removes many notes at once — easier to rescan.
-    broadcastNoteChange(id ? { kind: 'remove', id } : { kind: 'refresh' }, e.sender.id)
+    broadcastNoteChange({ kind: 'refresh' }, e.sender.id)
+    return result
+  })
+  ipcMain.handle('notes:removeExternal', (e, id: string) => {
+    const result = noteStore.removeExternal(id)
+    externalWatcher.sync(noteStore.listOpenedRoots())
+    reminderScheduler.unschedule(id)
+    broadcastNoteChange({ kind: 'remove', id }, e.sender.id)
     return result
   })
   ipcMain.handle('notes:restore', (e, trashName: string, originalPath: string, isFolder: boolean) => {
@@ -451,13 +447,13 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('notes:search', (_e, query: string) => noteStore.search(query))
   ipcMain.handle('notes:getDir', () => noteStore.getNotesDir())
-  ipcMain.handle('notes:copyPath', (_e, path: string) => {
-    const full = noteStore.absolutePath(path)
+  ipcMain.handle('notes:copyPath', (_e, id: string) => {
+    const full = noteStore.absolutePath(id)
     clipboard.writeText(full)
     return full
   })
-  ipcMain.handle('notes:revealInFinder', (_e, path: string) => {
-    shell.showItemInFolder(noteStore.absolutePath(path))
+  ipcMain.handle('notes:revealInFinder', (_e, id: string) => {
+    shell.showItemInFolder(noteStore.absolutePath(id))
   })
   ipcMain.handle('notes:listTrash', () => noteStore.listTrash())
   ipcMain.handle('notes:purgeTrash', (_e, trashName: string) => noteStore.purgeTrash(trashName))

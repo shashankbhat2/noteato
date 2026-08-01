@@ -34,13 +34,14 @@ interface NoteatoApi {
   }
   notes: {
     list: () => Promise<NoteSummary[]>
-    read: (path: string) => Promise<Note>
+    read: (id: string) => Promise<Note>
     create: (title?: string) => Promise<Note>
-    save: (path: string, options: SaveOptions) => Promise<Note>
-    setPinned: (path: string, pinned: boolean) => Promise<NoteSummary | null>
-    setReminder: (path: string, reminderAt: string | null) => Promise<NoteSummary | null>
-    delete: (path: string) => Promise<DeletedEntry>
-    removeExternal: (path: string) => Promise<boolean>
+    save: (id: string, options: SaveOptions) => Promise<Note>
+    setPinned: (id: string, pinned: boolean) => Promise<NoteSummary | null>
+    setReminder: (id: string, reminderAt: string | null) => Promise<NoteSummary | null>
+    delete: (id: string) => Promise<DeletedEntry>
+    removeExternal: (id: string) => Promise<boolean>
+    removeLinkedFolder: (rootPath: string) => Promise<boolean>
     restore: (
       trashName: string,
       originalPath: string,
@@ -53,8 +54,8 @@ interface NoteatoApi {
     takeExternalOpens: () => Promise<Note[]>
     subscribeExternalOpen: (callback: (note: Note) => void) => () => void
     getDir: () => Promise<string>
-    copyPath: (path: string) => Promise<string>
-    revealInFinder: (path: string) => Promise<void>
+    copyPath: (id: string) => Promise<string>
+    revealInFinder: (id: string) => Promise<void>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
     openFolder: () => Promise<NoteSummary[]>

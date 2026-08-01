@@ -4,7 +4,13 @@
  */
 
 export type PaneView =
-  | { kind: 'note'; id: string; path: string; title: string }
+  /**
+   * A note pane holds an id, never a path. Renaming a note renames its file,
+   * so a pane keyed on location would lose the note the moment its title
+   * changed. `title` rides along only so the pane can label itself without a
+   * read.
+   */
+  | { kind: 'note'; id: string; title: string }
   | { kind: 'home' }
   | { kind: 'trash' }
 

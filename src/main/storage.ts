@@ -254,6 +254,55 @@ export class NoteStore {
     return this.openedRows().map(({ path, kind }) => ({ path, kind }))
   }
 
+  // --- Identity -------------------------------------------------------------
+  //
+  // A note's identity is its `id`, not its path. The path is where it happens
+  // to live right now: renaming a note renames its file, and anything holding
+  // a path would be pointing at nothing the moment a title changed.
+  //
+  // The index is a cache over what `list()` already computes, rebuilt on a
+  // miss rather than maintained eagerly — the library is also edited from
+  // outside the app, so an index this process kept by hand would drift.
+  private idIndex = new Map<string, string>()
+
+  private rebuildIdIndex(): void {
+    this.idIndex.clear()
+    for (const summary of this.list()) this.idIndex.set(summary.id, summary.path)
+  }
+
+  /**
+   * The path a note currently lives at.
+   *
+   * A cached entry is trusted only if the file is still there *and* still
+   * claims that id — otherwise a note deleted outside Noteato, or a filename
+   * reused by a different note, would resolve to the wrong file.
+   */
+  resolvePath(id: string): string {
+    const cached = this.idIndex.get(id)
+    if (cached && this.pathStillHolds(cached, id)) return cached
+    this.rebuildIdIndex()
+    const found = this.idIndex.get(id)
+    if (found === undefined) throw new Error(`No note with id ${id}`)
+    return found
+  }
+
+  /** True when `relPath` exists and the note there still has this id. */
+  private pathStillHolds(relPath: string, id: string): boolean {
+    try {
+      if (isAbsolute(relPath)) return existsSync(relPath) && `ext:${relPath}` === id
+      const full = this.resolveWithin(relPath)
+      if (!existsSync(full)) return false
+      return parseNoteFile(readFileSync(full, 'utf-8')).meta.id === id
+    } catch {
+      return false
+    }
+  }
+
+  /** Note the id→path pair a mutation just produced, so the next read is warm. */
+  private remember(summary: { id: string; path: string }): void {
+    this.idIndex.set(summary.id, summary.path)
+  }
+
   getNotesDir(): string {
     return this.notesDir
   }
@@ -309,8 +358,8 @@ export class NoteStore {
    * reveal in Finder). Managed notes resolve under the notes dir; linked files
    * must still be registered, so this can't be used to probe the filesystem.
    */
-  absolutePath(notePath: string): string {
-    return this.resolveNotePath(notePath)
+  absolutePath(id: string): string {
+    return this.resolveNotePath(this.resolvePath(id))
   }
 
   private walkNotes(dir: string, prefix: string, out: string[]): void {
@@ -431,7 +480,7 @@ export class NoteStore {
     return summaries
   }
 
-  read(relPath: string): Note {
+  readByPath(relPath: string): Note {
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
       if (!root) throw new Error('External note is not linked to Noteato.')
@@ -472,7 +521,7 @@ export class NoteStore {
       // library uses (this is Noteato's own directory).
       const managedPath = rel.replace(/\\/g, '/')
       const existing = this.toSummary(managedPath)
-      if (existing) return this.read(managedPath)
+      if (existing) return this.readByPath(managedPath)
 
       const raw = readFileSync(full, 'utf-8')
       const { body } = parseNoteFile(raw)
@@ -488,14 +537,14 @@ export class NoteStore {
         reminderAt: null
       }
       writeFileSync(full, serializeNoteFile(meta, body), 'utf-8')
-      return this.read(managedPath)
+      return this.readByPath(managedPath)
     }
 
     // Outside the library: link in place, never write to the file.
     this.db
       .prepare("INSERT OR IGNORE INTO opened_files (path, kind, added_at) VALUES (?, 'file', ?)")
       .run(full, new Date().toISOString())
-    return this.read(full)
+    return this.readByPath(full)
   }
 
   /** Link a folder in place; its markdown files appear as external notes. */
@@ -510,16 +559,44 @@ export class NoteStore {
     return this.list().filter((note) => note.externalRoot === full)
   }
 
-  removeExternal(notePath: string): boolean {
+  /** Read a note by identity. Everything outside this class uses this. */
+  read(id: string): Note {
+    return this.readByPath(this.resolvePath(id))
+  }
+
+  /** Unlink a single externally linked note, by identity. */
+  removeExternal(id: string): boolean {
+    const notePath = this.resolvePath(id)
     if (!isAbsolute(notePath)) return false
-    const row = this.openedRow(notePath)
+    this.idIndex.delete(id)
+    return this.unlinkRegistered(notePath)
+  }
+
+  /**
+   * Unlink a registered folder, by its path.
+   *
+   * Deliberately not the same call as removeExternal: a folder is not a note
+   * and has no id, so routing it through an id-keyed method would mean
+   * inventing one. Kept separate rather than overloaded.
+   */
+  removeLinkedFolder(rootPath: string): boolean {
+    if (!isAbsolute(rootPath)) return false
+    const removed = this.unlinkRegistered(rootPath)
+    // The notes it surfaced are gone from the library, so their cached
+    // locations are stale.
+    if (removed) this.idIndex.clear()
+    return removed
+  }
+
+  private unlinkRegistered(path: string): boolean {
+    const row = this.openedRow(path)
     if (!row) return false
     const remove = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM opened_files WHERE path = ?').run(notePath)
+      this.db.prepare('DELETE FROM opened_files WHERE path = ?').run(path)
       // Removing a folder also drops pin/reminder metadata entries created
       // for its children, so they don't linger as standalone links.
       if (row.kind === 'folder') {
-        this.db.prepare("DELETE FROM opened_files WHERE path LIKE ? || '/%'").run(notePath)
+        this.db.prepare("DELETE FROM opened_files WHERE path LIKE ? || '/%'").run(path)
       }
     })
     remove()
@@ -543,11 +620,13 @@ export class NoteStore {
     }
     writeFileSync(this.resolveWithin(path), serializeNoteFile(meta, ''), 'utf-8')
 
+    this.remember({ id, path })
     return { ...meta, path, folder: '', excerpt: '', body: '' }
   }
 
-  save(relPath: string, options: SaveOptions): Note {
-    const existing = this.read(relPath)
+  save(id: string, options: SaveOptions): Note {
+    const relPath = this.resolvePath(id)
+    const existing = this.readByPath(relPath)
     const external = isAbsolute(relPath)
     // A title set outside the editor (sidebar rename) rewrites the body's
     // leading title block; editor saves derive the title from that block, so
@@ -561,7 +640,7 @@ export class NoteStore {
       // the file (and the file's identity on disk) is left untouched.
       const raw = readFileSync(relPath, 'utf-8')
       writeFileSync(relPath, replaceExternalBody(raw, body), 'utf-8')
-      return this.read(relPath)
+      return this.readByPath(relPath)
     }
 
     const meta: NoteMeta = {
@@ -583,6 +662,9 @@ export class NoteStore {
     }
 
     writeFileSync(this.resolveNotePath(targetPath), serializeNoteFile(meta, body), 'utf-8')
+    // A rename moved the file; the index has to learn the new location before
+    // anything else asks for this id.
+    this.remember({ id: meta.id, path: targetPath })
     return {
       ...meta,
       path: targetPath,
@@ -593,7 +675,8 @@ export class NoteStore {
   }
 
   // Toggle pin without bumping updatedAt, so pinning never reorders the list.
-  setPinned(relPath: string, pinned: boolean): NoteSummary | null {
+  setPinned(id: string, pinned: boolean): NoteSummary | null {
+    const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
       if (!root) return null
@@ -619,7 +702,8 @@ export class NoteStore {
 
   // Set or clear a note's one-shot reminder without bumping updatedAt, mirroring
   // setPinned — reminders shouldn't reorder the recency-sorted sidebar list.
-  setReminder(relPath: string, reminderAt: string | null): NoteSummary | null {
+  setReminder(id: string, reminderAt: string | null): NoteSummary | null {
+    const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
       if (!root) return null
@@ -674,11 +758,13 @@ export class NoteStore {
     return { trashName, originalPath: relPath, isFolder }
   }
 
-  delete(relPath: string): DeletedEntry {
+  delete(id: string): DeletedEntry {
+    const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) throw new Error('Use Remove from Noteato for linked files.')
+    this.idIndex.delete(id)
     let title = baseName(relPath).replace(/\.(md|markdown)$/i, '')
     try {
-      title = this.read(relPath).title || title
+      title = this.readByPath(relPath).title || title
     } catch {
       /* unreadable — keep the filename */
     }
@@ -840,7 +926,7 @@ export class NoteStore {
 
       let body: string
       try {
-        body = this.read(summary.path).body
+        body = this.readByPath(summary.path).body
       } catch {
         continue
       }

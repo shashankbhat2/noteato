@@ -75,7 +75,6 @@ interface OpenTarget {
 const noteView = (note: OpenTarget): PaneView => ({
   kind: 'note',
   id: note.id,
-  path: note.path,
   title: note.title
 })
 
@@ -312,8 +311,10 @@ export default function MainLayout() {
         const view = pane.view
         if (view.kind !== 'note') return pane
         const found = list.find((note) => note.id === view.id)
-        if (!found || (found.path === view.path && found.title === view.title)) return pane
-        return { ...pane, view: { ...view, path: found.path, title: found.title } }
+        // Only the label can drift now — the id a pane holds is stable across
+        // renames, which is the whole point of keying on it.
+        if (!found || found.title === view.title) return pane
+        return { ...pane, view: { ...view, title: found.title } }
       })
     )
   }
@@ -467,22 +468,14 @@ export default function MainLayout() {
   // A pane's stored path is its bootstrap value and can lag behind a rename, so
   // OS-level actions resolve the note's current path by id — refreshing once if
   // the local list is the stale one.
-  const notePathOf = async (id: string): Promise<string | null> => {
-    const known = notes.find((n) => n.id === id)
-    if (known) return known.path
-    return (await refresh()).find((n) => n.id === id)?.path ?? null
-  }
-
-  // The main process rejects paths it can no longer resolve (a linked file
-  // unlinked or deleted since the list was built) — nothing useful to report.
+  // The main process rejects ids it can no longer resolve (a note deleted or
+  // unlinked since the list was built) — nothing useful to report.
   const copyNotePath = async (id: string): Promise<void> => {
-    const path = await notePathOf(id)
-    if (path) await window.api.notes.copyPath(path).catch(() => {})
+    await window.api.notes.copyPath(id).catch(() => {})
   }
 
   const revealNote = async (id: string): Promise<void> => {
-    const path = await notePathOf(id)
-    if (path) await window.api.notes.revealInFinder(path).catch(() => {})
+    await window.api.notes.revealInFinder(id).catch(() => {})
   }
 
   const handleCreate = async (title = 'Untitled'): Promise<void> => {
@@ -494,8 +487,8 @@ export default function MainLayout() {
   // Rename from the sidebar. Saving with a new title also slug-renames the
   // file, so re-point the open pane (if any) to the new path.
   const handleRenameNote = async (note: NoteSummary, title: string): Promise<void> => {
-    const full = await window.api.notes.read(note.path)
-    const saved = await window.api.notes.save(note.path, {
+    const full = await window.api.notes.read(note.id)
+    const saved = await window.api.notes.save(note.id, {
       title,
       body: full.body,
       tags: full.tags,
@@ -506,12 +499,12 @@ export default function MainLayout() {
   }
 
   const handleTogglePin = async (note: NoteSummary): Promise<void> => {
-    await window.api.notes.setPinned(note.path, !note.pinned)
+    await window.api.notes.setPinned(note.id, !note.pinned)
     await refresh()
   }
 
   const handleSetReminder = async (note: NoteSummary, reminderAt: string | null): Promise<void> => {
-    const updated = await window.api.notes.setReminder(note.path, reminderAt)
+    const updated = await window.api.notes.setReminder(note.id, reminderAt)
     if (!updated) return
     setNotes((prev) =>
       prev.map((n) => (n.id === updated.id ? { ...n, reminderAt: updated.reminderAt } : n))
@@ -546,7 +539,7 @@ export default function MainLayout() {
       await refresh()
       return
     }
-    const token = await window.api.notes.delete(c.note.path)
+    const token = await window.api.notes.delete(c.note.id)
     closeNotePanes(c.note.id)
     await refresh()
     showUndo(token, `Deleted “${c.note.title || 'Untitled'}”`)
@@ -609,7 +602,7 @@ export default function MainLayout() {
 
   const handleRemoveExternal = async (note: NoteSummary): Promise<void> => {
     if (!note.external) return
-    await window.api.notes.removeExternal(note.path)
+    await window.api.notes.removeExternal(note.id)
     closeNotePanes(note.id)
     await refresh()
   }
@@ -617,7 +610,7 @@ export default function MainLayout() {
   // Unlink a whole registered folder; close any panes showing notes from it.
   const handleRemoveLinkedFolder = async (rootPath: string): Promise<void> => {
     const affected = notes.filter((n) => n.externalRoot === rootPath)
-    await window.api.notes.removeExternal(rootPath)
+    await window.api.notes.removeLinkedFolder(rootPath)
     affected.forEach((n) => closeNotePanes(n.id))
     await refresh()
   }
@@ -764,7 +757,7 @@ export default function MainLayout() {
       case 'note':
         return (
           <NoteEditor
-            path={view.path}
+            noteId={view.id}
             onSaved={handleNoteSaved}
             onEditorReady={(editor) => registerEditor(view.id, editor)}
             paneControls={controls}
@@ -912,7 +905,7 @@ export default function MainLayout() {
       {searchOpen && (
         <SearchModal
           onClose={() => setSearchOpen(false)}
-          onSelect={(r) => openInFocused({ kind: 'note', id: r.id, path: r.path, title: r.title })}
+          onSelect={(r) => openInFocused({ kind: 'note', id: r.id, title: r.title })}
         />
       )}
       {notionGuideOpen && (

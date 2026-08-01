@@ -45,16 +45,19 @@ const api = {
   },
   notes: {
     list: () => ipcRenderer.invoke('notes:list'),
-    read: (path: string) => ipcRenderer.invoke('notes:read', path),
+    read: (id: string) => ipcRenderer.invoke('notes:read', id),
     create: (title?: string) => ipcRenderer.invoke('notes:create', title),
-    save: (path: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', path, options),
-    setPinned: (path: string, pinned: boolean): Promise<NoteSummary | null> =>
-      ipcRenderer.invoke('notes:setPinned', path, pinned),
-    setReminder: (path: string, reminderAt: string | null): Promise<NoteSummary | null> =>
-      ipcRenderer.invoke('notes:setReminder', path, reminderAt),
-    delete: (path: string): Promise<DeletedEntry> => ipcRenderer.invoke('notes:delete', path),
-    removeExternal: (path: string): Promise<boolean> =>
-      ipcRenderer.invoke('notes:removeExternal', path),
+    save: (id: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', id, options),
+    setPinned: (id: string, pinned: boolean): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:setPinned', id, pinned),
+    setReminder: (id: string, reminderAt: string | null): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:setReminder', id, reminderAt),
+    delete: (id: string): Promise<DeletedEntry> => ipcRenderer.invoke('notes:delete', id),
+    removeExternal: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke('notes:removeExternal', id),
+    /** Folders have no id — they are unlinked by path. */
+    removeLinkedFolder: (rootPath: string): Promise<boolean> =>
+      ipcRenderer.invoke('notes:removeLinkedFolder', rootPath),
     restore: (
       trashName: string,
       originalPath: string,
@@ -73,9 +76,9 @@ const api = {
       return () => ipcRenderer.removeListener('notes:external-open', listener)
     },
     getDir: () => ipcRenderer.invoke('notes:getDir'),
-    copyPath: (path: string): Promise<string> => ipcRenderer.invoke('notes:copyPath', path),
-    revealInFinder: (path: string): Promise<void> =>
-      ipcRenderer.invoke('notes:revealInFinder', path),
+    copyPath: (id: string): Promise<string> => ipcRenderer.invoke('notes:copyPath', id),
+    revealInFinder: (id: string): Promise<void> =>
+      ipcRenderer.invoke('notes:revealInFinder', id),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import'),
     openFolder: (): Promise<NoteSummary[]> => ipcRenderer.invoke('notes:openFolder'),

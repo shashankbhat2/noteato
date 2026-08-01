@@ -55,7 +55,8 @@ import NoteAiPanel from './NoteAiPanel'
 import TagBar from './TagBar'
 
 interface Props {
-  path: string
+  /** Identity, not location — a rename must not look like a different note. */
+  noteId: string
   onSaved: (note: Note) => void
   onEditorReady?: (editor: NoteatoEditor | null) => void
   /**
@@ -281,7 +282,7 @@ function NoteSideMenu(props: React.ComponentProps<typeof SideMenu>) {
   )
 }
 
-export default function NoteEditor({ path, onSaved, onEditorReady, paneControls }: Props) {
+export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControls }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [headerTitle, setHeaderTitle] = useState('Untitled')
@@ -303,7 +304,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   useEffect(() => {
     setActiveSurface('note')
     setOutlineVisible(false)
-  }, [path])
+  }, [noteId])
   const overflowBtnRef = useRef<HTMLButtonElement>(null)
   // The overflow menu is built at click time from these, not from the render
   // closure that happened to create the handler.
@@ -314,9 +315,9 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   // must not write the pre-edit list back, so saves read the tags from here
   // rather than from whichever `note` their closure captured.
   const tagsRef = useRef<string[]>([])
-  // The path this pane is actually showing. Editing a title renames the file,
-  // so it drifts from the `path` prop the tab was opened with.
-  const livePathRef = useRef<string | null>(null)
+  // Whether this pane is already showing a note, so a switch can keep the old
+  // editor mounted while the next one loads.
+  const hasLoadedRef = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const metadataRef = useRef<HTMLDivElement>(null)
   const reminderBtnRef = useRef<HTMLButtonElement>(null)
@@ -338,28 +339,17 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   }, [aiError])
 
   useEffect(() => {
-    // A rename feeds the note's new path back down through this prop. That's
-    // the note already on screen — reloading it would throw away the caret and
-    // any edits made since the save for nothing.
-    if (livePathRef.current === path) {
-      // Returning to the still-mounted note after another path failed to load
-      // should reveal that editor again instead of leaving the error screen up.
-      setLoadError(null)
-      setIsSwitchingNote(false)
-      return
-    }
-
     let cancelled = false
     // Keep the current editor mounted while the replacement note is read and
     // parsed. Clearing it here made the entire document shell collapse into a
     // centred loading message on every sidebar click, then expand again.
-    const replacingVisibleNote = livePathRef.current !== null
+    const replacingVisibleNote = hasLoadedRef.current
     if (replacingVisibleNote) setIsSwitchingNote(true)
     else setInitialBlocks('loading')
     setLoadError(null)
 
     const load = async (): Promise<void> => {
-      const loaded = await window.api.notes.read(path)
+      const loaded = await window.api.notes.read(noteId)
       if (cancelled) return
 
       const scratch = createNoteatoEditor()
@@ -374,7 +364,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
         // Commit every piece of note-specific layout together. React batches
         // these updates, so title metadata, width and editor content change in
         // one paint instead of walking through several intermediate layouts.
-        livePathRef.current = loaded.path
+        hasLoadedRef.current = true
         tagsRef.current = loaded.tags
         setNote(loaded)
         setHeaderTitle(loaded.title || 'Untitled')
@@ -407,7 +397,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
         switchSettleFrameRef.current = null
       }
     }
-  }, [path, loadAttempt])
+  }, [noteId, loadAttempt])
 
   const editor = useMemo(() => {
     if (initialBlocks === 'loading') return undefined
@@ -574,14 +564,13 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     nextCreatedAt?: string
   ): Promise<Note | undefined> => {
     if (!note) return undefined
-    const saved = await window.api.notes.save(note.path, {
+    const saved = await window.api.notes.save(noteId, {
       title: titleFromMarkdown(markdown) || 'Untitled',
       body: markdown,
       tags: tagsRef.current,
       createdAt: nextCreatedAt,
       fullWidth: nextFullWidth
     })
-    livePathRef.current = saved.path
     setNote(saved)
     setHeaderTitle(saved.title || 'Untitled')
     tagsRef.current = saved.tags
@@ -640,9 +629,6 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     }
   }
 
-  /** The path this pane is actually showing — a rename moves it off `path`. */
-  const currentPath = (): string => livePathRef.current ?? path
-
   /**
    * Everything the header used to show as a permanent glyph. These are real
    * actions, but occasional ones — a row of icons for each is the header
@@ -680,8 +666,8 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
           }
         },
         { separator: true, label: '' },
-        { label: 'Copy path', onClick: () => void window.api.notes.copyPath(currentPath()) },
-        { label: REVEAL_LABEL, onClick: () => void window.api.notes.revealInFinder(currentPath()) }
+        { label: 'Copy path', onClick: () => void window.api.notes.copyPath(noteId) },
+        { label: REVEAL_LABEL, onClick: () => void window.api.notes.revealInFinder(noteId) }
       ]
     })
   }
@@ -698,14 +684,14 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   // truth right now and will overwrite shortly anyway).
   useEffect(() => {
     if (!editor || !note?.external) return
-    const { id, path: notePath } = note
+    const { id } = note
     return window.api.notes.subscribeChanged((change) => {
       if (change.kind !== 'upsert' || change.note.id !== id) return
       if (saveTimer.current) return
       void (async () => {
         let latest: Note
         try {
-          latest = await window.api.notes.read(notePath)
+          latest = await window.api.notes.read(id)
         } catch {
           return
         }
@@ -755,7 +741,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     }
     let result
     try {
-      result = await window.api.notes.setReminder(base.path, reminderAt)
+      result = await window.api.notes.setReminder(noteId, reminderAt)
     } catch {
       return
     }
@@ -779,7 +765,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     }
     let result
     try {
-      result = await window.api.notes.setPinned(base.path, !base.pinned)
+      result = await window.api.notes.setPinned(noteId, !base.pinned)
     } catch {
       return
     }
@@ -805,7 +791,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
 
   useEffect(() => {
     void refreshTagSuggestions()
-  }, [path])
+  }, [noteId])
 
   // Tags ride along with a normal save, so this uses the same flush-first dance
   // as pin/reminder: a pending autosave may be about to rename the file.
@@ -1094,7 +1080,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
         <button
           className="empty-state-btn"
           onClick={() => {
-            livePathRef.current = null
+            hasLoadedRef.current = false
             setLoadAttempt((n) => n + 1)
           }}
         >
