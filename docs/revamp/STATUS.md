@@ -17,7 +17,7 @@ Last updated: 2026-08-01, end of Phase 1.
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
 | **1.5 — Identity migration** | ⬜ next | Path-keyed → id-keyed. Pure refactor, no on-disk change |
 | **2 — Capture path** | ⬜ | Mic, pre-roll ring buffer, commit to the §4.3 note format |
-| **3 — On-device ASR** | ⬜ | Benchmark, wire the winner, delete the Electron capture path |
+| **3 — On-device ASR** | ⬜ | FluidAudio (Parakeet on ANE) — benchmarked against whisper.cpp, then wired |
 | **4 — Retrieval** | ⬜ | Hybrid index, type-to-search, result → audio seek |
 | **5–7** | ⬜ | Dictation, meetings, tier gating |
 | **Signing (parallel track)** | ⬜ not started | Gates the *release* of 1–4, blocks no development |
@@ -136,6 +136,28 @@ src/main/agentClient.ts      the Electron side of the socket
 - **The HUD does not record.** Phase 2.
 - **`bench:panel` needs a window server**, so it is unreliable on hosted CI runners. It reports
   rather than gates there; the gate is meaningful locally.
+
+---
+
+## Engine decision (2026-08-01)
+
+On-device transcription will use **[FluidAudio](https://github.com/FluidInference/FluidAudio)**
+(Apache 2.0) — Swift-native Parakeet on the Apple Neural Engine — for voice notes, dictation and
+meetings. It resolves the open question from the plan: the well-known Parakeet path is Python, which
+a 150 MB menu-bar process cannot host.
+
+Checked rather than assumed: it resolves and builds against our toolchain (Swift 6.3, macOS 14
+target) and pulls **zero transitive dependencies**.
+
+Two things carried into the plan rather than taken at face value:
+
+- **The vendor's ~190× realtime is on an M4 Pro, with their audio.** Phase 3 still benchmarks it
+  against `whisper.cpp` on our M2 before wiring, because §6 asks for latency-per-accuracy, not a
+  press release.
+- **We will not use its speaker diarization**, despite it being the most tempting thing in the
+  package. §8 rules out N-speaker diarization deliberately; channel separation (mic = you, system
+  audio = them) is exact by construction rather than inferred. FluidAudio does the transcription;
+  the channels do the attribution. See Phase 6 in the plan.
 
 ---
 

@@ -195,6 +195,10 @@ largest piece of Phase 2; pulling it out is what makes Phase 2 estimable.
   `DistributedNotificationCenter`). Buffer discarded on pause, quit, and every commit. Never written.
 - Pre-roll length setting, 0–15 s, default 10, where **0 genuinely closes the stream** rather than
   buffering and discarding.
+- *Optional, if it lands cheaply:* FluidAudio's Silero VAD (arriving with the ASR dependency in
+  Phase 3) can mark where speech actually starts inside the buffered 10 seconds, so a commit trims
+  to the thought rather than to a fixed window. Nice-to-have, not a blocker — do not let it delay
+  the buffer itself, which is the differentiating piece.
 - HUD gets its waveform + elapsed timer. `Esc` / hotkey commits, `Cmd+Esc` discards.
 - Commit path: write the §4.3 note directory, AAC-encode to `audio.m4a`.
 - Migration: flat `<slug>.md` → `<timestamp>-<hash>/` directories. Reconcile-on-launch for notes
@@ -212,26 +216,51 @@ one-time flag so it can't re-fire. That precedent is in `storage.ts:142` and sho
 
 ## Phase 3 — On-device ASR · L
 
+**Engine: [FluidAudio](https://github.com/FluidInference/FluidAudio)** (Apache 2.0) — a Swift SDK
+running Parakeet on the Apple Neural Engine. This resolves the constraint that made Parakeet a
+question mark: the well-known Parakeet path is `parakeet-mlx`, which is Python, and a Python runtime
+inside a menu-bar process held to 150 MB resident does not work. FluidAudio is the Swift-native
+route that constraint was waiting on.
+
+Verified before writing this, not assumed:
+
+- Resolves and builds against our toolchain (Swift 6.3, `.macOS(.v14)` — the agent package already
+  targets that).
+- **Zero transitive dependencies.** It brings nothing else into the agent, which is worth a lot in a
+  process whose whole argument is that it stays small.
+- Apache 2.0, so it needs a `NOTICE` alongside the app's MIT licence. Small, but it is a real
+  obligation and easy to forget until someone asks.
+
+```swift
+.package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.12.4")
+```
+
 **Work**
 
-- Benchmark harness first, engines second. Fixed corpus, and report **RTF, WER, first-token latency,
-  peak memory, model download size** — the brief is explicit that the choice is latency-per-accuracy,
-  not WER alone.
-- Candidates: `whisper.cpp` with `large-v3-turbo` (Swift-package bindings exist), and Parakeet via a
-  Swift/CoreML path.
-- **A constraint the brief doesn't mention:** the well-known Parakeet MLX path is Python. Embedding a
-  Python runtime in a menu-bar process that must stay under 150 MB resident does not work. Parakeet
-  stays a candidate only via a Swift-native or CoreML route; if no such route holds up under
-  benchmarking, whisper.cpp wins by default and that should be recorded as the reason.
-- Streaming partials into the HUD for dictation; batch pass for voice notes.
-- Model downloaded on first run, not bundled.
-- **Delete the Electron capture path here.** `useDictation.ts`, `DictationPanel.tsx`, `Waveform.tsx`,
-  `deepgramApiKey`, the CSP entry, the README lines. The brief is explicit: two capture paths must not
-  ship. Deepgram returns as a labelled per-note "re-transcribe with cloud model" action — which now
-  has an obvious home: it is a named action in the Phase 0.5 bar.
+- **Benchmark first, wire second — the vendor number is not the number.** FluidAudio advertises
+  ~190× realtime on an M4 Pro; our budget is an M2, and RTF on someone else's hardware with someone
+  else's audio is a claim, not a measurement. Keep `whisper.cpp` + `large-v3-turbo` in the harness as
+  the control. Report **RTF, WER, first-token latency, peak memory, model download size** — §6 is
+  explicit that the pick is latency-per-accuracy, not WER alone.
+- `AsrManager` for the batch pass over committed voice notes; `SlidingWindowAsrManager` for streaming
+  partials into the HUD.
+- Models auto-download from HuggingFace on first use, which is exactly what §6 asks for (not bundled,
+  DMG stays small). **But** §9 requires the one-time app to be genuinely complete offline, and a
+  first run behind a firewall that cannot reach HuggingFace is a dead end. `ModelRegistry.baseURL`
+  points at a mirror — decide early whether we host one, and make the failure legible either way.
+- **Delete the Electron capture path here.** `useDictation.ts`, `Waveform.tsx`, `deepgramApiKey`, the
+  CSP entry, the README lines. Two capture paths must not ship. Deepgram returns as a labelled
+  per-note "re-transcribe with cloud model" action, which has an obvious home in the AI panel.
 
-**Proof** — transcription RTF **< 0.3×** on this M2; the feature flag from Phase 1 is removed, not
-merely defaulted.
+**Proof** — transcription RTF **< 0.3×** on this M2; the Phase 1 feature flag is removed, not merely
+defaulted.
+
+**The risk this adds, and it is a real one:** a loaded CoreML model is resident memory, and §10 caps
+the agent at 150 MB idle. Phase 1 measured 46.7 MB with no model, so there is room — but not
+unlimited room, and "idle" has to mean the model is *not* loaded. That implies a load/unload policy
+and a first-capture load cost, which trades against the 0 ms pre-roll promise. Measure both numbers
+in this phase (idle RSS with model unloaded, and load latency on first capture) rather than
+discovering the trade later.
 
 ---
 
@@ -281,6 +310,16 @@ pasteboard fallback that **restores the previous pasteboard contents**; verbatim
 Compatibility pass across Slack, Mail, Safari, Chrome, Terminal, iTerm, VS Code — the Electron and
 terminal cases are where AX injection usually breaks.
 
+**Engine** — the same FluidAudio stack as Phase 3, in its streaming configuration:
+`SlidingWindowAsrManager`, with **Parakeet EOU 120M** rather than the 0.6B file model. The EOU
+variant detects end-of-utterance, which is precisely the signal dictation needs to decide when a
+phrase is finished enough to inject. Silero VAD (also in the SDK) gates silence so a held key in a
+quiet room does not stream empty audio.
+
+Injecting on utterance boundaries rather than on a timer is what keeps §7's "verbatim-leaning, no
+rewriting" honest: text lands once and is not retroactively revised in the user's editor, which is
+the behaviour people notice and resent.
+
 **Proof** — a recorded compatibility matrix, not a claim.
 
 ---
@@ -293,6 +332,23 @@ The first feature that needs **Screen Recording** permission.
 separation only, shipped perfectly rather than N-speaker shipped adequately; renameable speaker
 labels persisted per note; timestamp-linked summaries; retained replayable audio. Detection prompt
 only behind explicit opt-in, never auto-record.
+
+**Use FluidAudio for the transcription here, and deliberately *not* for the diarization.** The SDK
+ships speaker diarization — LS-EEND streaming up to 10 speakers, Sortformer up to 4, offline VBx
+clustering with overlap handling. It is the most tempting thing in the package and adopting it would
+be a mistake:
+
+- §8 is explicit that N-speaker diarization "is where every competitor gets criticized; do not join
+  that pile." Taking it because it is *there* is exactly how that decision gets made by accident.
+- Channel separation already gives two-way attribution that is **exact**, not inferred — mic is you,
+  system audio is them, by construction. No embedding model can beat a guarantee, and every one of
+  them will occasionally be wrong in a way users can see.
+- Speaker *embeddings* are a different privacy conversation from transcription, on a product whose
+  central claim is that nothing leaves the machine. Not one to open without needing to.
+
+Run each channel through `AsrManager` separately and label by channel. If N-speaker is ever wanted
+(one room, one mic), it is an additive change on a foundation that already works — not a
+prerequisite.
 
 **Verify early, don't plan around it** — macOS 15 introduced periodic re-authorization prompts for
 screen capture. I don't know the current 26.x behaviour or whether signing changes it. Check this in
