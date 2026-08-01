@@ -36,6 +36,7 @@ import { SidebarModeManager } from './sidebarMode'
 import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
 import { AgentClient } from './agentClient'
+import { agentBinaryPath, launchAgentIfNeeded } from './agentLauncher'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 
 const appDb = getAppDb()
@@ -70,7 +71,12 @@ const globalShortcutManager = new GlobalShortcutManager(() => sidebarModeManager
 // while both capture paths coexist; the Electron path goes in Phase 3. Absent
 // agent is an ordinary state — the client retries quietly and the library works
 // exactly as before.
-const agentEnabled = process.env['NOTEATO_AGENT'] === '1'
+// On by default wherever the agent binary actually exists — requiring an env
+// var made sense while both capture paths coexisted, but after installing a
+// DMG there is nobody to set one. NOTEATO_AGENT=0 still turns it off.
+const agentEnabled =
+  process.env['NOTEATO_AGENT'] === '1' ||
+  (process.env['NOTEATO_AGENT'] !== '0' && agentBinaryPath() !== null)
 const agentClient = new AgentClient(
   (message) => {
     switch (message.type) {
@@ -691,7 +697,12 @@ app.whenReady().then(() => {
   const runtime = runtimeSettings()
   sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
   globalShortcutManager.sync(runtime)
-  if (agentEnabled) agentClient.start()
+  if (agentEnabled) {
+    // Try to connect first; only launch if nothing answers, so a user who
+    // already runs the agent themselves does not get a second one.
+    agentClient.start()
+    setTimeout(() => launchAgentIfNeeded(agentClient.isConnected()), 1200)
+  }
   edgeHoverWatcher.sync()
   trayManager.setEnabled(shouldKeepRunning())
 
