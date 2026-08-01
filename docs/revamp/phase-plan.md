@@ -17,16 +17,45 @@ Sizes are relative effort, not calendar: **S** ≈ a sitting, **M** ≈ a few da
 
 ---
 
-## Blocked on your decision
+## Decisions — resolved
 
-These block code, not scheduling. Phase 0.5 can start without them; Phase 1.5 cannot finish without (2).
+**1. AI: one bottom action bar on the note; AI opens as a window.** Not a deletion — a reshape. The
+two chat surfaces (`AgentPanel` hosted in a pane, and the second assistant in `HomeView`) collapse
+into a single bar of explicit, named actions at the foot of the note, with AI output opening in its
+own window rather than docking as a sidebar or pane.
 
-1. **The chat assistants** — `AgentPanel.tsx` (601 ln) and the second assistant in `HomeView`. §11
-   says delete; they're shipped README features. Deleting them is Phase 0.5 work if you say so.
-2. **Tags and `scratch_notes`** — both are user data already on disk. Determines the Phase 1.5 and
-   Phase 2 migration shape.
-3. **Reminders** — the brief never mentions them; they're shipped, with notification plumbing, and
-   `reminderAt` lives in note frontmatter. The §4.3 format needs a slot for them or the feature dies.
+This lands close to what §9 and §11 were actually asking for: no chat sidebar, AI acting on notes
+through named actions with visible output. The existing selection-AI work
+(`SelectionAiPopup.tsx`, `SelectionAiToolbar.tsx`) is the raw material — those actions move into the
+bar rather than being rewritten.
+
+It's also load-bearing later, not cosmetic: **the bar is the surface §9's traceability requirement
+lands on.** Summaries and action items carrying timestamp ranges back into the transcript need
+somewhere to be invoked from and somewhere to render. Building it in Phase 0.5 means Phase 4 has a
+home to put them in.
+
+**2. Tags, scratch notes and the sidebar panel all stay.** They are shipped features with user data
+on disk. This is an explicit, deliberate exception to §11's "no tag taxonomies" and to reading §4.2's
+"one flat stream" as *the app has exactly one store*. Recorded here so the deviation is a decision
+rather than a drift.
+
+**3. Reminders — assumed kept**, following from (2): `ReminderScheduler` serves both notes and
+scratch notes, and keeping the sidebar keeps the surface they appear on. The §4.3 `note.md`
+front-matter therefore carries `reminderAt` alongside `tags` and `pinned`. Correct this if the
+intent was narrower; nothing else in the plan depends on it.
+
+### What (2) changes downstream
+
+- **Phase 2:** the new `note.md` front-matter must carry `tags`, `pinned`, `fullWidth`, `reminderAt`.
+  The hand-rolled `key: value` parser survives Phase 2 intact — it only has to be replaced in Phase 4,
+  when §9's timestamp ranges introduce nesting it can't express.
+- **Phase 4 — the one with teeth:** if scratch notes persist as a separate store, **retrieval has to
+  index them too.** Otherwise the app ships the exact gap the product exists to close — a thing you
+  captured, that search cannot find, because it landed in the other store. Non-negotiable if (2)
+  holds; see the Phase 4 section.
+- **Phase 1:** the sidebar keeps `⌘⌥S`, so the agent owns at least two global hotkeys from day one
+  (capture + sidebar), and dictation later. `GlobalShortcutManager` is *deleted* in Phase 1, not
+  merely bypassed — the agent becomes the single owner of every global shortcut.
 
 ---
 
@@ -40,11 +69,14 @@ notarization in the release workflow. See audit §5a for why this matters more t
 
 ---
 
-## Phase 0.5 — Groundwork · S
+## Phase 0.5 — Groundwork and the action bar · M
+
+Two independent pieces. Both are pre-agent work in the existing codebase, and both should land
+before Phase 1.5, which is easier once (B) has removed a pane type.
+
+### A. Test and benchmark groundwork · S
 
 Nothing here is a feature. All of it is a prerequisite for measuring anything.
-
-**Work**
 
 - Vitest for the TS side; a `test` script; `npm test` in CI.
 - A Swift package skeleton at `agent/` with swift-testing wired, built in CI.
@@ -53,9 +85,23 @@ Nothing here is a feature. All of it is a prerequisite for measuring anything.
   These become the §10 gates; they already exist as throwaway scripts and produced the audit numbers.
 - Archive `plan.md`, `roadmap.md`, `tldraw-integration.md` → `docs/archive/`. They describe folders,
   iCloud sync and a hosted AI proxy; `roadmap.md` Phase 1 is literally the thing §11 forbids.
-- If you've decided on the chat assistants: delete them here, before any new code depends on them.
 
-**Proof** — `npm test` and the Swift tests run green in CI; the three benchmarks report numbers.
+### B. The note action bar · M
+
+- New `NoteActionBar` at the foot of the note editor: one row of explicit, named actions.
+- The selection-AI actions (`SelectionAiPopup`, `SelectionAiToolbar`) move into it. Reuse, not rewrite
+  — `ai/client.ts` and the `ai:stream` IPC channel stay exactly as they are.
+- AI output opens in **its own window**, not a pane and not a dock. New `BrowserWindow`, same preload.
+- Remove the assistant as a *pane type* (`AgentPanel` in `panes.ts`) and the `HomeView` assistant.
+- Collapse the three AI settings flags (`aiSelectionActions`, `aiAgentEnabled`,
+  `homeAssistantEnabled`) into what the new surface actually needs.
+- Update the README and replace `ss/assistant.png`, which documents the pane that's going away.
+
+**Sequencing note** — do (B) before Phase 1.5. Dropping the assistant pane type leaves `panes.ts`
+with one fewer case for the identity refactor to carry through.
+
+**Proof** — `npm test` and the Swift tests run green in CI; the three benchmarks report numbers; the
+action bar reaches parity with the selection-AI actions it replaces.
 
 **Risk** — CI runs on shared `macos-latest` runners, where absolute timings are noisy. Recommend the
 gate assert the §10 ceiling (80 ms / 150 ms) on a **median of N runs**, and publish the raw number as
@@ -104,6 +150,12 @@ real work that's easy to leave until it blocks someone.
 **Watch** — `runtimeSettings()` currently forces the tray and the only global shortcut off until
 `onboardingCompleted`. An always-resident agent inverts that assumption; check the first-run flow at
 the start of this phase, not the end.
+
+**Shortcut ownership** — the sidebar panel is staying, so `⌘⌥S` stays with it and the agent owns two
+global hotkeys from day one, three once dictation lands. `GlobalShortcutManager` is deleted here, not
+bypassed: Electron's `globalShortcut` stops being used entirely and the agent becomes the single
+registrar. Two processes racing to register the same accelerator is a bug that only shows up on
+someone else's machine.
 
 ---
 
@@ -174,7 +226,8 @@ one-time flag so it can't re-fire. That precedent is in `storage.ts:142` and sho
 - Model downloaded on first run, not bundled.
 - **Delete the Electron capture path here.** `useDictation.ts`, `DictationPanel.tsx`, `Waveform.tsx`,
   `deepgramApiKey`, the CSP entry, the README lines. The brief is explicit: two capture paths must not
-  ship. Deepgram returns as a labelled per-note "re-transcribe with cloud model" action.
+  ship. Deepgram returns as a labelled per-note "re-transcribe with cloud model" action — which now
+  has an obvious home: it is a named action in the Phase 0.5 bar.
 
 **Proof** — transcription RTF **< 0.3×** on this M2; the feature flag from Phase 1 is removed, not
 merely defaulted.
@@ -195,12 +248,18 @@ notes with a warm cache** — already over the 150 ms budget, with 1.5 KB bodies
 - **The index lives in the agent, not in Electron.** The agent owns embedding generation, it is the
   resident process, and HUD search must be fast with Electron closed. Electron queries it over IPC.
   This follows from §2 but is worth stating because it's the natural place to get it wrong.
+- **Index `scratch_notes` as well as the markdown library.** This follows from the decision to keep
+  scratch notes, and it is the requirement most likely to be missed, because the two stores have
+  always been deliberately separate. If retrieval covers only one of them, the app ships a thing you
+  captured that search cannot find — the precise failure the product exists to prevent. Tags feed the
+  same index as filters, since they're staying too.
 - Type-to-search in the HUD — same hotkey, no second surface.
 - Result → open the note, seek audio to the matched moment, play. §5 calls this the core interaction
   of the app; it should be the thing that gets polished, not the thing that gets finished last.
 
 **Proof** — first results **< 150 ms** at 5,000 notes, using the Phase 0.5 benchmark corpus so the
-number is directly comparable to the 190 ms baseline.
+number is directly comparable to the 190 ms baseline. A separate assertion that a scratch note and a
+voice note matching the same query both appear in one ranked list.
 
 ---
 
