@@ -164,7 +164,7 @@ someone else's machine.
 
 ---
 
-## Phase 1.5 — Identity migration · L — ⬜ NEXT
+## Phase 1.5 — Identity migration · L — ✅ DONE
 
 A pure refactor. No new features, no on-disk change, no user-visible difference. This exists purely
 to keep Phase 2 from becoming an XL.
@@ -185,7 +185,7 @@ largest piece of Phase 2; pulling it out is what makes Phase 2 estimable.
 
 ---
 
-## Phase 2 — Capture path · L
+## Phase 2 — Capture path · L — ⬜ NEXT
 
 **Work**
 

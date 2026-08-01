@@ -3,7 +3,7 @@
 Branch `revamp/agent-architecture`. Companion to [`phase-plan.md`](./phase-plan.md) (what to build)
 and [`phase-0-audit.md`](./phase-0-audit.md) (what was there before).
 
-Last updated: 2026-08-01, end of Phase 1.
+Last updated: 2026-08-01, end of Phase 1.5.
 
 ---
 
@@ -15,8 +15,8 @@ Last updated: 2026-08-01, end of Phase 1.
 | **0.5A — Test & benchmark groundwork** | ✅ done | Vitest, Swift package, 3 benchmarks, docs archived |
 | **0.5B — AI surface** | ✅ done | Per-note Chat tab; no floating dock |
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
-| **1.5 — Identity migration** | ⬜ next | Path-keyed → id-keyed. Pure refactor, no on-disk change |
-| **2 — Capture path** | ⬜ | Mic, pre-roll ring buffer, commit to the §4.3 note format |
+| **1.5 — Identity migration** | ✅ done | Notes keyed on id; renames no longer move a note out from under an open pane |
+| **2 — Capture path** | ⬜ next | Mic, pre-roll ring buffer, commit to the §4.3 note format |
 | **3 — On-device ASR** | ⬜ | FluidAudio (Parakeet on ANE) — benchmarked against whisper.cpp, then wired |
 | **4 — Retrieval** | ⬜ | Hybrid index, type-to-search, result → audio seek |
 | **5–7** | ⬜ | Dictation, meetings, tier gating |
@@ -75,10 +75,15 @@ down — ownership is exclusive at runtime, never shared.
 ### Tests and benchmarks
 
 ```bash
-npm test            # 22 TS tests
+npm test            # 35 TS tests
 npm run test:agent  # 14 Swift tests
 npm run bench       # all three §10 benchmarks
 ```
+
+`better-sqlite3` is a native addon built against Electron's ABI, so it cannot load under Vitest. Tests
+that touch `NoteStore` run against a stub (`test/stubs/better-sqlite3.ts`) that implements the
+statements the store issues and throws on anything else — a new query fails loudly rather than
+quietly returning nothing.
 
 ---
 
