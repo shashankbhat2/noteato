@@ -328,7 +328,7 @@ the behaviour people notice and resent.
 
 ---
 
-## Phase 6 — Meeting mode · L — ⬜ NEXT
+## Phase 6 — Meeting mode · L — 🟨 BUILT, UNVERIFIED (needs Screen Recording granted)
 
 The first feature that needs **Screen Recording** permission.
 
@@ -360,7 +360,7 @@ the first days of this phase; it affects the UX design, not just the plumbing.
 
 ---
 
-## Phase 7 — Tier gating · M
+## Phase 7 — Tier gating · M — ⬜ NEXT
 
 Local/cloud split per §9, licence check, settings, pricing copy. The rule that makes it honest:
 **the one-time app must be genuinely complete offline.** Add the "no user content is used for model

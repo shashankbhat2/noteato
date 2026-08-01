@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let mic = MicCapture()
     private let dictation = DictationSession()
     private var dictating = false
+    private let systemAudio = SystemAudioCapture()
+    private var inMeeting = false
 
     /// The user's own pause, distinct from "the mic happens to be closed".
     /// Screen lock does not set this, so unlocking restores listening — but it
@@ -39,7 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sidebar = hotkeys.register(.sidebar) { [weak self] in self?.toggleSidebar() }
         let library = hotkeys.register(.library) { [weak self] in self?.openLibrary() }
         let dictate = hotkeys.register(.dictate) { [weak self] in self?.toggleDictation() }
-        _ = dictate
+        let meeting = hotkeys.register(.meeting) { [weak self] in self?.toggleMeeting() }
+        _ = (dictate, meeting)
         if capture == nil || sidebar == nil || library == nil {
             // Another app already owns the combination. Not fatal — the menu
             // bar still works — but the user needs to know why their key does
@@ -230,6 +233,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    // MARK: - Meeting
+
+    private func toggleMeeting() {
+        if inMeeting { stopMeeting() } else { startMeeting() }
+    }
+
+    /// Two streams from one keypress: the microphone is you, system audio is
+    /// everyone else. Nothing joins the call and no bot appears in anyone's
+    /// participant list — this is the OS handing over audio it already plays.
+    private func startMeeting() {
+        guard SystemAudioCapture.hasPermission else {
+            explainScreenRecording()
+            return
+        }
+        if mic.state == .idle { mic.startListening() }
+        mic.beginCapture()
+        inMeeting = true
+        hud.show()
+        refreshStatusItem()
+
+        captureKeys = [
+            hotkeys.register(.commitCapture) { [weak self] in self?.stopMeeting() },
+            hotkeys.register(.discardCapture) { [weak self] in self?.discardMeeting() }
+        ].compactMap { $0 }
+
+        Task { [systemAudio] in
+            do {
+                try await systemAudio.start()
+            } catch {
+                await MainActor.run {
+                    self.inMeeting = false
+                    self.hud.hide()
+                    self.refreshStatusItem()
+                    self.reportDictationFailure(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func discardMeeting() {
+        finishMeeting(keep: false)
+    }
+
+    private func stopMeeting() {
+        finishMeeting(keep: true)
+    }
+
+    private func finishMeeting(keep: Bool) {
+        guard inMeeting else { return }
+        inMeeting = false
+        for token in captureKeys { hotkeys.unregister(token) }
+        captureKeys = []
+        hud.hide()
+
+        let mine = mic.endCapture(keep: keep)
+        let rate = mic.sampleRate
+        let vault = settings.notesDirectory
+        refreshStatusItem()
+
+        Task { [systemAudio] in
+            let theirs = await systemAudio.stop()
+            guard keep, !(mine.isEmpty && theirs.isEmpty) else { return }
+            do {
+                let committed = try MeetingWriter.commit(
+                    mic: mine, system: theirs, sampleRate: rate, vault: vault)
+                await MainActor.run {
+                    self.server.send(
+                        AgentMessage(type: .captureCommitted, path: committed.directory.path))
+                }
+            } catch {
+                await MainActor.run { self.reportCaptureFailure(error) }
+            }
+        }
+    }
+
+    private func explainScreenRecording() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Noteato needs Screen Recording to hear the other side"
+        alert.informativeText =
+            "macOS puts system audio behind the Screen Recording permission. Noteato never records your screen — it only takes the audio.\n\nOpen System Settings › Privacy & Security › Screen Recording and turn on Noteato, then press the meeting key again."
+        alert.addButton(withTitle: "Open Settings")
+        alert.addButton(withTitle: "Not now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn,
+            let url = URL(
+                string:
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     // MARK: - Dictation
 
     private func toggleDictation() {
@@ -337,6 +433,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let symbol: String
         let description: String
         switch mic.state {
+        case .recording where inMeeting:
+            symbol = "person.wave.2"
+            description = "Noteato — recording a meeting (you and system audio)"
         case .recording:
             symbol = "record.circle"
             description = "Noteato — recording"
@@ -369,6 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         add(menu, "Capture   ⌥⌘Space", #selector(menuCapture))
         add(menu, dictating ? "Stop dictation   ⌥⌘D" : "Dictate   ⌥⌘D", #selector(menuDictate))
+        add(menu, inMeeting ? "End meeting   ⇧⌥⌘Space" : "Record meeting   ⇧⌥⌘Space", #selector(menuMeeting))
         let pause = add(
             menu, pausedByUser ? "Resume listening" : "Pause listening", #selector(togglePause))
         pause.state = pausedByUser ? .on : .off
@@ -394,6 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuCapture() { toggleCapture() }
     @objc private func menuDictate() { toggleDictation() }
+    @objc private func menuMeeting() { toggleMeeting() }
     @objc private func menuOpenLibrary() { openLibrary() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 

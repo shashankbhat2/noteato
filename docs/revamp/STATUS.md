@@ -21,8 +21,8 @@ Last updated: 2026-08-01, end of Phase 3.
 
 | **4 — Retrieval** | ⏭️ skipped for now | Search still 197 ms; no type-to-search. **Blocks the ship set** |
 | **5 — Dictation** | 🟨 built | ⌥⌘D, streaming, injects into any app. Compatibility matrix partly verified |
-| **6 — Meetings** | ⬜ next | ScreenCaptureKit dual-stream |
-| **7 — Tier gating** | ⬜ | |
+| **6 — Meetings** | 🟨 built, unverified | Dual-stream + merge tested; **needs your Screen Recording grant to run at all** |
+| **7 — Tier gating** | ⬜ next | |
 | **Signing (parallel track)** | ⬜ not started | Gates the *release* of 1–4, blocks no development |
 
 ---
@@ -151,6 +151,33 @@ src/main/agentClient.ts      the Electron side of the socket
   rather than gates there; the gate is meaningful locally.
 
 ---
+
+## Meetings — blocked on a permission only you can grant
+
+`⇧⌥⌘Space` starts a meeting: microphone as one channel, system audio as the other. Attribution is
+exact by construction — the mic is you, system audio is them — rather than inferred from how voices
+sound. FluidAudio ships a speaker diarizer and we are deliberately **not** using it: §8 rules out
+N-speaker diarization, and a guarantee beats a good model here.
+
+**Verified:** the merge logic, with 12 tests — chronological reconstruction from shared timestamps,
+overlapping speech preserved rather than smoothed away, pause-based utterance splitting, renaming a
+side, and markdown with timestamps that point back into the audio.
+
+**Not verified — and it cannot be from here:** whether audio actually flows. `SystemAudioCapture`
+reports `screenRecordingGranted: false` on this machine, so no stream has ever started. To unblock:
+
+```
+npm run probe:meeting          # play something audible while it runs
+```
+
+It will tell you whether the permission is held, whether the stream starts, and whether audio is
+genuinely arriving — a stream that starts but delivers nothing is the failure that looks like
+success, so it has its own line in the output.
+
+**On the re-authorisation question the plan flagged:** the permission *check* is silent
+(`CGPreflightScreenCaptureAccess` does not prompt), which is what lets §8's "never auto-record"
+promise hold — merely checking cannot pop a dialog. Whether macOS 26 re-prompts periodically once
+granted is still unanswered, because nothing here has been granted yet.
 
 ## Dictation — what is verified, and what is not
 

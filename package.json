@@ -36,7 +36,8 @@
     "probe:capture": "swift run -c release --package-path agent CaptureProbe",
     "bench:asr": "swift run -c release --package-path agent AsrBench",
     "transcribe": "swift run -c release --package-path agent NoteatoTranscribe",
-    "probe:inject": "swift run -c release --package-path agent InjectProbe"
+    "probe:inject": "swift run -c release --package-path agent InjectProbe",
+    "probe:meeting": "swift run -c release --package-path agent MeetingProbe"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

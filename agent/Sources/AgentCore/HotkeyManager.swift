@@ -42,6 +42,12 @@ public final class HotkeyManager {
         public static let dictate = Shortcut(
             keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(optionKey | cmdKey))
 
+        /// ⇧⌥⌘Space — meeting. Its own key because it starts a second audio
+        /// stream and needs a permission the others do not; a modifier on
+        /// capture would hide that difference.
+        public static let meeting = Shortcut(
+            keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey | cmdKey | shiftKey))
+
         // Live only while the HUD is up. Registered globally because a
         // non-activating panel never becomes key and so cannot receive these
         // as ordinary key events — and unregistered the moment the HUD closes,

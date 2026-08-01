@@ -62,6 +62,8 @@ let package = Package(
                 ])
             ]
         ),
+        // Answers §8's screen-capture permission question, which only the OS can.
+        .executableTarget(name: "MeetingProbe", dependencies: ["AgentCore"]),
         // Answers §7's compatibility question, which only a real app can.
         .executableTarget(name: "InjectProbe", dependencies: ["AgentCore"]),
         .executableTarget(
