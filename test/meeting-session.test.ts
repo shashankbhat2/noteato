@@ -60,6 +60,52 @@ describe('MeetingSession', () => {
     expect(session.getState().phase).toBe('idle')
   })
 
+  describe('transcribing', () => {
+    it('passes through transcribing on the way back to idle', () => {
+      const session = new MeetingSession()
+      session.start('note-a')
+
+      expect(session.beginTranscribing()).toBe(true)
+      expect(session.getState().phase).toBe('transcribing')
+      // The note is still needed: transcription has to know where to put itself.
+      expect(session.getState().noteId).toBe('note-a')
+
+      expect(session.finishTranscribing()).toBe(true)
+      expect(session.getState()).toEqual({ phase: 'idle', startedAt: null, noteId: null })
+    })
+
+    // Transcription can take minutes on a long meeting. Starting a second
+    // recording on top of one still being processed would contend for the
+    // microphone and race two writes into the same note.
+    it('refuses a new recording while transcribing', () => {
+      const session = new MeetingSession()
+      session.start()
+      session.beginTranscribing()
+
+      expect(session.start()).toBe(false)
+      expect(session.toggle()).toBe(false)
+      expect(session.getState().phase).toBe('transcribing')
+    })
+
+    it('ignores transcribing transitions from the wrong phase', () => {
+      const session = new MeetingSession()
+
+      expect(session.beginTranscribing()).toBe(false)
+      expect(session.finishTranscribing()).toBe(false)
+      expect(session.getState().phase).toBe('idle')
+    })
+
+    it('cannot be stopped or discarded mid-transcription', () => {
+      const session = new MeetingSession()
+      session.start()
+      session.beginTranscribing()
+
+      expect(session.stop()).toBe(false)
+      expect(session.discard()).toBe(false)
+      expect(session.getState().phase).toBe('transcribing')
+    })
+  })
+
   describe('per note', () => {
     it('attaches the recording to the note that started it', () => {
       const session = new MeetingSession()

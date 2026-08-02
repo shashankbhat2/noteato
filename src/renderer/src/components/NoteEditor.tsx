@@ -28,6 +28,8 @@ import {
 import type { MeetingState, Note, NoteRecording } from '../../../shared/types'
 import { elapsedLabel } from '../../../shared/elapsed'
 import RecordingPlayer from './RecordingPlayer'
+import TranscriptView from './TranscriptView'
+import type { MeetingTranscript } from '../../../shared/meetingTranscript'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
@@ -308,6 +310,9 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   })
   const [recordElapsed, setRecordElapsed] = useState('')
   const [recording, setRecording] = useState<NoteRecording | null>(null)
+  const [transcript, setTranscript] = useState<MeetingTranscript | null>(null)
+  const [playhead, setPlayhead] = useState(0)
+  const seekRef = useRef<((seconds: number) => void) | null>(null)
 
   useEffect(() => {
     void window.api.meeting.getState().then(setMeeting)
@@ -322,14 +327,22 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       void window.api.meeting.getRecording(noteId).then((found) => {
         if (!cancelled) setRecording(found)
       })
+      void window.api.meeting.getTranscript(noteId).then((found) => {
+        if (!cancelled) setTranscript(found)
+      })
     }
     load()
-    const unsubscribe = window.api.meeting.subscribeRecorded((recordedNoteId) => {
-      if (recordedNoteId === noteId) load()
-    })
+    const unsubscribers = [
+      window.api.meeting.subscribeRecorded((changed) => {
+        if (changed === noteId) load()
+      }),
+      window.api.meeting.subscribeTranscript((changed) => {
+        if (changed === noteId) load()
+      })
+    ]
     return () => {
       cancelled = true
-      unsubscribe()
+      for (const unsubscribe of unsubscribers) unsubscribe()
     }
   }, [noteId])
 
@@ -1159,6 +1172,15 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   reminderAtRef.current = reminderAt
   fullWidthRef.current = fullWidth
 
+  const transcriptLabel =
+    recording?.transcriptStatus === 'pending'
+      ? { title: 'Transcribing…', detail: 'This runs on your Mac; long meetings take a while.' }
+      : recording?.transcriptStatus === 'failed'
+        ? { title: 'Transcription failed', detail: 'The recording is safe and still playable.' }
+        : recording
+          ? { title: 'No transcript', detail: 'This recording has not been transcribed.' }
+          : { title: 'Transcript', detail: 'The recording transcript will appear here.' }
+
   const recordingThisNote = meeting.phase === 'recording' && meeting.noteId === note.id
   // One recording at a time: while another note owns it, this button reports
   // why it is unavailable rather than silently doing nothing.
@@ -1373,16 +1395,28 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         }
         role="tabpanel"
       >
-        <div className="note-transcription-empty">
-          <Microphone size={18} />
-          <strong>Transcript</strong>
-          <span>
-            {recording
-              ? 'Transcription is not wired up yet — the recording is playable below.'
-              : 'The recording transcript will appear here.'}
-          </span>
-        </div>
-        {recording && <RecordingPlayer recording={recording} />}
+        {transcript ? (
+          <TranscriptView
+            transcript={transcript}
+            playheadSeconds={playhead}
+            onSeek={(seconds) => seekRef.current?.(seconds)}
+          />
+        ) : (
+          <div className="note-transcription-empty">
+            <Microphone size={18} />
+            <strong>{transcriptLabel.title}</strong>
+            <span>{transcriptLabel.detail}</span>
+          </div>
+        )}
+        {recording && (
+          <RecordingPlayer
+            recording={recording}
+            onPosition={setPlayhead}
+            registerSeek={(seek) => {
+              seekRef.current = seek
+            }}
+          />
+        )}
       </div>
 
       {chatOpen && (

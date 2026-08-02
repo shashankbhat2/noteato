@@ -1104,38 +1104,55 @@ button {
 /* Everything that isn't a note. Icons only: these are five fixed destinations
    and their glyphs carry them, where five more labelled rows would compete
    with the note list for attention. */
-/* Two named controls, not a row of glyphs you hover to identify. */
+/* Two named controls, not a row of glyphs you hover to identify. Inset to the
+   same gutter as the note rows so search, new and the library share one edge. */
 .sidebar-head {
   flex-shrink: 0;
-  padding: 4px 16px;
+  padding: 4px var(--sidebar-inset) 8px;
   border-bottom: none;
 }
 
-.sidebar-head-row {
+/* One control cut in two, not two widgets on a panel. It reads as sidebar
+   rather than as an object sitting on it: no hairline, no elevated fill —
+   a single tonal step off --sidebar-bg, the same move the rows below make on
+   hover, at the rows' radius. Each half lights on its own so the seam stays
+   legible without a divider doing the work. */
+.sidebar-omni {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: stretch;
+  height: var(--row-h);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--sidebar-hover) 55%, transparent);
+  /* Clips each half's hover wash back to the shell's corners. */
+  overflow: hidden;
+  transition: background-color var(--dur-fast) var(--ease);
 }
 
-.sidebar-search {
+.sidebar-omni:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) 75%, transparent);
+}
+
+.sidebar-search,
+.sidebar-new {
   display: flex;
-  min-width: 0;
-  flex: 1;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 9px;
-  border: 1px solid var(--subtleBorder);
-  border-radius: var(--radius-sm);
-  background: var(--elevatedSurface);
+  border: none;
+  background: transparent;
   color: var(--mutedText);
   font: inherit;
   font-size: 12px;
-  text-align: left;
   cursor: pointer;
   transition:
-    border-color var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
+}
+
+.sidebar-search {
+  min-width: 0;
+  flex: 1;
+  gap: 6px;
+  padding: 0 8px 0 9px;
+  text-align: left;
 }
 
 .sidebar-search span {
@@ -1146,9 +1163,10 @@ button {
   white-space: nowrap;
 }
 
-.sidebar-search:hover {
+.sidebar-search:hover,
+.sidebar-new:hover {
   color: var(--primaryText);
-  border-color: var(--borderColor);
+  background: var(--sidebar-hover);
 }
 
 .sidebar-search kbd {
@@ -1158,30 +1176,37 @@ button {
   opacity: 0.8;
 }
 
+/* The short rule is the only seam: a divider inset from the shell's top and
+   bottom, so the halves separate without the control gaining an outline. */
 .sidebar-new {
-  display: flex;
-  align-items: center;
+  position: relative;
   gap: 5px;
-  height: 30px;
   padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: var(--surface-hover);
   color: var(--secondaryText);
-  font: inherit;
-  font-size: 12px;
   font-weight: 550;
-  cursor: pointer;
-  transition:
-    color var(--dur-fast) var(--ease),
-    border-color var(--dur-fast) var(--ease),
-    background-color var(--dur-fast) var(--ease);
 }
 
-.sidebar-new:hover {
-  color: var(--primaryText);
-  border-color: transparent;
-  background: var(--hoverSurface);
+.sidebar-new::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--subtleBorder);
+  transition: opacity var(--dur-fast) var(--ease);
+}
+
+/* With either half washed, the seam is already drawn by the fill. */
+.sidebar-search:hover ~ .sidebar-new::before,
+.sidebar-new:hover::before {
+  opacity: 0;
+}
+
+.sidebar-search:focus-visible,
+.sidebar-new:focus-visible {
+  outline: 2px solid var(--focusRing);
+  outline-offset: -2px;
 }
 
 /* Utilities, at the foot: reachable without competing with the library. */
@@ -2776,6 +2801,75 @@ body.resizing-panes .editor-pane {
   overflow: hidden;
   /* Containing block for the floating player. */
   position: relative;
+}
+
+/* With a transcript the surface becomes a scrolling column rather than a
+   centred placeholder. */
+.note-transcription-surface.active:has(.transcript-view) {
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow-y: auto;
+}
+
+.transcript-view {
+  width: 100%;
+  max-width: var(--view-measure);
+  margin: 0 auto;
+  /* Bottom room so the floating player never covers the last exchange. */
+  padding: 22px 28px 92px;
+}
+
+.transcript-segment {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  scroll-margin: 24px;
+}
+
+.transcript-segment.active {
+  background: var(--accent-soft);
+}
+
+.transcript-segment-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.transcript-speaker {
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--primaryText);
+}
+
+/* "Them" is the other side of the call — tinted so a long meeting is scannable
+   without reading every name. */
+.transcript-segment.them .transcript-speaker {
+  color: var(--accent);
+}
+
+.transcript-stamp {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--mutedText);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.transcript-stamp:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.transcript-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.62;
+  color: var(--text);
+  white-space: pre-wrap;
 }
 
 .note-transcription-empty {

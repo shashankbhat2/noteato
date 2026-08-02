@@ -38,6 +38,8 @@ import { GlobalShortcutManager } from './globalShortcuts'
 import { removeStaleAgent } from './staleAgent'
 import { MeetingRecorder } from './meeting/recorder'
 import { RecordingStore } from './meeting/recordingStore'
+import { transcribeCapture } from './meeting/transcribe'
+import { SherpaServer } from './asr/sherpaServer'
 import { RecorderWindow } from './recorderWindow'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 
@@ -69,6 +71,7 @@ const reminderScheduler = new ReminderScheduler(
 )
 const recorderWindow = new RecorderWindow(appDb)
 const recordingStore = new RecordingStore(appDb)
+const sherpaServer = new SherpaServer()
 const meetingRecorder = new MeetingRecorder({
   getVault: () => noteStore.getNotesDir(),
   onStateChange: (state) => {
@@ -88,7 +91,7 @@ const meetingRecorder = new MeetingRecorder({
     }
     if (error.code === 'screen_recording_denied') explainScreenRecording()
   },
-  onCommitted: (recording) => {
+  onCommitted: async (recording) => {
     // A recording started from the tray or the accelerator carries no note —
     // the ordinary case, since a meeting starts while you are looking at Zoom.
     // Give it one, so the audio is reachable from the library rather than only
@@ -113,11 +116,34 @@ const meetingRecorder = new MeetingRecorder({
 
     reminderScheduler.rebuildAll()
     broadcastNoteChange({ kind: 'refresh' })
-    for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send('meeting:recorded', noteId)
+    broadcastMeeting('meeting:recorded', noteId)
+
+    // Transcription runs while the session is still in `transcribing`, so the
+    // pill keeps reporting work that is genuinely still happening.
+    recordingStore.setTranscriptStatus(noteId, 'pending')
+    broadcastMeeting('meeting:transcript-changed', noteId)
+    try {
+      await transcribeCapture(sherpaServer, recording.dir, (received, total) => {
+        // Only meaningful on the first meeting, when the model is downloading.
+        broadcastMeeting('meeting:model-progress', { received, total })
+      })
+      recordingStore.setTranscriptStatus(noteId, 'ready')
+    } catch (error) {
+      recordingStore.setTranscriptStatus(noteId, 'failed')
+      // Rethrown so the recorder reports it; the audio is safe either way, and
+      // a failed transcript is worth saying out loud rather than swallowing.
+      throw error
+    } finally {
+      broadcastMeeting('meeting:transcript-changed', noteId)
     }
   }
 })
+
+function broadcastMeeting(channel: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(channel, payload)
+  }
+}
 const globalShortcutManager = new GlobalShortcutManager(
   () => sidebarModeManager.toggle(),
   () => meetingRecorder.toggle()
@@ -667,6 +693,9 @@ function registerIpcHandlers(): void {
   })
   ipcMain.handle('meeting:getState', () => meetingRecorder.getState())
   ipcMain.handle('meeting:getRecording', (_e, noteId: string) => recordingStore.get(noteId))
+  ipcMain.handle('meeting:getTranscript', (_e, noteId: string) =>
+    recordingStore.readTranscript(noteId)
+  )
   ipcMain.handle('meeting:start', (_e, noteId: string | null = null) => {
     meetingRecorder.start(noteId)
     return meetingRecorder.getState()
@@ -789,6 +818,7 @@ app.on('will-quit', () => {
   // Close the helper's files rather than killing it: an m4a without its moov
   // atom is an hour of audio nobody can play.
   meetingRecorder.shutdown()
+  sherpaServer.stop()
   recorderWindow.destroy()
   globalShortcutManager.destroy()
   edgeHoverWatcher.stop()

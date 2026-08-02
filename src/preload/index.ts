@@ -22,6 +22,7 @@ import type {
   SidebarModeState,
   TrashEntry
 } from '../shared/types'
+import type { MeetingTranscript } from '../shared/meetingTranscript'
 
 let nextAiStreamRequestId = 0
 
@@ -138,6 +139,8 @@ const api = {
     getState: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:getState'),
     getRecording: (noteId: string): Promise<NoteRecording | null> =>
       ipcRenderer.invoke('meeting:getRecording', noteId),
+    getTranscript: (noteId: string): Promise<MeetingTranscript | null> =>
+      ipcRenderer.invoke('meeting:getTranscript', noteId),
     /** Omit `noteId` to record into a new note. */
     start: (noteId?: string | null): Promise<MeetingState> =>
       ipcRenderer.invoke('meeting:start', noteId ?? null),
@@ -165,6 +168,19 @@ const api = {
       const listener = (_e: Electron.IpcRendererEvent, noteId: string): void => callback(noteId)
       ipcRenderer.on('meeting:recorded', listener)
       return () => ipcRenderer.removeListener('meeting:recorded', listener)
+    },
+    subscribeTranscript: (callback: (noteId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, noteId: string): void => callback(noteId)
+      ipcRenderer.on('meeting:transcript-changed', listener)
+      return () => ipcRenderer.removeListener('meeting:transcript-changed', listener)
+    },
+    subscribeModelProgress: (callback: (p: { received: number; total: number }) => void) => {
+      const listener = (
+        _e: Electron.IpcRendererEvent,
+        p: { received: number; total: number }
+      ): void => callback(p)
+      ipcRenderer.on('meeting:model-progress', listener)
+      return () => ipcRenderer.removeListener('meeting:model-progress', listener)
     }
   },
   reminders: {

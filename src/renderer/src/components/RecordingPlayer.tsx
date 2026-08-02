@@ -13,6 +13,10 @@ const SPEEDS = [1, 1.25, 1.5, 2] as const
 
 interface Props {
   recording: NoteRecording
+  /** Drives the transcript's highlight of the segment being played. */
+  onPosition?: (seconds: number) => void
+  /** Hands the transcript a way to seek, so clicking a timestamp jumps here. */
+  registerSeek?: (seek: (seconds: number) => void) => void
 }
 
 function fileUrl(path: string): string {
@@ -29,7 +33,7 @@ function fileUrl(path: string): string {
  * clock and the system element is slaved to it, so seeking, pausing and rate
  * changes stay in step without either track being mixed down on disk.
  */
-export default function RecordingPlayer({ recording }: Props) {
+export default function RecordingPlayer({ recording, onPosition, registerSeek }: Props) {
   const micRef = useRef<HTMLAudioElement>(null)
   const systemRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
@@ -76,8 +80,13 @@ export default function RecordingPlayer({ recording }: Props) {
       mic.currentTime = Math.min(Math.max(0, seconds), duration || mic.duration || 0)
       resync(true)
       setPosition(mic.currentTime)
+      onPosition?.(mic.currentTime)
+      // Clicking a transcript timestamp means "play from here", not "move the
+      // cursor and wait" — so a paused player starts.
+      if (mic.paused) void mic.play().catch(() => setFailed(true))
+      if (systemRef.current?.paused) void systemRef.current.play().catch(() => {})
     },
-    [duration, resync]
+    [duration, onPosition, resync]
   )
 
   useEffect(() => {
@@ -86,6 +95,7 @@ export default function RecordingPlayer({ recording }: Props) {
 
     const onTime = (): void => {
       setPosition(mic.currentTime)
+      onPosition?.(mic.currentTime)
       resync()
     }
     const onLoaded = (): void => {
@@ -113,7 +123,9 @@ export default function RecordingPlayer({ recording }: Props) {
       mic.removeEventListener('pause', onPause)
       mic.removeEventListener('ended', onEnded)
     }
-  }, [resync])
+  }, [onPosition, resync])
+
+  useEffect(() => registerSeek?.(seekTo), [registerSeek, seekTo])
 
   useEffect(() => {
     if (micRef.current) micRef.current.playbackRate = speed

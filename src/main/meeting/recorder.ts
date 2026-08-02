@@ -20,7 +20,7 @@ interface Options {
   onStateChange: (state: MeetingState) => void
   onLevels: (levels: AudioLevels) => void
   onError: (error: AudioError) => void
-  onCommitted: (recording: MeetingRecording) => void
+  onCommitted: (recording: MeetingRecording) => void | Promise<void>
 }
 
 /**
@@ -69,24 +69,38 @@ export class MeetingRecorder {
       onReady: () => {},
       onLevels: (levels) => this.options.onLevels(levels),
       onDone: (result) => {
-        // Read before stop() clears them.
+        // Read before the phase change clears them.
         const { noteId, startedAt } = this.session.getState()
         this.audio = null
         const dir = this.capture?.dir
         this.capture = null
 
-        if (this.discarding) {
+        if (this.discarding || !dir) {
           if (dir) removeCaptureDir(dir)
           this.discarding = false
-        } else if (dir) {
+          this.session.stop()
+          return
+        }
+
+        // Stay in `transcribing` for the whole of onCommitted: it creates the
+        // note, stores the row and runs transcription, and the pill should say
+        // so rather than disappearing while the note is still filling in.
+        this.session.beginTranscribing()
+        void Promise.resolve(
           this.options.onCommitted({
             dir,
             noteId,
             startedAt: startedAt ?? Date.now(),
             ...result
           })
-        }
-        this.session.stop()
+        )
+          .catch((error) => {
+            this.options.onError({
+              code: 'transcribe_failed',
+              message: error instanceof Error ? error.message : String(error)
+            })
+          })
+          .finally(() => this.session.finishTranscribing())
       },
       onError: (error) => {
         this.audio = null

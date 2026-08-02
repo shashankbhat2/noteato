@@ -52,13 +52,30 @@ export class MeetingSession {
     return true
   }
 
-  /**
-   * End the recording and keep it. Goes straight back to `idle` until there is
-   * something to transcribe; the `transcribing` hop belongs to the phase that
-   * earns it.
-   */
+  /** End the recording and keep it. */
   stop(): boolean {
     if (this.state.phase !== 'recording') return false
+    this.set(IDLE)
+    return true
+  }
+
+  /**
+   * The audio is closed and transcription has begun.
+   *
+   * A distinct phase rather than an early return to idle: transcription takes
+   * real time on a long meeting, and a UI that claimed to be finished while the
+   * note was still filling in would be lying. It also keeps a second recording
+   * from starting on top of one still being processed.
+   */
+  beginTranscribing(): boolean {
+    if (this.state.phase !== 'recording') return false
+    this.set({ ...this.state, phase: 'transcribing' })
+    return true
+  }
+
+  /** Transcription finished, succeeded or not — either way the session is over. */
+  finishTranscribing(): boolean {
+    if (this.state.phase !== 'transcribing') return false
     this.set(IDLE)
     return true
   }

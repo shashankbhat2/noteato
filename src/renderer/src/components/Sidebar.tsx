@@ -251,9 +251,10 @@ export default function Sidebar({
   return (
     <aside className={collapsed ? 'sidebar collapsed' : 'sidebar'}>
       {/* The two things the sidebar is for, named rather than drawn as glyphs
-          you have to hover to identify. */}
+          you have to hover to identify — and carried by one control cut in two
+          rather than two widgets sitting on the panel. */}
       <div className="sidebar-head">
-        <div className="sidebar-head-row">
+        <div className="sidebar-omni">
           <button className="sidebar-search" onClick={onSearch}>
             <Search size={15} />
             <span>Search notes…</span>

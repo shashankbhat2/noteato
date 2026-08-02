@@ -24,6 +24,7 @@ export type AudioErrorCode =
   | 'unsupported_os'
   | 'bad_arguments'
   | 'write_failed'
+  | 'transcribe_failed'
   | 'crashed'
 
 export interface AudioError {

@@ -19,6 +19,7 @@ import type {
   SidebarModeState,
   TrashEntry
 } from '../shared/types'
+import type { MeetingTranscript } from '../shared/meetingTranscript'
 
 export interface ContextMenuParams {
   x: number
@@ -91,6 +92,7 @@ interface NoteatoApi {
   meeting: {
     getState: () => Promise<MeetingState>
     getRecording: (noteId: string) => Promise<NoteRecording | null>
+    getTranscript: (noteId: string) => Promise<MeetingTranscript | null>
     /** Omit `noteId` to record into a new note. */
     start: (noteId?: string | null) => Promise<MeetingState>
     stop: () => Promise<MeetingState>
@@ -100,6 +102,10 @@ interface NoteatoApi {
     subscribeLevels: (callback: (levels: MeetingLevels) => void) => () => void
     subscribeError: (callback: (error: MeetingError) => void) => () => void
     subscribeRecorded: (callback: (noteId: string) => void) => () => void
+    subscribeTranscript: (callback: (noteId: string) => void) => () => void
+    subscribeModelProgress: (
+      callback: (p: { received: number; total: number }) => void
+    ) => () => void
   }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>
