@@ -4,7 +4,7 @@ import { MeetingSession } from '../src/main/meeting/session'
 describe('MeetingSession', () => {
   it('starts idle', () => {
     const session = new MeetingSession()
-    expect(session.getState()).toEqual({ phase: 'idle', startedAt: null })
+    expect(session.getState()).toEqual({ phase: 'idle', startedAt: null, noteId: null })
     expect(session.isRecording()).toBe(false)
   })
 
@@ -35,14 +35,14 @@ describe('MeetingSession', () => {
     const session = new MeetingSession()
     session.start()
     expect(session.stop()).toBe(true)
-    expect(session.getState()).toEqual({ phase: 'idle', startedAt: null })
+    expect(session.getState()).toEqual({ phase: 'idle', startedAt: null, noteId: null })
   })
 
   it('discard returns to idle', () => {
     const session = new MeetingSession()
     session.start()
     expect(session.discard()).toBe(true)
-    expect(session.getState()).toEqual({ phase: 'idle', startedAt: null })
+    expect(session.getState()).toEqual({ phase: 'idle', startedAt: null, noteId: null })
   })
 
   it('stop and discard are no-ops when idle', () => {
@@ -58,6 +58,62 @@ describe('MeetingSession', () => {
     expect(session.getState().phase).toBe('recording')
     session.toggle()
     expect(session.getState().phase).toBe('idle')
+  })
+
+  describe('per note', () => {
+    it('attaches the recording to the note that started it', () => {
+      const session = new MeetingSession()
+      session.start('note-a')
+
+      expect(session.getState().noteId).toBe('note-a')
+      expect(session.isRecordingNote('note-a')).toBe(true)
+      expect(session.isRecordingNote('note-b')).toBe(false)
+    })
+
+    it('leaves noteId null when started from the tray or accelerator', () => {
+      const session = new MeetingSession()
+      session.start()
+      expect(session.getState().noteId).toBeNull()
+    })
+
+    // Note B's button must not be able to end note A's recording: from note B
+    // the recording is invisible, so it would read as the button doing nothing
+    // while a recording silently died.
+    it('refuses a toggle carrying a different note', () => {
+      const session = new MeetingSession()
+      session.start('note-a')
+
+      expect(session.toggle('note-b')).toBe(false)
+      expect(session.isRecordingNote('note-a')).toBe(true)
+    })
+
+    it('stops when the owning note toggles', () => {
+      const session = new MeetingSession()
+      session.start('note-a')
+
+      expect(session.toggle('note-a')).toBe(true)
+      expect(session.getState().phase).toBe('idle')
+    })
+
+    // The tray and the accelerator carry no note, so they stop whatever runs.
+    it('stops a note-owned recording from an untargeted toggle', () => {
+      const session = new MeetingSession()
+      session.start('note-a')
+
+      expect(session.toggle()).toBe(true)
+      expect(session.getState().phase).toBe('idle')
+    })
+
+    it('clears noteId on stop and on discard', () => {
+      const session = new MeetingSession()
+      session.start('note-a')
+      session.stop()
+      expect(session.getState().noteId).toBeNull()
+
+      session.start('note-b')
+      session.discard()
+      expect(session.getState().noteId).toBeNull()
+    })
   })
 
   it('notifies subscribers on every transition, and not on rejected ones', () => {
@@ -76,7 +132,7 @@ describe('MeetingSession', () => {
 
     session.stop()
     expect(listener).toHaveBeenCalledTimes(2)
-    expect(listener).toHaveBeenLastCalledWith({ phase: 'idle', startedAt: null })
+    expect(listener).toHaveBeenLastCalledWith({ phase: 'idle', startedAt: null, noteId: null })
 
     session.stop()
     expect(listener).toHaveBeenCalledTimes(2)

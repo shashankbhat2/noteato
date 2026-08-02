@@ -25,7 +25,8 @@ import {
   IconStar as Star,
   IconStarFilled as StarFilled
 } from '@tabler/icons-react'
-import type { Note } from '../../../shared/types'
+import type { MeetingState, Note } from '../../../shared/types'
+import { elapsedLabel } from '../../../shared/elapsed'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
@@ -284,7 +285,6 @@ function NoteSideMenu(props: React.ComponentProps<typeof SideMenu>) {
 export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControls }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
-  const [headerTitle, setHeaderTitle] = useState('Untitled')
   const [fullWidth, setFullWidth] = useState(false)
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([])
   const [initialBlocks, setInitialBlocks] = useState<NoteatoBlock[] | 'loading'>('loading')
@@ -300,6 +300,31 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [chatOpen, setChatOpen] = useState(false)
   const [outlineVisible, setOutlineVisible] = useState(false)
   const [isSwitchingNote, setIsSwitchingNote] = useState(false)
+  const [meeting, setMeeting] = useState<MeetingState>({
+    phase: 'idle',
+    startedAt: null,
+    noteId: null
+  })
+  const [recordElapsed, setRecordElapsed] = useState('')
+
+  useEffect(() => {
+    void window.api.meeting.getState().then(setMeeting)
+    return window.api.meeting.subscribeState(setMeeting)
+  }, [])
+
+  // Derived from startedAt rather than counted, so the header agrees with the
+  // pill to the second even after this pane was remounted mid-recording.
+  useEffect(() => {
+    if (meeting.phase !== 'recording' || meeting.noteId !== noteId) {
+      setRecordElapsed('')
+      return
+    }
+    const startedAt = meeting.startedAt ?? Date.now()
+    const tick = (): void => setRecordElapsed(elapsedLabel(startedAt, Date.now()))
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [meeting.phase, meeting.noteId, meeting.startedAt, noteId])
 
   useEffect(() => {
     setActiveSurface('note')
@@ -377,7 +402,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         hasLoadedRef.current = true
         tagsRef.current = loaded.tags
         setNote(loaded)
-        setHeaderTitle(loaded.title || 'Untitled')
         setFullWidth(loaded.fullWidth)
         setInitialBlocks(loaded.external ? blocks : ensureTitleBlock(blocks, loaded.title))
 
@@ -582,7 +606,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       fullWidth: nextFullWidth
     })
     setNote(saved)
-    setHeaderTitle(saved.title || 'Untitled')
     tagsRef.current = saved.tags
     onSaved(saved)
     return saved
@@ -721,7 +744,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
           applyingExternalRef.current = false
         }
         setNote(latest)
-        setHeaderTitle(latest.title || 'Untitled')
       })()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1118,6 +1140,19 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   reminderAtRef.current = reminderAt
   fullWidthRef.current = fullWidth
 
+  const recordingThisNote = meeting.phase === 'recording' && meeting.noteId === note.id
+  // One recording at a time: while another note owns it, this button reports
+  // why it is unavailable rather than silently doing nothing.
+  const recordingElsewhere = meeting.phase !== 'idle' && !recordingThisNote
+  const recordDisabled = recordingElsewhere || note.external
+  const recordButtonLabel = recordingThisNote
+    ? 'Stop recording'
+    : recordingElsewhere
+      ? 'Another recording is already running'
+      : note.external
+        ? 'Linked notes cannot hold a recording'
+        : 'Record a meeting into this note'
+
   return (
     <div
       ref={rootRef}
@@ -1133,9 +1168,24 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       {/* Spans the card and stays put while the note scrolls beneath it. */}
       <div className="note-editor-toolbar">
         <div className="note-toolbar-leading">
-          <span className="note-header-title" title={headerTitle}>
-            {headerTitle}
-          </span>
+          {/* Recording belongs to a note, so its control lives in that note's
+              header — where the title used to be. The title is already the
+              first thing in the document below; repeating it here spent the
+              most reachable spot in the pane on a duplicate. */}
+          <button
+            type="button"
+            className={recordingThisNote ? 'note-record-btn recording' : 'note-record-btn'}
+            onClick={() => void window.api.meeting.toggle(note.id)}
+            disabled={recordDisabled}
+            aria-pressed={recordingThisNote}
+            title={recordButtonLabel}
+          >
+            <span className="note-record-mark" aria-hidden="true" />
+            <span className="note-record-text">{recordingThisNote ? 'Stop' : 'Record'}</span>
+            {recordingThisNote && recordElapsed && (
+              <span className="note-record-time">{recordElapsed}</span>
+            )}
+          </button>
           {parentLabel && (
             <span className="note-location" title={note.path}>
               {parentLabel}
@@ -1243,14 +1293,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
               if (imagePickingRef.current) return
               // Linked files are shown exactly as they are on disk — a title
               // heading is never forced into someone else's markdown.
-              if (!note.external) {
-                scheduleTitleFix()
-                // `scheduleTitleFix` runs first, so this reads the stable
-                // leading H1 even when Backspace briefly tries to merge it.
-                queueMicrotask(() => {
-                  setHeaderTitle(titleFromBlocks(editor.document) || 'Untitled')
-                })
-              }
+              if (!note.external) scheduleTitleFix()
               if (!aiStreamingRef.current) scheduleSave()
             }}
             theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}

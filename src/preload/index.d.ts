@@ -2,6 +2,8 @@ import type { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   AiCompleteRequest,
   DeletedEntry,
+  MeetingError,
+  MeetingLevels,
   MeetingState,
   Note,
   NoteChange,
@@ -87,11 +89,14 @@ interface NoteatoApi {
   }
   meeting: {
     getState: () => Promise<MeetingState>
-    start: () => Promise<MeetingState>
+    /** Omit `noteId` to record into a new note. */
+    start: (noteId?: string | null) => Promise<MeetingState>
     stop: () => Promise<MeetingState>
     discard: () => Promise<MeetingState>
-    toggle: () => Promise<MeetingState>
+    toggle: (noteId?: string | null) => Promise<MeetingState>
     subscribeState: (callback: (state: MeetingState) => void) => () => void
+    subscribeLevels: (callback: (levels: MeetingLevels) => void) => () => void
+    subscribeError: (callback: (error: MeetingError) => void) => () => void
   }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>

@@ -1,17 +1,7 @@
 import { useEffect, useState } from 'react'
 import { IconPlayerStopFilled as Stop, IconTrash as Trash } from '@tabler/icons-react'
-import type { MeetingState } from '../../../shared/types'
-
-/** m:ss up to an hour, then h:mm:ss — meetings routinely run past both. */
-function elapsedLabel(startedAt: number, now: number): string {
-  const total = Math.max(0, Math.floor((now - startedAt) / 1000))
-  const seconds = String(total % 60).padStart(2, '0')
-  const minutes = Math.floor(total / 60) % 60
-  const hours = Math.floor(total / 3600)
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}`
-    : `${minutes}:${seconds}`
-}
+import type { MeetingLevels, MeetingState } from '../../../shared/types'
+import { elapsedLabel } from '../../../shared/elapsed'
 
 /**
  * The always-on-top recording indicator. Its own window (see RecorderWindow),
@@ -20,8 +10,13 @@ function elapsedLabel(startedAt: number, now: number): string {
  * focus.
  */
 export default function RecorderPill() {
-  const [state, setState] = useState<MeetingState>({ phase: 'idle', startedAt: null })
+  const [state, setState] = useState<MeetingState>({
+    phase: 'idle',
+    startedAt: null,
+    noteId: null
+  })
   const [now, setNow] = useState(() => Date.now())
+  const [levels, setLevels] = useState<MeetingLevels>({ mic: 0, system: 0 })
 
   useEffect(() => {
     void window.api.meeting.getState().then(setState)
@@ -36,6 +31,11 @@ export default function RecorderPill() {
     return () => clearInterval(id)
   }, [state.phase])
 
+  // The dot doubles as a level meter: it is the only signal that the microphone
+  // is actually hearing something, and a recording that captured silence is
+  // worth finding out about during the meeting rather than after it.
+  useEffect(() => window.api.meeting.subscribeLevels(setLevels), [])
+
   if (state.phase === 'idle') return null
 
   const transcribing = state.phase === 'transcribing'
@@ -45,25 +45,24 @@ export default function RecorderPill() {
       <span
         className={transcribing ? 'recorder-pill-dot transcribing' : 'recorder-pill-dot'}
         aria-hidden="true"
+        style={
+          transcribing
+            ? undefined
+            : // Loudest of the two channels, lightly compressed so ordinary
+              // speech visibly moves it rather than only clipping does.
+              { transform: `scale(${1 + Math.min(1, Math.max(levels.mic, levels.system) * 2.2) * 0.5})` }
+        }
       />
-      <span className="recorder-pill-label">
-        {transcribing ? 'Transcribing…' : 'Recording'}
-      </span>
       <span className="recorder-pill-time">
-        {state.startedAt !== null && !transcribing ? elapsedLabel(state.startedAt, now) : ''}
+        {transcribing
+          ? '···'
+          : state.startedAt !== null
+            ? elapsedLabel(state.startedAt, now)
+            : ''}
       </span>
 
       {!transcribing && (
         <div className="recorder-pill-actions">
-          <button
-            type="button"
-            className="recorder-pill-btn discard"
-            onClick={() => void window.api.meeting.discard()}
-            aria-label="Discard recording"
-            title="Discard recording"
-          >
-            <Trash size={15} />
-          </button>
           <button
             type="button"
             className="recorder-pill-btn stop"
@@ -71,7 +70,16 @@ export default function RecorderPill() {
             aria-label="Stop and keep recording"
             title="Stop and keep"
           >
-            <Stop size={14} />
+            <Stop size={16} />
+          </button>
+          <button
+            type="button"
+            className="recorder-pill-btn discard"
+            onClick={() => void window.api.meeting.discard()}
+            aria-label="Discard recording"
+            title="Discard recording"
+          >
+            <Trash size={17} />
           </button>
         </div>
       )}

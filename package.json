@@ -16,10 +16,10 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "clean": "rm -rf dist out",
-    "build:mac": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64",
-    "build:mac:arm64": "npm run clean && electron-vite build && electron-builder --mac --arm64",
-    "build:mac:intel": "npm run clean && electron-vite build && electron-builder --mac --x64",
-    "release": "npm run clean && electron-vite build && electron-builder --mac --arm64 --publish always",
+    "build:mac": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --arm64 --x64",
+    "build:mac:arm64": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --arm64",
+    "build:mac:intel": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --x64",
+    "release": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --arm64 --publish always",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
@@ -27,7 +27,8 @@
     "test:watch": "vitest",
     "bench:search": "node bench/search/run.mjs",
     "bench:memory": "electron bench/memory/main.cjs",
-    "bench": "npm run bench:search && npm run bench:memory"
+    "bench": "npm run bench:search && npm run bench:memory",
+    "build:native": "node scripts/build-native.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",

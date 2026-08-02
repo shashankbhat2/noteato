@@ -1,12 +1,23 @@
 import type { MeetingState } from '../../shared/types'
 
+const IDLE: MeetingState = { phase: 'idle', startedAt: null, noteId: null }
+
 /**
  * The lifecycle of one meeting recording.
  *
  * Phase 2 deliberately has no audio behind it. Every start/stop/discard edge —
- * from the tray, the accelerator, the pill and the in-window buttons — is
- * debugged here first, so that when capture lands the only new failure mode is
- * capture itself rather than capture plus a control surface nobody exercised.
+ * from the tray, the accelerator, the pill and the note's own record button —
+ * is debugged here first, so that when capture lands the only new failure mode
+ * is capture itself rather than capture plus a control surface nobody
+ * exercised.
+ *
+ * A recording belongs to a note. Starting from a note's toolbar attaches it to
+ * that note; starting from the tray or the accelerator leaves `noteId` null,
+ * which commits to a new note instead — that is the ordinary case, because a
+ * meeting starts while you are looking at Zoom rather than at Noteato.
+ *
+ * Exactly one recording runs at a time. You are only ever in one meeting, and
+ * two concurrent captures would contend for the same microphone.
  *
  * State is in-memory on purpose. A recording cannot outlive the process that
  * owns the capture, so a killed app coming back `idle` is the correct answer
@@ -14,7 +25,7 @@ import type { MeetingState } from '../../shared/types'
  * app claim to be recording something it is not.
  */
 export class MeetingSession {
-  private state: MeetingState = { phase: 'idle', startedAt: null }
+  private state: MeetingState = IDLE
   private listeners = new Set<(state: MeetingState) => void>()
 
   getState(): MeetingState {
@@ -25,10 +36,19 @@ export class MeetingSession {
     return this.state.phase === 'recording'
   }
 
-  /** Returns false when a recording is already in flight. */
-  start(): boolean {
+  /** True when this specific note is the one being recorded. */
+  isRecordingNote(noteId: string): boolean {
+    return this.state.phase === 'recording' && this.state.noteId === noteId
+  }
+
+  /**
+   * Begin recording, optionally into an existing note. Returns false when a
+   * recording is already in flight — including one belonging to another note,
+   * which the caller should surface rather than silently swallow.
+   */
+  start(noteId: string | null = null): boolean {
     if (this.state.phase !== 'idle') return false
-    this.set({ phase: 'recording', startedAt: Date.now() })
+    this.set({ phase: 'recording', startedAt: Date.now(), noteId })
     return true
   }
 
@@ -39,23 +59,34 @@ export class MeetingSession {
    */
   stop(): boolean {
     if (this.state.phase !== 'recording') return false
-    this.set({ phase: 'idle', startedAt: null })
+    this.set(IDLE)
     return true
   }
 
   /** End the recording and throw it away. */
   discard(): boolean {
     if (this.state.phase !== 'recording') return false
-    this.set({ phase: 'idle', startedAt: null })
+    this.set(IDLE)
     return true
   }
 
-  /** What the tray item and the in-window buttons do: one control, both ways. */
-  toggle(): void {
-    if (this.state.phase === 'recording') this.stop()
-    else if (this.state.phase === 'idle') this.start()
+  /**
+   * What every control does: one button, both ways.
+   *
+   * A toggle carrying a different note than the one recording is refused rather
+   * than treated as "stop". Note B's button must not be able to end note A's
+   * recording — from note B the recording is invisible, so that would read as
+   * the button doing nothing while a recording silently died.
+   */
+  toggle(noteId: string | null = null): boolean {
+    if (this.state.phase === 'recording') {
+      if (noteId !== null && noteId !== this.state.noteId) return false
+      return this.stop()
+    }
+    if (this.state.phase === 'idle') return this.start(noteId)
     // Mid-transcription a toggle is meaningless — dropping it is kinder than
     // queueing a start the user will have forgotten asking for.
+    return false
   }
 
   subscribe(listener: (state: MeetingState) => void): () => void {

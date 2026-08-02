@@ -68,7 +68,11 @@ export default function SidebarModeWindow() {
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [meeting, setMeeting] = useState<MeetingState>({ phase: 'idle', startedAt: null })
+  const [meeting, setMeeting] = useState<MeetingState>({
+    phase: 'idle',
+    startedAt: null,
+    noteId: null
+  })
 
   useEffect(() => {
     void window.api.meeting.getState().then(setMeeting)

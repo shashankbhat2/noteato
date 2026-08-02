@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url'
 import type {
   AiCompleteRequest,
   DeletedEntry,
+  MeetingError,
+  MeetingLevels,
   MeetingState,
   Note,
   NoteChange,
@@ -133,14 +135,28 @@ const api = {
   },
   meeting: {
     getState: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:getState'),
-    start: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:start'),
+    /** Omit `noteId` to record into a new note. */
+    start: (noteId?: string | null): Promise<MeetingState> =>
+      ipcRenderer.invoke('meeting:start', noteId ?? null),
     stop: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:stop'),
     discard: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:discard'),
-    toggle: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:toggle'),
+    toggle: (noteId?: string | null): Promise<MeetingState> =>
+      ipcRenderer.invoke('meeting:toggle', noteId ?? null),
     subscribeState: (callback: (state: MeetingState) => void) => {
       const listener = (_e: Electron.IpcRendererEvent, state: MeetingState): void => callback(state)
       ipcRenderer.on('meeting:state-changed', listener)
       return () => ipcRenderer.removeListener('meeting:state-changed', listener)
+    },
+    subscribeLevels: (callback: (levels: MeetingLevels) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, levels: MeetingLevels): void =>
+        callback(levels)
+      ipcRenderer.on('meeting:levels', listener)
+      return () => ipcRenderer.removeListener('meeting:levels', listener)
+    },
+    subscribeError: (callback: (error: MeetingError) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, error: MeetingError): void => callback(error)
+      ipcRenderer.on('meeting:error', listener)
+      return () => ipcRenderer.removeListener('meeting:error', listener)
     }
   },
   reminders: {

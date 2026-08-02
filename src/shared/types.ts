@@ -109,6 +109,23 @@ export interface MeetingState {
    *  from this rather than counted in the renderer, so the pill stays correct
    *  across a renderer reload and cannot drift from the actual recording. */
   startedAt: number | null
+  /**
+   * The note this recording belongs to. `null` means it was started from the
+   * tray or the accelerator with no note in hand — the usual case, since you
+   * start a meeting from inside Zoom — and it will commit to a new note.
+   */
+  noteId: string | null
+}
+
+/** Peak input levels, 0–1, pushed to the recording pill about ten times a second. */
+export interface MeetingLevels {
+  mic: number
+  system: number
+}
+
+export interface MeetingError {
+  code: string
+  message: string
 }
 
 export interface Settings {

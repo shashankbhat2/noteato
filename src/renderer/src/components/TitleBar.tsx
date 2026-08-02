@@ -1,13 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import {
-  IconLayoutSidebar as PanelLeft,
-  IconMicrophone as Microphone,
-  IconPlayerStopFilled as Stop,
-  IconSettings as Settings
-} from '@tabler/icons-react'
-import type { MeetingState } from '../../../shared/types'
-import { MEETING_ACCELERATOR } from '../../../shared/globalShortcuts'
-import { shortcutDisplay } from '../../../shared/globalShortcuts'
+import { useRef } from 'react'
+import { IconLayoutSidebar as PanelLeft, IconSettings as Settings } from '@tabler/icons-react'
 
 const DOUBLE_CLICK_MS = 400
 
@@ -27,15 +19,6 @@ export default function TitleBar({
   onOpenSettings
 }: Props) {
   const isMac = window.electron.process.platform === 'darwin'
-  const [meeting, setMeeting] = useState<MeetingState>({ phase: 'idle', startedAt: null })
-
-  useEffect(() => {
-    void window.api.meeting.getState().then(setMeeting)
-    return window.api.meeting.subscribeState(setMeeting)
-  }, [])
-
-  const recording = meeting.phase === 'recording'
-  const meetingHint = shortcutDisplay(MEETING_ACCELERATOR, window.electron.process.platform)
 
   // Standard DOM dblclick doesn't fire reliably on -webkit-app-region: drag
   // areas — macOS intercepts mouse handling there for window dragging before
@@ -60,17 +43,6 @@ export default function TitleBar({
       onMouseDown={handleMouseDown}
     >
       <div className="title-bar-actions">
-        <button
-          type="button"
-          className={recording ? 'title-bar-btn recording' : 'title-bar-btn'}
-          onClick={() => void window.api.meeting.toggle()}
-          disabled={meeting.phase === 'transcribing'}
-          aria-label={recording ? 'End meeting' : 'Record meeting'}
-          aria-pressed={recording}
-          title={`${recording ? 'End' : 'Record'} meeting · ${meetingHint}`}
-        >
-          {recording ? <Stop size={15} /> : <Microphone size={16} />}
-        </button>
         <button
           type="button"
           className="title-bar-btn"

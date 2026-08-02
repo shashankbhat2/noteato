@@ -36,7 +36,7 @@ import { SidebarModeManager } from './sidebarMode'
 import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
 import { removeStaleAgent } from './staleAgent'
-import { MeetingSession } from './meeting/session'
+import { MeetingRecorder } from './meeting/recorder'
 import { RecorderWindow } from './recorderWindow'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 
@@ -66,12 +66,69 @@ const reminderScheduler = new ReminderScheduler(
   (note) => openScratchNote(note),
   (change) => broadcastScratchChange(change)
 )
-const meetingSession = new MeetingSession()
-const recorderWindow = new RecorderWindow()
+const recorderWindow = new RecorderWindow(appDb)
+const meetingRecorder = new MeetingRecorder({
+  getVault: () => noteStore.getNotesDir(),
+  onStateChange: (state) => {
+    trayManager.refresh()
+    if (state.phase === 'idle') recorderWindow.hide()
+    else recorderWindow.show(state)
+    // One broadcast drives every surface, so the tray, the pill and the note's
+    // own button cannot disagree about whether a recording is running.
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('meeting:state-changed', state)
+    }
+  },
+  onLevels: (levels) => recorderWindow.sendLevels(levels),
+  onError: (error) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('meeting:error', error)
+    }
+    if (error.code === 'screen_recording_denied') explainScreenRecording()
+  },
+  onCommitted: (recording) => {
+    // Phase 3 stops at the audio. Transcription, the merge and the note that
+    // carries them are Phases 4 and 5; until then the capture directory on disk
+    // is the whole result.
+    console.log(
+      `[meeting] committed ${recording.dir} — ${recording.seconds.toFixed(1)}s, ` +
+        `system audio ${recording.systemCaptured ? 'captured' : 'MISSING'}`
+    )
+  }
+})
 const globalShortcutManager = new GlobalShortcutManager(
   () => sidebarModeManager.toggle(),
-  () => meetingSession.toggle()
+  () => meetingRecorder.toggle()
 )
+
+/**
+ * ScreenCaptureKit gives no prompt of its own for an already-denied app, so the
+ * only way out is Settings. macOS also requires a full relaunch after the
+ * toggle is flipped — saying so here is the difference between a user who
+ * grants it and one who grants it, sees nothing change, and gives up.
+ */
+function explainScreenRecording(): void {
+  void dialog
+    .showMessageBox({
+      type: 'info',
+      message: 'Noteato needs Screen Recording permission',
+      detail:
+        'Recording the other side of a meeting captures your Mac’s audio output, ' +
+        'which macOS puts behind Screen Recording.\n\n' +
+        'Enable Noteato under Privacy & Security → Screen Recording, then quit and ' +
+        'reopen Noteato — macOS only applies the change on relaunch.',
+      buttons: ['Open Settings', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    .then(({ response }) => {
+      if (response === 0) {
+        void shell.openExternal(
+          'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+        )
+      }
+    })
+}
 
 const edgeHoverWatcher = new EdgeHoverWatcher(
   () => {
@@ -103,20 +160,9 @@ const trayManager = new TrayManager(
     sidebarModeManager.destroy()
     recorderWindow.destroy()
   },
-  () => meetingSession.isRecording(),
-  () => meetingSession.toggle()
+  () => meetingRecorder.isRecording(),
+  () => meetingRecorder.toggle()
 )
-
-// One subscription drives every surface, so the tray, the pill and both
-// in-window buttons cannot disagree about whether a recording is running.
-meetingSession.subscribe((state) => {
-  trayManager.refresh()
-  if (state.phase === 'idle') recorderWindow.hide()
-  else recorderWindow.show(state)
-  for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send('meeting:state-changed', state)
-  }
-})
 
 /**
  * Electron owns the one visible Noteato menu-bar icon. This used to negotiate
@@ -597,22 +643,22 @@ function registerIpcHandlers(): void {
     sidebarModeManager.setPinned(pinned)
     return sidebarModeManager.getState()
   })
-  ipcMain.handle('meeting:getState', () => meetingSession.getState())
-  ipcMain.handle('meeting:start', () => {
-    meetingSession.start()
-    return meetingSession.getState()
+  ipcMain.handle('meeting:getState', () => meetingRecorder.getState())
+  ipcMain.handle('meeting:start', (_e, noteId: string | null = null) => {
+    meetingRecorder.start(noteId)
+    return meetingRecorder.getState()
   })
   ipcMain.handle('meeting:stop', () => {
-    meetingSession.stop()
-    return meetingSession.getState()
+    meetingRecorder.stop()
+    return meetingRecorder.getState()
   })
   ipcMain.handle('meeting:discard', () => {
-    meetingSession.discard()
-    return meetingSession.getState()
+    meetingRecorder.discard()
+    return meetingRecorder.getState()
   })
-  ipcMain.handle('meeting:toggle', () => {
-    meetingSession.toggle()
-    return meetingSession.getState()
+  ipcMain.handle('meeting:toggle', (_e, noteId: string | null = null) => {
+    meetingRecorder.toggle(noteId)
+    return meetingRecorder.getState()
   })
 
   ipcMain.handle('ai:complete', (_e, req: AiCompleteRequest) => completeAi(settingsStore.read(), req))
@@ -717,9 +763,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
-  // A recording must not outlive the window that shows it is running. Once
-  // capture lands this is where it gets committed rather than orphaned.
-  meetingSession.stop()
+  // Close the helper's files rather than killing it: an m4a without its moov
+  // atom is an hour of audio nobody can play.
+  meetingRecorder.shutdown()
   recorderWindow.destroy()
   globalShortcutManager.destroy()
   edgeHoverWatcher.stop()

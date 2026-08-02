@@ -863,13 +863,6 @@ button {
   background: var(--accent-soft);
 }
 
-/* Recording is a state the whole app is in, not a pane — so it reads red
-   rather than accent, matching the pill. */
-.title-bar-btn.recording {
-  color: #e5484d;
-  background: rgba(229, 72, 77, 0.12);
-}
-
 .title-bar-btn:disabled {
   opacity: 0.45;
   cursor: default;
@@ -2579,15 +2572,71 @@ body.resizing-panes .editor-pane {
   gap: 10px;
 }
 
-.note-header-title {
-  min-width: 0;
-  overflow: hidden;
+/* The note's record control. Sits in the drag region, so it opts back out. */
+.note-record-btn {
+  -webkit-app-region: no-drag;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
   color: var(--primaryText);
-  font-size: 12.5px;
-  font-weight: 560;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.note-record-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: var(--border-strong);
+}
+
+/* The dot is the affordance: a filled circle to start, a square to stop. */
+.note-record-mark {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: #e5484d;
+  transition:
+    border-radius 0.14s ease,
+    width 0.14s ease,
+    height 0.14s ease;
+}
+
+.note-record-btn.recording {
+  color: #e5484d;
+  border-color: rgba(229, 72, 77, 0.35);
+  background: rgba(229, 72, 77, 0.1);
+}
+
+.note-record-btn.recording .note-record-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: recorder-pulse 1.8s ease-in-out infinite;
+}
+
+.note-record-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.note-record-time {
+  padding-left: 6px;
+  border-left: 1px solid rgba(229, 72, 77, 0.28);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 
 /* Notes flatten their pane-control wrapper so More can sit immediately before
@@ -7838,20 +7887,30 @@ body.is-reordering * {
   background: transparent;
 }
 
+/* A vertical column, so it parks against a screen edge without covering the
+   app being recorded. */
 .recorder-pill {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  margin: 8px;
-  padding: 0 6px 0 14px;
+  /* Nothing here stretches: the pill is exactly as tall as its contents, since
+     any slack is empty space parked over the app being recorded. */
+  justify-content: center;
+  gap: 6px;
+  height: calc(100% - 8px);
+  margin: 4px;
+  padding: 8px 0;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--bg);
-  box-shadow: var(--shadow-2);
-  /* The window is click-through everywhere the pill is not. */
-  -webkit-app-region: no-drag;
+  /* The pill body is the window's drag handle; its buttons opt back out. */
+  -webkit-app-region: drag;
   user-select: none;
+  cursor: grab;
+}
+
+.recorder-pill:active {
+  cursor: grabbing;
 }
 
 .recorder-pill-dot {
@@ -7874,38 +7933,42 @@ body.is-reordering * {
   }
 }
 
-.recorder-pill-label {
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text);
-}
-
 .recorder-pill-time {
   /* Tabular figures stop the pill twitching as the seconds tick over. */
   font-variant-numeric: tabular-nums;
-  font-size: 12.5px;
-  color: var(--text-muted);
-  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 550;
+  letter-spacing: -0.2px;
+  line-height: 1;
+  color: var(--text);
+  flex: none;
 }
 
 .recorder-pill-actions {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
+  flex: none;
 }
 
 .recorder-pill-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  /* Comfortably hittable: these are the controls you reach for in a hurry, on a
+     window deliberately parked at the edge of the screen. */
+  width: 30px;
+  height: 30px;
+  flex: none;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  /* Without this the buttons are part of the drag region and never click. */
+  -webkit-app-region: no-drag;
   transition:
     background-color 0.12s ease,
     color 0.12s ease;

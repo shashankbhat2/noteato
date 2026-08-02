@@ -1,12 +1,25 @@
 import { join } from 'path'
 import { is } from '@electron-toolkit/utils'
 import { BrowserWindow, screen } from 'electron'
+import type Database from 'better-sqlite3'
 import type { MeetingState } from '../shared/types'
+import { SqlKvStore } from './db'
 
-const WIDTH = 268
-const HEIGHT = 56
-/** Clear of the Dock without floating oddly high on a screen with none. */
-const BOTTOM_MARGIN = 96
+/**
+ * A narrow vertical column: it parks against a screen edge without covering the
+ * app being recorded. Sized to its contents — dot, rotated timer, two buttons —
+ * rather than left with slack, since every pixel here sits over someone's work.
+ */
+const WIDTH = 54
+const HEIGHT = 120
+/** Clear of the edge so the pill reads as floating rather than half off-screen. */
+const EDGE_MARGIN = 16
+
+interface RecorderWindowState {
+  /** null until the pill has been dragged; it then opens where it was left. */
+  x: number | null
+  y: number | null
+}
 
 /**
  * The recording indicator: a small pill above everything, on every Space.
@@ -23,11 +36,23 @@ const BOTTOM_MARGIN = 96
  */
 export class RecorderWindow {
   private window: BrowserWindow | null = null
+  private stateStore: SqlKvStore<RecorderWindowState>
+
+  constructor(db: Database.Database) {
+    this.stateStore = new SqlKvStore<RecorderWindowState>(db, 'recorder-window-state', {
+      x: null,
+      y: null
+    })
+  }
 
   show(state: MeetingState): void {
     const win = this.ensureWindow()
     this.send(state)
-    if (!win.isVisible()) win.showInactive()
+    if (!win.isVisible()) {
+      // Displays can have changed while it sat hidden between recordings.
+      this.handleDisplayChange()
+      win.showInactive()
+    }
   }
 
   hide(): void {
@@ -43,6 +68,17 @@ export class RecorderWindow {
     win.webContents.send('meeting:state-changed', state)
   }
 
+  /**
+   * Levels go only to the pill, at ~10 Hz. Broadcasting them to every window
+   * would wake the main renderer ten times a second to animate something it
+   * does not show.
+   */
+  sendLevels(levels: { mic: number; system: number }): void {
+    const win = this.window
+    if (!win || win.isDestroyed() || !win.isVisible()) return
+    win.webContents.send('meeting:levels', levels)
+  }
+
   destroy(): void {
     const win = this.window
     if (!win || win.isDestroyed()) return
@@ -53,10 +89,8 @@ export class RecorderWindow {
   private ensureWindow(): BrowserWindow {
     if (this.window && !this.window.isDestroyed()) return this.window
 
-    const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const win = new BrowserWindow({
-      x: Math.round(workArea.x + (workArea.width - WIDTH) / 2),
-      y: workArea.y + workArea.height - HEIGHT - BOTTOM_MARGIN,
+      ...this.openAt(),
       width: WIDTH,
       height: HEIGHT,
       show: false,
@@ -64,7 +98,7 @@ export class RecorderWindow {
       transparent: true,
       hasShadow: false,
       resizable: false,
-      movable: false,
+      movable: true,
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
@@ -81,8 +115,21 @@ export class RecorderWindow {
     // Above fullscreen apps and on every Space: a call is usually one or both.
     win.setAlwaysOnTop(true, 'screen-saver')
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+    screen.on('display-removed', this.handleDisplayChange)
+    screen.on('display-added', this.handleDisplayChange)
+    screen.on('display-metrics-changed', this.handleDisplayChange)
+
     win.on('closed', () => {
+      screen.removeListener('display-removed', this.handleDisplayChange)
+      screen.removeListener('display-added', this.handleDisplayChange)
+      screen.removeListener('display-metrics-changed', this.handleDisplayChange)
       if (this.window === win) this.window = null
+    })
+    win.on('moved', () => {
+      if (win.isDestroyed()) return
+      const [x, y] = win.getPosition()
+      this.stateStore.write({ x, y })
     })
 
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -92,5 +139,52 @@ export class RecorderWindow {
     }
 
     return win
+  }
+
+  /**
+   * Where to open: wherever it was last dragged, or against the left edge of
+   * the screen the pointer is on — which is the screen the user is working on,
+   * and on a multi-monitor desk is rarely the primary one.
+   */
+  private openAt(): { x: number; y: number } {
+    const saved = this.stateStore.read()
+    if (saved.x !== null && saved.y !== null) return this.clamp(saved.x, saved.y)
+
+    const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    return {
+      x: workArea.x + EDGE_MARGIN,
+      y: Math.round(workArea.y + (workArea.height - HEIGHT) / 2)
+    }
+  }
+
+  /**
+   * Pull a position back onto a display that actually exists.
+   *
+   * `getDisplayNearestPoint` answers for the closest display even when the
+   * point is far outside every one of them, which is exactly the case after a
+   * monitor is unplugged — so clamping to that display's work area is what
+   * rescues a pill stranded in coordinates nobody can reach.
+   */
+  private clamp(x: number, y: number): { x: number; y: number } {
+    const { workArea } = screen.getDisplayNearestPoint({ x, y })
+    return {
+      x: Math.min(Math.max(x, workArea.x), workArea.x + workArea.width - WIDTH),
+      y: Math.min(Math.max(y, workArea.y), workArea.y + workArea.height - HEIGHT)
+    }
+  }
+
+  /**
+   * Displays changed under a live pill — unplugged, rearranged, or resolution
+   * switched. Without this the pill can be left addressing coordinates that no
+   * longer belong to any screen, i.e. invisible mid-recording.
+   */
+  private handleDisplayChange = (): void => {
+    const win = this.window
+    if (!win || win.isDestroyed()) return
+    const [x, y] = win.getPosition()
+    const next = this.clamp(x, y)
+    if (next.x === x && next.y === y) return
+    win.setPosition(next.x, next.y)
+    this.stateStore.write(next)
   }
 }
