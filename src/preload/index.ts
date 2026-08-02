@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import type {
   AiCompleteRequest,
   DeletedEntry,
+  MeetingState,
   Note,
   NoteChange,
   NoteSummary,
@@ -128,6 +129,18 @@ const api = {
         callback(state)
       ipcRenderer.on('sidebar:state-changed', listener)
       return () => ipcRenderer.removeListener('sidebar:state-changed', listener)
+    }
+  },
+  meeting: {
+    getState: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:getState'),
+    start: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:start'),
+    stop: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:stop'),
+    discard: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:discard'),
+    toggle: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:toggle'),
+    subscribeState: (callback: (state: MeetingState) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, state: MeetingState): void => callback(state)
+      ipcRenderer.on('meeting:state-changed', listener)
+      return () => ipcRenderer.removeListener('meeting:state-changed', listener)
     }
   },
   reminders: {

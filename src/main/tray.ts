@@ -1,7 +1,7 @@
 import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
+import { MEETING_ACCELERATOR, SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
 
 // A small render of the tray glyph, embedded inline so the tray works
 // identically in dev and packaged builds without wiring a separate resource
@@ -17,7 +17,9 @@ export class TrayManager {
     private showMainWindow: () => void,
     private showSidebar: () => void,
     private isSidebarEnabled: () => boolean,
-    private onQuit: () => void
+    private onQuit: () => void,
+    private isRecording: () => boolean,
+    private onToggleMeeting: () => void
   ) {}
 
   setEnabled(enabled: boolean): void {
@@ -25,6 +27,15 @@ export class TrayManager {
       this.create()
       this.tray?.setContextMenu(this.buildMenu())
     } else this.destroy()
+  }
+
+  /**
+   * Rebuild after meeting state changed. The menu is a snapshot taken when it
+   * was built, so "Record meeting" would otherwise still say Record while a
+   * recording is running.
+   */
+  refresh(): void {
+    this.tray?.setContextMenu(this.buildMenu())
   }
 
   private create(): void {
@@ -50,6 +61,16 @@ export class TrayManager {
         label: 'Show Noteato',
         click: () => this.showMainWindow()
       },
+      { type: 'separator' },
+      {
+        label: this.isRecording() ? 'End meeting' : 'Record meeting',
+        // Display-only hint, as below: GlobalShortcutManager owns the real
+        // registration and a second handler here would fire it twice.
+        accelerator: MEETING_ACCELERATOR,
+        registerAccelerator: false,
+        click: () => this.onToggleMeeting()
+      },
+      { type: 'separator' },
       ...(this.isSidebarEnabled()
         ? [
             {

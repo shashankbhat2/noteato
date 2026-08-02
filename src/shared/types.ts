@@ -95,6 +95,22 @@ export type SyncPreference = 'none' | 'icloud' | 'noteatoPro'
 /** Which screen edge the compact notes panel docks to (and reveals from). */
 export type ScreenEdge = 'left' | 'right'
 
+/**
+ * Where a meeting recording is in its life. `transcribing` is declared here so
+ * every surface handles it from the start; nothing enters it until transcription
+ * lands, because a state the app can display but never reach is still a state
+ * the UI has to be right about.
+ */
+export type MeetingPhase = 'idle' | 'recording' | 'transcribing'
+
+export interface MeetingState {
+  phase: MeetingPhase
+  /** Epoch ms the recording began, or null when idle. Elapsed time is derived
+   *  from this rather than counted in the renderer, so the pill stays correct
+   *  across a renderer reload and cannot drift from the actual recording. */
+  startedAt: number | null
+}
+
 export interface Settings {
   onboardingCompleted: boolean
   userName: string

@@ -863,6 +863,18 @@ button {
   background: var(--accent-soft);
 }
 
+/* Recording is a state the whole app is in, not a pane — so it reads red
+   rather than accent, matching the pill. */
+.title-bar-btn.recording {
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.12);
+}
+
+.title-bar-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* Body layout */
 
 .app-body {
@@ -5166,6 +5178,17 @@ body.resizing-panes .editor-pane {
   background: var(--bg-tertiary);
 }
 
+.sidebar-mode-window-actions button.recording,
+.sidebar-mode-window-actions button.recording:hover {
+  color: #e5484d;
+  background: rgba(229, 72, 77, 0.12);
+}
+
+.sidebar-mode-window-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .sidebar-mode-window-actions button.active {
   color: var(--accent);
 }
@@ -7803,6 +7826,99 @@ body.is-reordering * {
   border: 1px solid var(--subtleBorder);
   border-radius: 4px;
   background: var(--surface);
+}
+
+/* --- Recording pill ------------------------------------------------------- */
+
+/* Its window is transparent, so the shared html/body background has to come off
+   or it frames the pill in an opaque rectangle. */
+.recorder-window,
+.recorder-window body,
+.recorder-window #root {
+  background: transparent;
+}
+
+.recorder-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  margin: 8px;
+  padding: 0 6px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+  /* The window is click-through everywhere the pill is not. */
+  -webkit-app-region: no-drag;
+  user-select: none;
+}
+
+.recorder-pill-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: #e5484d;
+  animation: recorder-pulse 1.8s ease-in-out infinite;
+}
+
+.recorder-pill-dot.transcribing {
+  background: var(--accent);
+  animation: none;
+}
+
+@keyframes recorder-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.recorder-pill-label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.recorder-pill-time {
+  /* Tabular figures stop the pill twitching as the seconds tick over. */
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.recorder-pill-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.recorder-pill-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.recorder-pill-btn:hover {
+  background: var(--hoverSurface);
+  color: var(--text);
+}
+
+.recorder-pill-btn.stop:hover {
+  background: #e5484d;
+  color: #fff;
 }
 
 /* The whole interface honours this, not just the panels that animate most. */

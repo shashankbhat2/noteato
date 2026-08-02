@@ -36,6 +36,8 @@ import { SidebarModeManager } from './sidebarMode'
 import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
 import { removeStaleAgent } from './staleAgent'
+import { MeetingSession } from './meeting/session'
+import { RecorderWindow } from './recorderWindow'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 
 const appDb = getAppDb()
@@ -64,7 +66,12 @@ const reminderScheduler = new ReminderScheduler(
   (note) => openScratchNote(note),
   (change) => broadcastScratchChange(change)
 )
-const globalShortcutManager = new GlobalShortcutManager(() => sidebarModeManager.toggle())
+const meetingSession = new MeetingSession()
+const recorderWindow = new RecorderWindow()
+const globalShortcutManager = new GlobalShortcutManager(
+  () => sidebarModeManager.toggle(),
+  () => meetingSession.toggle()
+)
 
 const edgeHoverWatcher = new EdgeHoverWatcher(
   () => {
@@ -94,8 +101,22 @@ const trayManager = new TrayManager(
     allowQuit = true
     edgeHoverWatcher.stop()
     sidebarModeManager.destroy()
-  }
+    recorderWindow.destroy()
+  },
+  () => meetingSession.isRecording(),
+  () => meetingSession.toggle()
 )
+
+// One subscription drives every surface, so the tray, the pill and both
+// in-window buttons cannot disagree about whether a recording is running.
+meetingSession.subscribe((state) => {
+  trayManager.refresh()
+  if (state.phase === 'idle') recorderWindow.hide()
+  else recorderWindow.show(state)
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('meeting:state-changed', state)
+  }
+})
 
 /**
  * Electron owns the one visible Noteato menu-bar icon. This used to negotiate
@@ -576,6 +597,24 @@ function registerIpcHandlers(): void {
     sidebarModeManager.setPinned(pinned)
     return sidebarModeManager.getState()
   })
+  ipcMain.handle('meeting:getState', () => meetingSession.getState())
+  ipcMain.handle('meeting:start', () => {
+    meetingSession.start()
+    return meetingSession.getState()
+  })
+  ipcMain.handle('meeting:stop', () => {
+    meetingSession.stop()
+    return meetingSession.getState()
+  })
+  ipcMain.handle('meeting:discard', () => {
+    meetingSession.discard()
+    return meetingSession.getState()
+  })
+  ipcMain.handle('meeting:toggle', () => {
+    meetingSession.toggle()
+    return meetingSession.getState()
+  })
+
   ipcMain.handle('ai:complete', (_e, req: AiCompleteRequest) => completeAi(settingsStore.read(), req))
   const aiStreamAborts = new Map<number, AbortController>()
   ipcMain.handle('ai:stream', (e, requestId: number, req: AiCompleteRequest) => {
@@ -678,6 +717,10 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  // A recording must not outlive the window that shows it is running. Once
+  // capture lands this is where it gets committed rather than orphaned.
+  meetingSession.stop()
+  recorderWindow.destroy()
   globalShortcutManager.destroy()
   edgeHoverWatcher.stop()
   externalWatcher.destroy()

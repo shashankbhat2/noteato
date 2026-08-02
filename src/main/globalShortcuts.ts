@@ -1,6 +1,6 @@
 import { globalShortcut } from 'electron'
 import type { Settings } from '../shared/types'
-import { SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
+import { MEETING_ACCELERATOR, SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
 
 /**
  * Electron's registration of the product's global shortcuts.
@@ -11,16 +11,25 @@ import { SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
  * registrar unconditionally.
  */
 export class GlobalShortcutManager {
-  constructor(private toggleSidebar: () => void) {}
+  constructor(
+    private toggleSidebar: () => void,
+    private toggleMeeting: () => void
+  ) {}
 
   sync(settings: Settings): void {
     globalShortcut.unregister(SIDEBAR_MODE_ACCELERATOR)
     if (settings.sidebarModeEnabled) {
       globalShortcut.register(SIDEBAR_MODE_ACCELERATOR, this.toggleSidebar)
     }
+
+    // Unconditional: recording is the one thing you start from inside another
+    // app, so it must not depend on a panel preference to be reachable.
+    globalShortcut.unregister(MEETING_ACCELERATOR)
+    globalShortcut.register(MEETING_ACCELERATOR, this.toggleMeeting)
   }
 
   destroy(): void {
     globalShortcut.unregister(SIDEBAR_MODE_ACCELERATOR)
+    globalShortcut.unregister(MEETING_ACCELERATOR)
   }
 }

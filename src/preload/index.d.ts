@@ -2,6 +2,7 @@ import type { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   AiCompleteRequest,
   DeletedEntry,
+  MeetingState,
   Note,
   NoteChange,
   NoteSummary,
@@ -83,6 +84,14 @@ interface NoteatoApi {
     close: () => Promise<void>
     setPinned: (pinned: boolean) => Promise<SidebarModeState>
     subscribeState: (callback: (state: SidebarModeState) => void) => () => void
+  }
+  meeting: {
+    getState: () => Promise<MeetingState>
+    start: () => Promise<MeetingState>
+    stop: () => Promise<MeetingState>
+    discard: () => Promise<MeetingState>
+    toggle: () => Promise<MeetingState>
+    subscribeState: (callback: (state: MeetingState) => void) => () => void
   }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>
