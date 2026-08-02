@@ -1,4 +1,6 @@
 import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
 
 // A small render of the tray glyph, embedded inline so the tray works
@@ -27,10 +29,16 @@ export class TrayManager {
 
   private create(): void {
     if (this.tray) return
-    const icon = nativeImage
-      .createFromDataURL(`data:image/png;base64,${ICON_BASE64}`)
-      .resize({ width: 18, height: 18 })
-    icon.setTemplateImage(true)
+    const appIconPath = app.isPackaged
+      ? join(process.resourcesPath, 'icon.icns')
+      : join(app.getAppPath(), 'build', 'icon.png')
+    const source = existsSync(appIconPath)
+      ? nativeImage.createFromPath(appIconPath)
+      : nativeImage.createFromDataURL(`data:image/png;base64,${ICON_BASE64}`)
+    const icon = source.resize({ width: 18, height: 18 })
+    // Keep the actual Noteato mark instead of replacing it with a system
+    // waveform glyph or letting macOS flatten the whole icon as a template.
+    icon.setTemplateImage(false)
     this.tray = new Tray(icon)
     this.tray.setToolTip('Noteato')
     this.tray.setContextMenu(this.buildMenu())

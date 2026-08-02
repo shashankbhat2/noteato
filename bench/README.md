@@ -5,24 +5,17 @@ criteria, not aspirations — the point of keeping them in the repo is that a nu
 reproduce is a number nobody defends.
 
 ```
-npm run bench            # the three §10 gates
-npm run bench:panel      # hotkey → HUD          budget 80 ms
+npm run bench            # both §10 gates
 npm run bench:search     # search, 5k notes      budget 150 ms
 npm run bench:memory     # Electron idle floor   budget 150 MB
-npm run bench:asr        # transcription RTF     budget 0.3x
-npm run probe:capture    # mic → pre-roll → committed file, end to end
-```
-
-`bench:asr` takes `-- --file <audio>` to measure real speech; with no file it synthesises a tone,
-which exercises the pipeline but says nothing about accuracy. A quick way to get real speech with a
-known transcript:
-
-```
-say -v Samantha -o /tmp/speech.aiff "the sentence you want to check"
-npm run bench:asr -- --file /tmp/speech.aiff --json
 ```
 
 Add `-- --json` for machine-readable output, `-- --gate` to exit non-zero on a budget miss.
+
+> `bench:panel` (hotkey → HUD) and `bench:asr` (transcription RTF) lived in the Swift package and
+> went with it when the agent was removed. Both budgets still apply to whatever replaces them —
+> see `docs/revamp/meeting-notes-plan.md` — but there is nothing to measure until that lands, and a
+> benchmark against a deleted implementation is worse than no benchmark.
 
 ## Baselines on the Phase 0 reference machine
 
@@ -30,30 +23,20 @@ Apple M2, macOS 26.5. Recorded 2026-08-01, before any revamp code landed.
 
 | Benchmark | Measured | Budget | |
 |---|---|---|---|
-| `bench:panel` — native NSPanel, cold | 23–33 ms | 80 ms | pass, ~3× headroom |
-| `bench:panel` — warm p95 | 2–7 ms | 80 ms | pass |
-| `bench:panel` — resident | 32.5 MB | 150 MB | pass |
 | `bench:search` — 5,000 notes, median | **197.7 ms** | 150 ms | **fail** |
 | `bench:memory` — Electron floor | **319.6 MB** | 150 MB | **fail** |
 | `bench:memory` — window ready-to-show | 305 ms | — | |
 
-Two of these fail against budget today. That is the finding, not a broken harness:
+Both fail against budget today. That is the finding, not a broken harness:
 
 - **Search** has no index. `NoteStore.search()` reads, parses and `stat`s every file via `list()`,
-  then re-reads each candidate. Phase 4 replaces it; this number is the baseline that rewrite is
-  measured against.
-- **Electron's floor** is why the agent is native. 319.6 MB is a *trivial* document in one window —
-  the real renderer is strictly heavier. No Electron configuration reaches the 150 MB agent budget,
-  which is the measurement the §2 process split rests on.
+  then re-reads each candidate. This number is the baseline any rewrite is measured against.
+- **Electron's floor.** 319.6 MB is a *trivial* document in one window — the real renderer is
+  strictly heavier. This was the measurement the native process split rested on; with the agent
+  removed, 150 MB is no longer a budget any single-process design can meet, and the number needs
+  restating against what the app actually is rather than carried forward unexamined.
 
 ## Notes on each
-
-**`bench:panel`** lives in the Swift package (`agent/Sources/PanelBench`) rather than here, so that
-Phase 1 can point it at the agent's real HUD type instead of the replica it measures today. It gates
-on the *cold* path — the slower of the two, and the one a user hits on the first capture after
-launch. It does not measure hotkey dispatch itself; `RegisterEventHotKey` delivery was well under a
-millisecond in the Phase 0 audit, so the panel is the term that matters. Revisit if that stops
-holding.
 
 **`bench:search`** generates a deterministic corpus from a fixed seed, so a number measured today is
 comparable to one measured after Phase 4. Implementations are pluggable
@@ -67,28 +50,20 @@ optimistic reading. `--body-words` shows what the index will actually face.
 
 ## Using these in CI
 
-Today CI runs all three **for information only** — see `.github/workflows/ci.yml`. Nothing gates yet,
-for the obvious reason: two of the three budgets are currently missed, so a gate switched on now
-would make `main` permanently red and get deleted within the week.
-
-Gates switch on as each budget becomes achievable, and that is the phase's proof:
-
-| Benchmark | Gate switches on | Why not sooner |
-|---|---|---|
-| `bench:panel` | **Phase 1**, repointed at the real HUD | Measures a replica until the agent exists |
-| `bench:search` | **Phase 4**, against the new engine | Fails at 197.7 ms today by design |
-| `bench:memory` | never as a hard gate | Reports the Electron floor; the agent's own RSS is what Phase 1 asserts |
+Today CI runs both **for information only** — see `.github/workflows/ci.yml`. Nothing gates yet,
+for the obvious reason: both budgets are currently missed, so a gate switched on now would make
+`main` permanently red and get deleted within the week.
 
 Two rules worth keeping when they do switch on. **Gate only what is CPU-bound and deterministic,
-report everything else** — shared `macos-latest` runners are noisy, and `bench:panel` additionally
-depends on a window server whose behaviour on hosted runners is not something to bet a red build on.
-And **gate on a median of N runs, publishing the raw number as an artifact**, so drift is visible
-before it trips the gate rather than as a surprise. A gate that goes red for reasons nobody can act
-on protects nothing.
+report everything else** — shared `macos-latest` runners are noisy. And **gate on a median of N
+runs, publishing the raw number as an artifact**, so drift is visible before it trips the gate
+rather than as a surprise. A gate that goes red for reasons nobody can act on protects nothing.
 
 ## On-device ASR — measured 2026-08-01
 
-FluidAudio (Parakeet TDT v3) on the M2 reference machine.
+Historical. FluidAudio (Parakeet TDT v3) on the M2 reference machine, before the agent was removed.
+Kept because it is the bar any replacement has to clear, and because the two findings below still
+hold for a Node-side implementation.
 
 | | Measured | Budget | |
 |---|---|---|---|
@@ -106,10 +81,10 @@ normalization doing its job, and the right call for a note.
 **Two findings that shape the design, not just the score:**
 
 - **Peak memory is ~133 MB and does not scale with audio length** (206 s cost barely more than
-  30 s). But the agent already sits at 55 MB with the mic open, and §10 caps it at 150 MB. Holding
-  the model inside the agent therefore breaks the budget. Transcription belongs in a short-lived
-  helper process that exits when it is done — that keeps the resident agent lean by construction
-  rather than by remembering to unload.
+  30 s). The conclusion outlives the agent: transcription belongs in a helper process that exits
+  when it is done, so the resident app stays lean by construction rather than by remembering to
+  unload. Note this cuts against keeping an ASR server warm for latency — that trade is a real one
+  to make deliberately, not by default.
 - **461 MB of model is a real first-run download.** §6 asks for it to be fetched rather than
   bundled, which keeps the DMG small, but this is large enough to warrant a visible progress state
   and an honest word before it starts. §9 also wants the app complete offline afterwards, so the

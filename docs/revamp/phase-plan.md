@@ -150,9 +150,9 @@ bundle. Three options; I recommend the third:
 |---|---|
 | Two separate `.app` bundles | Two signatures, two updaters, two things in `/Applications`. No. |
 | Agent as the bundle's main executable | Matches the brief most literally, but electron-builder has no supported way to produce it — `afterPack` surgery, and the release pipeline becomes bespoke. |
-| **Agent as an embedded helper** in `Contents/Resources`, registered as an `SMAppService` login item | One bundle, one signature, existing release pipeline intact. Residency comes from the login item, not from being `argv[0]`. Double-clicking the app opens the library, which is what users expect anyway. |
+| **Agent as an embedded helper** in `Contents/Library/LoginItems/NoteatoAgent.app`, registered as an `SMAppService` login item | One installed product and updater, with a real helper-bundle identity for TCC. Residency comes from the login item, not from being `argv[0]`. Double-clicking the outer app opens the library, which is what users expect anyway. |
 
-**Also** — packaging a Swift binary into the DMG needs `extraResources` plus a `scripts/build-agent.sh`,
+**Also** — packaging the Swift helper into the DMG needs `extraFiles` plus a `scripts/build-agent.sh`,
 and `npm run dev` needs to build and launch the agent alongside `electron-vite dev`. Small, but it is
 real work that's easy to leave until it blocks someone.
 
@@ -313,8 +313,9 @@ follows after.
 The first feature that needs **Accessibility** permission, and per the brief's own strategic note,
 the one that makes the agent a daily habit. Treat it as a headline feature.
 
-**Work** — separate hotkey; press-and-hold and toggle; streaming injection via `AXUIElement` with a
-pasteboard fallback that **restores the previous pasteboard contents**; verbatim-leaning cleanup only.
+**Work** — Fn press-and-hold plus a clickable bottom dictation drawer; streaming injection via
+`AXUIElement` with a pasteboard fallback; copy the completed session to the clipboard after
+injection; verbatim-leaning cleanup only.
 Compatibility pass across Slack, Mail, Safari, Chrome, Terminal, iTerm, VS Code — the Electron and
 terminal cases are where AX injection usually breaks.
 

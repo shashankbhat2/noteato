@@ -16,11 +16,11 @@ Last updated: 2026-08-01, end of Phase 3.
 | **0.5B — AI surface** | ✅ done | Per-note bottom Chat drawer; no separate page surface |
 | **1 — Agent skeleton** | ✅ done | Menu-bar process, hotkeys, HUD, IPC, Electron client |
 | **1.5 — Identity migration** | ✅ done | Notes keyed on id; renames no longer move a note out from under an open pane |
-| **2 — Capture path** | 🟨 mostly | Mic, pre-roll, commit to the §4.3 format. **Library migration not done** — see below |
+| **2 — Capture path** | ↪️ superseded | Standalone quick capture and pre-roll UI removed; meeting recording keeps the writer path |
 | **3 — On-device ASR** | ✅ done | FluidAudio (Parakeet on ANE), in a helper process that exits |
 
 | **4 — Retrieval** | ⏭️ skipped for now | Search still 197 ms; no type-to-search. **Blocks the ship set** |
-| **5 — Dictation** | 🟨 built | ⌥⌘D, streaming, injects into any app. Compatibility matrix partly verified |
+| **5 — Dictation** | 🟨 built | Fn push-to-talk + bottom drawer, focused-cursor injection and clipboard copy |
 | **6 — Meetings** | 🟨 built, unverified | Dual-stream + merge tested; **needs your Screen Recording grant to run at all** |
 | **7 — Tier gating** | ⬜ next | |
 | **Signing (parallel track)** | ⬜ not started | Gates the *release* of 1–4, blocks no development |
@@ -58,20 +58,17 @@ NOTEATO_AGENT=1 npm run dev
 
 What to try:
 
-- **⌥⌘Space** → the capture HUD appears, and **recording is already underway** — it opens with the
-  last 10 seconds of audio, so speak *before* pressing the key and check the words are there.
-  `Esc` or ⌥⌘Space again commits; `Cmd+Esc` discards. The note lands in your vault as
-  `<timestamp>-<hash>/` holding `audio.m4a` and `note.md`.
-- **The menu bar icon says what the mic is doing** — listening, recording, or off — and the menu
-  carries "Pause listening". Locking the screen pauses it too.
-- `npm run probe:capture -- --seconds 3` exercises the whole path against the real microphone and
-  prints what it found, which is the fastest way to tell a permission problem from a code one.
+- **The bottom drawer** stays as a small handle with the Noteato mark and a mic. Click the mic for
+  toggle dictation, or hold **Fn** for push-to-talk. It expands to a live waveform without taking
+  focus from the target field, then inserts at that caret and leaves the complete result on the
+  clipboard.
 - **⌥⌘S** → the compact side panel, exactly as before. The agent owns the key and forwards it; the
   library still owns the panel.
 - **⇧⌥⌘S** → bring the library to the front, launching it if it isn't running.
-- **The menu-bar waveform icon** → Capture, Open Library, and a line saying whether the library is
-  connected.
-- **Quit the library and press ⌥⌘Space again.** The HUD still opens. That is the §2 invariant: the
+- **The one Noteato menu-bar icon** → Dictation, Record meeting, Open
+  Library, Show Sidebar, and Quit Noteato. The native agent owns it while connected; Electron only
+  supplies a delayed fallback if the helper cannot launch.
+- **Quit the library and hold Fn again.** The drawer still opens. That is the §2 invariant: the
   agent is the source of truth and the library is an optional client.
 - **Open Library** from the menu bar with nothing running → launches it. In dev, set
   `NOTEATO_LIBRARY_CMD='npm run dev'` before starting the agent, since there is no `.app` bundle to
@@ -102,16 +99,16 @@ On this M2, 2026-08-01. `npm run bench` reproduces the first two.
 
 | Metric | Budget | Measured | |
 |---|---|---|---|
-| Hotkey → HUD visible, cold | < 80 ms | **29 ms** | ✅ ~2.7× headroom |
-| Hotkey → HUD visible, warm p95 | < 80 ms | **5 ms** | ✅ |
+| Fn → drawer visible, cold | < 80 ms | **29 ms** | ✅ ~2.7× headroom |
+| Fn → drawer visible, warm p95 | < 80 ms | **5 ms** | ✅ |
 | Agent idle memory | < 150 MB | **46.7 MB** | ✅ |
 | Agent idle CPU | < 1 % | **0.0 %** | ✅ |
 | Search, 5k notes | < 150 ms | **197.7 ms** | ❌ Phase 4 fixes this |
 | Library cold open | < 1.5 s | **3.11 s** | ❌ not yet addressed |
 | Transcription RTF | < 0.3× | **0.01–0.02** | ✅ 57–196× realtime |
-| Hotkey → recording | 0 ms | **0 ms** | ✅ already buffered |
+| Fn → microphone start | < 80 ms | benchmark retained | 🟨 remeasure installed helper |
 
-The HUD figure measures `AgentCore.CaptureHUD` — the type the agent actually shows, not a stand-in.
+The drawer figure measures `AgentCore.DictationDrawer` — the type the agent actually shows, not a stand-in.
 It does **not** include hotkey dispatch; `RegisterEventHotKey` delivery measured well under a
 millisecond in the Phase 0 audit, so the panel is the term that matters. If that ever stops holding,
 the benchmark will quietly under-report.
@@ -123,7 +120,7 @@ For comparison, the Electron path this replaces: 283 ms cold, 319.6 MB for an *e
 ## What Phase 1 built
 
 ```
-agent/Sources/AgentCore/     Framing, Protocol, SocketServer, CaptureHUD, HotkeyManager
+agent/Sources/AgentCore/     Framing, Protocol, SocketServer, DictationDrawer, HotkeyManager
 agent/Sources/NoteatoAgent/  main, AppDelegate, LibraryLauncher
 agent/Sources/PanelBench/    the §10 hotkey→HUD gate
 src/main/agentClient.ts      the Electron side of the socket
@@ -136,9 +133,10 @@ src/main/agentClient.ts      the Electron side of the socket
   JSON. Unknown message types are ignored on both sides, so a newer agent paired with an older
   library degrades to the intersection rather than failing to connect.
 - **Bundle layout** (the open question from the plan): the agent ships as
-  `Noteato.app/Contents/Resources/NoteatoAgent` — a helper inside the one bundle, not a second app.
-  One signature, one updater, existing release pipeline untouched. Residency will come from
-  registering it as a login item, not from being the bundle's main executable.
+  `Noteato.app/Contents/Library/LoginItems/NoteatoAgent.app` — a real nested helper inside the one
+  installed product. This gives microphone and Accessibility a named bundle identity and lets
+  LaunchServices start it correctly. The local unsigned build seals the whole helper ad hoc;
+  Developer ID signing remains the durable release identity.
 
 ### Known, deliberate gaps
 
@@ -182,12 +180,15 @@ granted is still unanswered, because nothing here has been granted yet.
 
 ## Dictation — what is verified, and what is not
 
-`⌥⌘D` starts and stops dictation. It streams from the microphone the agent already has open and
-types confirmed text into whatever app is in front.
+Hold `Fn` to dictate and release it to flush the final words into the focused field. The resting
+bottom drawer's mic and the menu item provide the toggle form. Audio is buffered while the model
+takes its warm-start path, so a short held phrase is not discarded before the decoder becomes ready.
+The completed session is copied to the clipboard after injection finishes.
 
-**Verified:** injection into TextEdit via the pasteboard route, with the clipboard's previous
-contents restored exactly (checked with a sentinel value). Only *confirmed* decoder output is
-injected, so text lands once and is never retroactively revised — §7's "no silent editorializing".
+**Verified:** injection into TextEdit via the pasteboard route. The fallback restores what it
+borrowed before the completed transcript deliberately becomes the new clipboard value. Only
+*confirmed* decoder output is injected, so text lands once and is never retroactively revised —
+§7's "no silent editorializing".
 
 **Not verified:** the rest of §7's compatibility matrix — Slack, Mail, Safari, Chrome, Terminal,
 iTerm, VS Code. `npm run probe:inject "some text"` injects into whatever is frontmost and reports
@@ -195,10 +196,11 @@ which route worked; running it once per app is the matrix, and it should be reco
 than claimed.
 
 **Worth knowing about permissions:** TCC attributes a command-line binary to the terminal that
-launched it, so in development dictation inherits the terminal's Accessibility grant and appears to
-work with no prompt. The shipped app needs its own grant, and ad-hoc signing means that grant is
-keyed to the binary's hash — so it is re-requested on every rebuild until the signing track lands.
-Development is therefore *easier* than production here, which is the direction that hides problems.
+launched it, so development can inherit the terminal's Accessibility grant. The installed build now
+launches a sealed `com.noteato.agent` helper app through LaunchServices, so macOS shows a legible
+Noteato entry for Microphone and Accessibility. The user still has to grant both; because local
+builds are ad-hoc signed, a changed binary hash can require the grant again until Developer ID
+signing lands.
 
 ## What Phase 2 left undone, deliberately
 

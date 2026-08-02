@@ -1,9 +1,8 @@
 node_modules
 out
 dist
-agent/.build
-resources/NoteatoAgent
-resources/NoteatoTranscribe
+# Compiled helper binaries staged for electron-builder's extraResources.
+resources/bin
 *.log
 *.tsbuildinfo
 .DS_Store

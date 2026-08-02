@@ -21,18 +21,9 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  agent:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: swift --version
-      - run: npm run build:agent
-      - run: npm run test:agent
-
-  # Reports the §10 numbers on every run. Deliberately not gating yet: two of the
-  # three budgets are missed today (see bench/README.md), so a gate switched on
-  # now would make main permanently red. Each gate switches on with the phase
-  # that earns it — panel in Phase 1, search in Phase 4.
+  # Reports the §10 numbers on every run. Deliberately not gating yet: the
+  # budgets are missed today (see bench/README.md), so a gate switched on now
+  # would make main permanently red.
   benchmarks:
     runs-on: macos-latest
     continue-on-error: true
@@ -51,12 +42,6 @@ jobs:
 
       - name: electron idle floor (budget 150 MB)
         run: npm run bench:memory -- --json | tee bench-memory.json
-
-      # Needs a window server. Hosted runners are unreliable for this, which is
-      # why the step tolerates failure and the gate waits for Phase 1.
-      - name: hotkey to HUD (budget 80 ms)
-        continue-on-error: true
-        run: npm run bench:panel -- --json | tee bench-panel.json
 
       - uses: actions/upload-artifact@v4
         if: always()

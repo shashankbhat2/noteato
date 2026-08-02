@@ -35,8 +35,7 @@ import { TrayManager } from './tray'
 import { SidebarModeManager } from './sidebarMode'
 import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
-import { AgentClient } from './agentClient'
-import { agentBinaryPath, launchAgentIfNeeded } from './agentLauncher'
+import { removeStaleAgent } from './staleAgent'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 
 const appDb = getAppDb()
@@ -67,50 +66,6 @@ const reminderScheduler = new ReminderScheduler(
 )
 const globalShortcutManager = new GlobalShortcutManager(() => sidebarModeManager.toggle())
 
-// The resident native agent (docs/revamp/phase-plan.md, Phase 1). Behind a flag
-// while both capture paths coexist; the Electron path goes in Phase 3. Absent
-// agent is an ordinary state — the client retries quietly and the library works
-// exactly as before.
-// On by default wherever the agent binary actually exists — requiring an env
-// var made sense while both capture paths coexisted, but after installing a
-// DMG there is nobody to set one. NOTEATO_AGENT=0 still turns it off.
-const agentEnabled =
-  process.env['NOTEATO_AGENT'] === '1' ||
-  (process.env['NOTEATO_AGENT'] !== '0' && agentBinaryPath() !== null)
-const agentClient = new AgentClient(
-  (message) => {
-    switch (message.type) {
-      case 'showLibrary':
-        showMainWindow()
-        break
-      case 'toggleSidebar':
-        sidebarModeManager.toggle()
-        break
-      case 'captureTranscribed':
-      case 'captureCommitted':
-        // The agent wrote a note directly to the vault. A full refresh is the
-        // honest response: this process has no idea what else changed while it
-        // was not the one writing.
-        reminderScheduler.rebuildAll()
-        broadcastNoteChange({ kind: 'refresh' })
-        break
-      case 'welcome':
-        if (message.protocolVersion !== undefined && message.protocolVersion !== 1) {
-          console.warn(
-            `NoteatoAgent speaks protocol ${message.protocolVersion}; this library speaks 1.`
-          )
-        }
-        break
-      default:
-        break
-    }
-  },
-  (connected) => {
-    // Exclusive ownership: the agent registers the global shortcuts whenever it
-    // is up, and Electron takes them back only if it goes away.
-    globalShortcutManager.setAgentConnected(connected, runtimeSettings())
-  }
-)
 const edgeHoverWatcher = new EdgeHoverWatcher(
   () => {
     const settings = runtimeSettings()
@@ -141,6 +96,15 @@ const trayManager = new TrayManager(
     sidebarModeManager.destroy()
   }
 )
+
+/**
+ * Electron owns the one visible Noteato menu-bar icon. This used to negotiate
+ * with the native agent for it; that helper is gone, so the tray now follows
+ * settings alone.
+ */
+function syncTray(): void {
+  trayManager.setEnabled(shouldKeepRunning())
+}
 
 function shouldKeepRunning(): boolean {
   const settings = runtimeSettings()
@@ -581,9 +545,6 @@ function registerIpcHandlers(): void {
       globalShortcutManager.sync(runtime)
     }
     if ('sidebarEdge' in patch) sidebarModeManager.applyEdge()
-    if ('preRollSeconds' in patch || 'notesDir' in patch) {
-      agentClient.send({ type: 'settingsChanged' })
-    }
     if (
       'sidebarModeEnabled' in patch ||
       'sidebarHoverReveal' in patch ||
@@ -596,7 +557,7 @@ function registerIpcHandlers(): void {
       'sidebarModeEnabled' in patch ||
       'onboardingCompleted' in patch
     ) {
-      trayManager.setEnabled(runtime.keepInMenuBar || runtime.sidebarModeEnabled)
+      syncTray()
       // Turning the tray off must never leave the app unreachable with a
       // hidden Dock icon and no menu bar presence.
       if (!runtime.keepInMenuBar && !runtime.sidebarModeEnabled && process.platform === 'darwin') {
@@ -697,14 +658,12 @@ app.whenReady().then(() => {
   const runtime = runtimeSettings()
   sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
   globalShortcutManager.sync(runtime)
-  if (agentEnabled) {
-    // Try to connect first; only launch if nothing answers, so a user who
-    // already runs the agent themselves does not get a second one.
-    agentClient.start()
-    setTimeout(() => launchAgentIfNeeded(agentClient.isConnected()), 1200)
-  }
   edgeHoverWatcher.sync()
-  trayManager.setEnabled(shouldKeepRunning())
+  syncTray()
+  // Upgrades from a build that shipped NoteatoAgent can leave the helper
+  // running: it would still hold the Fn tap and paint a second menu-bar icon
+  // this process knows nothing about.
+  void removeStaleAgent()
 
   // Windows/Linux deliver OS-opened files as launch arguments.
   for (const arg of process.argv.slice(1)) openExternalMarkdown(arg)
@@ -719,7 +678,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
-  agentClient.stop()
   globalShortcutManager.destroy()
   edgeHoverWatcher.stop()
   externalWatcher.destroy()
