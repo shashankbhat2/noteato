@@ -45,8 +45,27 @@ function migrate(database: Database.Database): void {
     `)
   }
 
+  if (version < 3) {
+    // Which note a meeting recording belongs to, and where its audio lives.
+    //
+    // Deliberately not in the note's frontmatter: the vault is the user's plain
+    // markdown, and audio paths and durations are Noteato's bookkeeping. (It
+    // would not survive there anyway — serializeNoteFile writes a fixed key
+    // allowlist, so any extra frontmatter is dropped on the note's first save.)
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS recordings (
+        note_id TEXT PRIMARY KEY,
+        capture_dir TEXT NOT NULL,
+        duration_seconds REAL NOT NULL DEFAULT 0,
+        system_captured INTEGER NOT NULL DEFAULT 0,
+        transcript_status TEXT NOT NULL DEFAULT 'none',
+        created_at TEXT NOT NULL
+      );
+    `)
+  }
+
   if (version >= 1) {
-    if (version < 2) database.pragma('user_version = 2')
+    if (version < 3) database.pragma('user_version = 3')
     return
   }
 
@@ -131,7 +150,7 @@ function migrate(database: Database.Database): void {
       if (data) insertKv.run(key, JSON.stringify(data))
     }
 
-    database.pragma('user_version = 2')
+    database.pragma('user_version = 3')
   })
   toV1()
 }

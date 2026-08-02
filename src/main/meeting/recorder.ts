@@ -10,6 +10,8 @@ export interface MeetingRecording {
   /** False when no system audio arrived — the far side was never recorded. */
   systemCaptured: boolean
   noteId: string | null
+  /** Epoch ms the recording began, for naming a note it was not started from. */
+  startedAt: number
 }
 
 interface Options {
@@ -67,7 +69,8 @@ export class MeetingRecorder {
       onReady: () => {},
       onLevels: (levels) => this.options.onLevels(levels),
       onDone: (result) => {
-        const noteId = this.session.getState().noteId
+        // Read before stop() clears them.
+        const { noteId, startedAt } = this.session.getState()
         this.audio = null
         const dir = this.capture?.dir
         this.capture = null
@@ -76,7 +79,12 @@ export class MeetingRecorder {
           if (dir) removeCaptureDir(dir)
           this.discarding = false
         } else if (dir) {
-          this.options.onCommitted({ dir, noteId, ...result })
+          this.options.onCommitted({
+            dir,
+            noteId,
+            startedAt: startedAt ?? Date.now(),
+            ...result
+          })
         }
         this.session.stop()
       },

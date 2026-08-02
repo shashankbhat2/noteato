@@ -37,6 +37,7 @@ import { EdgeHoverWatcher } from './edgeHover'
 import { GlobalShortcutManager } from './globalShortcuts'
 import { removeStaleAgent } from './staleAgent'
 import { MeetingRecorder } from './meeting/recorder'
+import { RecordingStore } from './meeting/recordingStore'
 import { RecorderWindow } from './recorderWindow'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 
@@ -67,6 +68,7 @@ const reminderScheduler = new ReminderScheduler(
   (change) => broadcastScratchChange(change)
 )
 const recorderWindow = new RecorderWindow(appDb)
+const recordingStore = new RecordingStore(appDb)
 const meetingRecorder = new MeetingRecorder({
   getVault: () => noteStore.getNotesDir(),
   onStateChange: (state) => {
@@ -87,13 +89,33 @@ const meetingRecorder = new MeetingRecorder({
     if (error.code === 'screen_recording_denied') explainScreenRecording()
   },
   onCommitted: (recording) => {
-    // Phase 3 stops at the audio. Transcription, the merge and the note that
-    // carries them are Phases 4 and 5; until then the capture directory on disk
-    // is the whole result.
-    console.log(
-      `[meeting] committed ${recording.dir} — ${recording.seconds.toFixed(1)}s, ` +
-        `system audio ${recording.systemCaptured ? 'captured' : 'MISSING'}`
-    )
+    // A recording started from the tray or the accelerator carries no note —
+    // the ordinary case, since a meeting starts while you are looking at Zoom.
+    // Give it one, so the audio is reachable from the library rather than only
+    // from the filesystem.
+    let noteId = recording.noteId
+    if (!noteId) {
+      const title = `Meeting — ${new Date(recording.startedAt).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      })}`
+      noteId = noteStore.create(title).id
+    }
+
+    recordingStore.add({
+      noteId,
+      captureDir: recording.dir,
+      durationSeconds: recording.seconds,
+      systemCaptured: recording.systemCaptured
+    })
+
+    reminderScheduler.rebuildAll()
+    broadcastNoteChange({ kind: 'refresh' })
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('meeting:recorded', noteId)
+    }
   }
 })
 const globalShortcutManager = new GlobalShortcutManager(
@@ -644,6 +666,7 @@ function registerIpcHandlers(): void {
     return sidebarModeManager.getState()
   })
   ipcMain.handle('meeting:getState', () => meetingRecorder.getState())
+  ipcMain.handle('meeting:getRecording', (_e, noteId: string) => recordingStore.get(noteId))
   ipcMain.handle('meeting:start', (_e, noteId: string | null = null) => {
     meetingRecorder.start(noteId)
     return meetingRecorder.getState()

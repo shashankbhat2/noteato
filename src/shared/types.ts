@@ -128,6 +128,19 @@ export interface MeetingError {
   message: string
 }
 
+/** A note's recording, as the renderer needs it to play and (later) transcribe. */
+export interface NoteRecording {
+  noteId: string
+  captureDir: string
+  durationSeconds: number
+  /** Absolute path to the microphone track — "me". */
+  micPath: string
+  /** Absolute path to the system-audio track — "them", or null if never heard. */
+  systemPath: string | null
+  transcriptStatus: 'none' | 'pending' | 'ready' | 'failed'
+  createdAt: string
+}
+
 export interface Settings {
   onboardingCompleted: boolean
   userName: string

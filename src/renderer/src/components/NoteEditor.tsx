@@ -25,8 +25,9 @@ import {
   IconStar as Star,
   IconStarFilled as StarFilled
 } from '@tabler/icons-react'
-import type { MeetingState, Note } from '../../../shared/types'
+import type { MeetingState, Note, NoteRecording } from '../../../shared/types'
 import { elapsedLabel } from '../../../shared/elapsed'
+import RecordingPlayer from './RecordingPlayer'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
@@ -306,11 +307,31 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     noteId: null
   })
   const [recordElapsed, setRecordElapsed] = useState('')
+  const [recording, setRecording] = useState<NoteRecording | null>(null)
 
   useEffect(() => {
     void window.api.meeting.getState().then(setMeeting)
     return window.api.meeting.subscribeState(setMeeting)
   }, [])
+
+  // Reloaded when a recording lands on this note, so the Transcript tab and its
+  // player appear the moment the capture commits rather than on next open.
+  useEffect(() => {
+    let cancelled = false
+    const load = (): void => {
+      void window.api.meeting.getRecording(noteId).then((found) => {
+        if (!cancelled) setRecording(found)
+      })
+    }
+    load()
+    const unsubscribe = window.api.meeting.subscribeRecorded((recordedNoteId) => {
+      if (recordedNoteId === noteId) load()
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [noteId])
 
   // Derived from startedAt rather than counted, so the header agrees with the
   // pill to the second even after this pane was remounted mid-recording.
@@ -1134,9 +1155,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       ? segments[segments.length - 2]
       : ''
   const reminderAt = note.reminderAt
-  // Phase 2 will attach recording metadata to notes. Until then there is no
-  // honest source of truth for a transcript, so the tab is present but locked.
-  const hasRecording = false
+  const hasRecording = recording !== null
   reminderAtRef.current = reminderAt
   fullWidthRef.current = fullWidth
 
@@ -1357,8 +1376,13 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         <div className="note-transcription-empty">
           <Microphone size={18} />
           <strong>Transcript</strong>
-          <span>The recording transcript will appear here.</span>
+          <span>
+            {recording
+              ? 'Transcription is not wired up yet — the recording is playable below.'
+              : 'The recording transcript will appear here.'}
+          </span>
         </div>
+        {recording && <RecordingPlayer recording={recording} />}
       </div>
 
       {chatOpen && (

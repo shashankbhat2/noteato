@@ -2774,6 +2774,8 @@ body.resizing-panes .editor-pane {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  /* Containing block for the floating player. */
+  position: relative;
 }
 
 .note-transcription-empty {
@@ -7875,6 +7877,118 @@ body.is-reordering * {
   border: 1px solid var(--subtleBorder);
   border-radius: 4px;
   background: var(--surface);
+}
+
+/* --- Recording player ----------------------------------------------------- */
+
+/* Floats over the transcript rather than sitting in its flow: playback is a
+   persistent control you scrub while reading, not a header you scroll past. */
+.recording-player {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(560px, calc(100% - 40px));
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: var(--shadow-2);
+}
+
+.recording-player-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.recording-player-btn:hover {
+  background: var(--hoverSurface);
+  color: var(--text);
+}
+
+.recording-player-btn.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.recording-player-btn.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.recording-player-scrub {
+  flex: 1 1 auto;
+  min-width: 90px;
+  height: 3px;
+  margin: 0 4px;
+  appearance: none;
+  border-radius: 999px;
+  background: var(--border);
+  cursor: pointer;
+}
+
+.recording-player-scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: grab;
+}
+
+.recording-player-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.recording-player-total {
+  color: var(--text-muted);
+}
+
+.recording-player-speed {
+  flex: none;
+  min-width: 34px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.recording-player-speed:hover {
+  color: var(--text);
+  background: var(--hoverSurface);
+}
+
+.recording-player-error {
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* --- Recording pill ------------------------------------------------------- */

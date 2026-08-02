@@ -6,6 +6,7 @@ import type {
   MeetingLevels,
   MeetingState,
   Note,
+  NoteRecording,
   NoteChange,
   NoteSummary,
   NotionImportResult,
@@ -89,6 +90,7 @@ interface NoteatoApi {
   }
   meeting: {
     getState: () => Promise<MeetingState>
+    getRecording: (noteId: string) => Promise<NoteRecording | null>
     /** Omit `noteId` to record into a new note. */
     start: (noteId?: string | null) => Promise<MeetingState>
     stop: () => Promise<MeetingState>
@@ -97,6 +99,7 @@ interface NoteatoApi {
     subscribeState: (callback: (state: MeetingState) => void) => () => void
     subscribeLevels: (callback: (levels: MeetingLevels) => void) => () => void
     subscribeError: (callback: (error: MeetingError) => void) => () => void
+    subscribeRecorded: (callback: (noteId: string) => void) => () => void
   }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>

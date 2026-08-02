@@ -9,6 +9,7 @@ import type {
   MeetingLevels,
   MeetingState,
   Note,
+  NoteRecording,
   NoteChange,
   NoteSummary,
   NotionImportResult,
@@ -135,6 +136,8 @@ const api = {
   },
   meeting: {
     getState: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:getState'),
+    getRecording: (noteId: string): Promise<NoteRecording | null> =>
+      ipcRenderer.invoke('meeting:getRecording', noteId),
     /** Omit `noteId` to record into a new note. */
     start: (noteId?: string | null): Promise<MeetingState> =>
       ipcRenderer.invoke('meeting:start', noteId ?? null),
@@ -157,6 +160,11 @@ const api = {
       const listener = (_e: Electron.IpcRendererEvent, error: MeetingError): void => callback(error)
       ipcRenderer.on('meeting:error', listener)
       return () => ipcRenderer.removeListener('meeting:error', listener)
+    },
+    subscribeRecorded: (callback: (noteId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, noteId: string): void => callback(noteId)
+      ipcRenderer.on('meeting:recorded', listener)
+      return () => ipcRenderer.removeListener('meeting:recorded', listener)
     }
   },
   reminders: {
