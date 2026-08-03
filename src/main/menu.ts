@@ -38,7 +38,16 @@ export function buildAppMenu(): Menu {
       submenu: [
         {
           label: 'New Note',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => sendShortcut('new-note')
+        },
+        // ⌘T kept as a hidden alias: it was the shortcut before ⌘N, and
+        // breaking it would cost people muscle memory for no gain.
+        {
+          label: 'New Note',
           accelerator: 'CmdOrCtrl+T',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
           click: () => sendShortcut('new-note')
         },
         { type: 'separator' },
@@ -63,7 +72,14 @@ export function buildAppMenu(): Menu {
         },
         {
           label: 'Find in Note…',
+          accelerator: 'CmdOrCtrl+Shift+F',
+          click: () => sendShortcut('find')
+        },
+        {
+          label: 'Find in Note…',
           accelerator: 'CmdOrCtrl+F',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
           click: () => sendShortcut('find')
         },
         { type: 'separator' },
@@ -101,7 +117,14 @@ export function buildAppMenu(): Menu {
       submenu: [
         {
           label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+/',
+          click: () => sendShortcut('toggle-sidebar')
+        },
+        {
+          label: 'Toggle Sidebar',
           accelerator: 'CmdOrCtrl+\\',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
           click: () => sendShortcut('toggle-sidebar')
         },
         { type: 'separator' },

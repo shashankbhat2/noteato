@@ -20,6 +20,7 @@ import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
+import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
 import { titleFromFirstLine } from '../titleBlock'
 import {
   createNoteatoEditor,
@@ -75,7 +76,7 @@ export default function ScratchEditor({ note: summary, onSaved, onDelete }: Prop
       setNote(loaded)
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
-        ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
+        ? restoreImageWidths(linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body)))
         : scratch.document
       // No title block here, unlike the main editor: a scratch note opens as an
       // empty paragraph you can just start typing into.
@@ -98,7 +99,7 @@ export default function ScratchEditor({ note: summary, onSaved, onDelete }: Prop
   const persist = async (): Promise<void> => {
     const activeEditor = editorRef.current
     if (!activeEditor || !noteRef.current) return
-    const body = await activeEditor.blocksToMarkdownLossy(activeEditor.document)
+    const body = await activeEditor.blocksToMarkdownLossy(imagesForMarkdown(activeEditor.document))
     const nextTitle = titleFromFirstLine(body) || 'Untitled'
     saveChain.current = saveChain.current
       .then(async () => {

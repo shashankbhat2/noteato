@@ -1,6 +1,8 @@
 node_modules
 out
 dist
+# Compiled helper binaries staged for electron-builder's extraResources.
+resources/bin
 *.log
 *.tsbuildinfo
 .DS_Store

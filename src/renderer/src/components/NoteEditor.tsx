@@ -1,51 +1,70 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BlockNoteView } from '@blocknote/mantine'
 import {
   SideMenu,
   SideMenuController,
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
-  type DefaultReactSuggestionItem
+  type DefaultReactSuggestionItem,
+  useBlockNoteEditor,
+  useExtensionState
 } from '@blocknote/react'
 import { filterSuggestionItems } from '@blocknote/core'
-import { SideMenuExtension } from '@blocknote/core/extensions'
+import { SideMenuExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { TextSelection } from '@tiptap/pm/state'
 import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
 import {
-  IconArrowsMaximize as UnfoldHorizontal,
-  IconArrowsMinimize as FoldHorizontal,
-  IconBell as Bell,
+  IconCalendar as Calendar,
+  IconDots as Dots,
+  IconFileDescription as MeetingNotesIcon,
   IconFilePlus as FilePlus,
   IconFileText as FileText,
+  IconMicrophone as Microphone,
+  IconPhoto as Photo,
   IconStar as Star,
   IconStarFilled as StarFilled
 } from '@tabler/icons-react'
-import type { Note } from '../../../shared/types'
+import type { MeetingState, Note, NoteRecording } from '../../../shared/types'
+import { elapsedLabel } from '../../../shared/elapsed'
+import RecordingPlayer from './RecordingPlayer'
+import TranscriptView from './TranscriptView'
+import type { MeetingTranscript } from '../../../shared/meetingTranscript'
+import {
+  DEFAULT_MEETING_NOTES_TEMPLATE,
+  type MeetingNotesState
+} from '../../../shared/meetingNotes'
+import MeetingNotesView from './MeetingNotesView'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
 import { linkifyBlocks } from '../linkify'
-import { ensureTitleBlock, enforceTitleBlock, titleFromMarkdown } from '../titleBlock'
-import { formatReminderAt } from '../reminderPresets'
+import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
+import {
+  ensureTitleBlock,
+  enforceTitleBlock,
+  titleFromBlocks,
+  titleFromMarkdown
+} from '../titleBlock'
 import {
   createNoteatoEditor,
   emitOpenNoteLink,
   type NoteatoBlock,
   type NoteatoEditor
 } from '../noteLink'
-import DictationPanel from './DictationPanel'
 import FindReplaceBar from './FindReplaceBar'
 import SelectionAiToolbar from './SelectionAiToolbar'
 import SelectionAiPopup from './SelectionAiPopup'
-import BlockDragMenu, { stripIds } from './BlockDragMenu'
+import { BlockMenuButton, stripIds } from './BlockDragMenu'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
-import TableOfContents from './TableOfContents'
+import NoteOutline from './NoteOutline'
+import NoteAiPanel from './NoteAiPanel'
 import TagBar from './TagBar'
 
 interface Props {
-  path: string
+  /** Identity, not location — a rename must not look like a different note. */
+  noteId: string
   onSaved: (note: Note) => void
   onEditorReady?: (editor: NoteatoEditor | null) => void
   /**
@@ -61,7 +80,36 @@ interface AiPopupState {
   position: { x: number; y: number } | null
 }
 
+type NoteSurface = 'note' | 'transcription' | 'meetingNotes'
+
 const SAVE_DEBOUNCE_MS = 600
+
+const REVEAL_LABEL =
+  window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
+
+function dateInputValue(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function noteDateLabel(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return 'Set date'
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function createdAtWithDate(iso: string, value: string): string | null {
+  const [year, month, day] = value.split('-').map(Number)
+  if (!year || !month || !day) return null
+  const next = new Date(iso)
+  if (Number.isNaN(next.getTime())) return null
+  next.setFullYear(year, month - 1, day)
+  return next.toISOString()
+}
 
 // Blocks whose main content is editable prose — right-clicking these gets the
 // text context menu (spelling, look up, search, cut/copy/paste); anything else
@@ -126,32 +174,20 @@ async function noteLinkItems(
     }))
 }
 
-// The sibling group (top-level or a nested children array) containing a block.
-function findSiblingGroup(blocks: NoteatoBlock[], id: string): NoteatoBlock[] | null {
-  for (const block of blocks) {
-    if (block.id === id) return blocks
-    const children = (block as unknown as { children?: NoteatoBlock[] }).children
-    if (children && children.length > 0) {
-      const found = findSiblingGroup(children, id)
-      if (found) return found
-    }
-  }
-  return null
-}
-
 // Slash menu: the default block items plus "New page" — creates a sibling
 // note in the same folder, drops a mention chip at the cursor and opens it.
 function slashMenuItems(
   editor: NoteatoEditor,
   note: Note,
-  query: string
+  query: string,
+  onImagePickerStateChange: (picking: boolean) => void,
+  onImageInserted: () => void
 ): DefaultReactSuggestionItem[] {
   const newPage: DefaultReactSuggestionItem = {
     title: 'New page',
-    subtext: 'Create a page linked from here',
     aliases: ['page', 'subpage', 'newpage', 'create'],
-    group: 'Pages',
-    icon: <FilePlus size={18} />,
+    size: 'small',
+    icon: <FilePlus size={14} />,
     onItemClick: () => {
       void (async () => {
         const created = await window.api.notes.create('Untitled')
@@ -163,10 +199,85 @@ function slashMenuItems(
       })()
     }
   }
-  return filterSuggestionItems([...getDefaultReactSlashMenuItems(editor), newPage], query)
+  const imageTitle = editor.dictionary.slash_menu.image.title
+  const hiddenMediaTitles = new Set([
+    editor.dictionary.slash_menu.audio.title,
+    editor.dictionary.slash_menu.video.title,
+    editor.dictionary.slash_menu.file.title
+  ])
+  const localImage: DefaultReactSuggestionItem = {
+    title: imageTitle,
+    aliases: ['image', 'photo', 'picture', 'media'],
+    icon: <Photo size={14} />,
+    size: 'small',
+    onItemClick: () => {
+      onImagePickerStateChange(true)
+      // Create the block while the editor still owns focus. Native dialogs can
+      // move the text selection, but the returned path can always update this
+      // concrete block id.
+      const imageBlock = insertOrUpdateBlockForSlashMenu(editor, { type: 'image' })
+      const restoreParagraph = (): void => {
+        const block = editor.getBlock(imageBlock.id)
+        if (block?.type === 'image' && !block.props.url) {
+          editor.updateBlock(imageBlock.id, { type: 'paragraph' })
+        }
+      }
+      void window.api.images
+        .chooseLocal()
+        .then((linked) => {
+          if (!linked || !editor.getBlock(imageBlock.id)) {
+            restoreParagraph()
+            onImagePickerStateChange(false)
+            return
+          }
+          editor.updateBlock(imageBlock.id, {
+            type: 'image',
+            props: { name: linked.name, url: linked.url }
+          })
+          onImagePickerStateChange(false)
+          onImageInserted()
+        })
+        .catch((error) => {
+          restoreParagraph()
+          onImagePickerStateChange(false)
+          console.error('Unable to link local image', error)
+        })
+    }
+  }
+  const blockTypes = getDefaultReactSlashMenuItems(editor)
+    .filter((item) => item.title !== imageTitle && !hiddenMediaTitles.has(item.title))
+    .map((item) => ({
+      ...item,
+      group: undefined,
+      subtext: undefined,
+      badge: undefined,
+      size: 'small' as const
+    }))
+  return filterSuggestionItems([...blockTypes, localImage, newPage], query)
 }
 
-export default function NoteEditor({ path, onSaved, onEditorReady, paneControls }: Props) {
+/** The first H1 is the note title, not a movable content block. */
+function NoteSideMenu(props: React.ComponentProps<typeof SideMenu>) {
+  const editor = useBlockNoteEditor() as unknown as NoteatoEditor
+  const hoveredBlock = useExtensionState(SideMenuExtension, {
+    editor,
+    selector: (state) => state?.block
+  }) as NoteatoBlock | undefined
+  const firstBlock = editor.document[0]
+  const isTitle =
+    hoveredBlock?.id === firstBlock?.id &&
+    firstBlock.type === 'heading' &&
+    Number((firstBlock.props as { level?: number }).level) === 1
+
+  if (isTitle) return null
+  return (
+    <SideMenu {...props}>
+      <BlockMenuButton />
+    </SideMenu>
+  )
+}
+
+export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControls }: Props) {
   const { resolvedTheme, fontFamily, aiSelectionActions } = useTheme()
   const [note, setNote] = useState<Note | null>(null)
   const [fullWidth, setFullWidth] = useState(false)
@@ -180,20 +291,137 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
+  const [activeSurface, setActiveSurface] = useState<NoteSurface>('note')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [outlineVisible, setOutlineVisible] = useState(false)
+  const [isSwitchingNote, setIsSwitchingNote] = useState(false)
+  const [meeting, setMeeting] = useState<MeetingState>({
+    phase: 'idle',
+    startedAt: null,
+    noteId: null
+  })
+  const [recordElapsed, setRecordElapsed] = useState('')
+  const [recording, setRecording] = useState<NoteRecording | null>(null)
+  const [transcript, setTranscript] = useState<MeetingTranscript | null>(null)
+  const [transcriptSaveStatus, setTranscriptSaveStatus] = useState<
+    'idle' | 'edited' | 'saving' | 'saved' | 'failed'
+  >('idle')
+  const [meetingNotesState, setMeetingNotesState] = useState<MeetingNotesState>({
+    noteId,
+    template: DEFAULT_MEETING_NOTES_TEMPLATE,
+    status: 'waiting',
+    content: ''
+  })
+  const [playhead, setPlayhead] = useState(0)
+  const seekRef = useRef<((seconds: number) => void) | null>(null)
+
+  useEffect(() => {
+    void window.api.meeting.getState().then(setMeeting)
+    return window.api.meeting.subscribeState(setMeeting)
+  }, [])
+
+  // Reloaded when a recording lands on this note, so the Transcript tab and its
+  // player appear the moment the capture commits rather than on next open.
+  useEffect(() => {
+    let cancelled = false
+    const load = (): void => {
+      void window.api.meeting.getRecording(noteId).then((found) => {
+        if (!cancelled) setRecording(found)
+      })
+      void window.api.meeting.getTranscript(noteId).then((found) => {
+        if (!cancelled) {
+          transcriptDraftRef.current = found
+          setTranscript(found)
+        }
+      })
+      void window.api.meeting.getNotesState(noteId).then((state) => {
+        if (!cancelled) setMeetingNotesState(state)
+      })
+    }
+    load()
+    const unsubscribers = [
+      window.api.meeting.subscribeRecorded((changed) => {
+        if (changed === noteId) load()
+      }),
+      window.api.meeting.subscribeTranscript((changed) => {
+        if (changed === noteId) load()
+      }),
+      window.api.meeting.subscribeNotes((state) => {
+        if (state.noteId === noteId) setMeetingNotesState(state)
+      })
+    ]
+    return () => {
+      cancelled = true
+      for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [noteId])
+
+  // Derived from startedAt rather than counted, so the header agrees with the
+  // pill to the second even after this pane was remounted mid-recording.
+  useEffect(() => {
+    if (meeting.phase !== 'recording' || meeting.noteId !== noteId) {
+      setRecordElapsed('')
+      return
+    }
+    const startedAt = meeting.startedAt ?? Date.now()
+    const tick = (): void => setRecordElapsed(elapsedLabel(startedAt, Date.now()))
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [meeting.phase, meeting.noteId, meeting.startedAt, noteId])
+
+  useEffect(() => {
+    setActiveSurface('note')
+    setChatOpen(false)
+    setOutlineVisible(false)
+    transcriptDraftRef.current = null
+    transcriptDirtyRef.current = false
+    transcriptEditVersionRef.current = 0
+    setTranscriptSaveStatus('idle')
+    setMeetingNotesState({
+      noteId,
+      template: DEFAULT_MEETING_NOTES_TEMPLATE,
+      status: 'waiting',
+      content: ''
+    })
+  }, [noteId])
+
+  useEffect(() => {
+    if (!chatOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setChatOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [chatOpen])
+  const overflowBtnRef = useRef<HTMLButtonElement>(null)
+  // The overflow menu is built at click time from these, not from the render
+  // closure that happened to create the handler.
+  const reminderAtRef = useRef<string | null>(null)
+  const fullWidthRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const transcriptSaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const transcriptDraftRef = useRef<MeetingTranscript | null>(null)
+  const transcriptDirtyRef = useRef(false)
+  const transcriptEditVersionRef = useRef(0)
   // Tags change through their own save; a body autosave scheduled before that
   // must not write the pre-edit list back, so saves read the tags from here
   // rather than from whichever `note` their closure captured.
   const tagsRef = useRef<string[]>([])
-  // The path this pane is actually showing. Editing a title renames the file,
-  // so it drifts from the `path` prop the tab was opened with.
-  const livePathRef = useRef<string | null>(null)
+  // Whether this pane is already showing a note, so a switch can keep the old
+  // editor mounted while the next one loads.
+  const hasLoadedRef = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const metadataRef = useRef<HTMLDivElement>(null)
   const reminderBtnRef = useRef<HTMLButtonElement>(null)
   const aiStreamingRef = useRef(false)
+  // Native pickers blur the app. Do not persist the temporary empty image
+  // block or the cleared slash query while the picker owns focus.
+  const imagePickingRef = useRef(false)
   // True while an on-disk change is being applied to the editor — those
   // programmatic block swaps must not trigger a save of their own.
   const applyingExternalRef = useRef(false)
+  const switchSettleFrameRef = useRef<number | null>(null)
   const onEditorReadyRef = useRef(onEditorReady)
   onEditorReadyRef.current = onEditorReady
 
@@ -204,33 +432,44 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   }, [aiError])
 
   useEffect(() => {
-    // A rename feeds the note's new path back down through this prop. That's
-    // the note already on screen — reloading it would throw away the caret and
-    // any edits made since the save for nothing.
-    if (livePathRef.current === path) return
-
     let cancelled = false
-    setInitialBlocks('loading')
+    // Keep the current editor mounted while the replacement note is read and
+    // parsed. Clearing it here made the entire document shell collapse into a
+    // centred loading message on every sidebar click, then expand again.
+    const replacingVisibleNote = hasLoadedRef.current
+    if (replacingVisibleNote) setIsSwitchingNote(true)
+    else setInitialBlocks('loading')
     setLoadError(null)
 
     const load = async (): Promise<void> => {
-      const loaded = await window.api.notes.read(path)
+      const loaded = await window.api.notes.read(noteId)
       if (cancelled) return
-      livePathRef.current = loaded.path
-      setNote(loaded)
-      setFullWidth(loaded.fullWidth)
-      tagsRef.current = loaded.tags
 
       const scratch = createNoteatoEditor()
       const blocks = loaded.body.trim()
-        ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body))
+        ? restoreImageWidths(linkifyBlocks(await scratch.tryParseMarkdownToBlocks(loaded.body)))
         : scratch.document
       // The first block is the title; notes from before the title lived in the
       // body (or created empty) get their stored title prepended as an H1.
       // Externally linked files are shown exactly as they are on disk — no
       // title block is ever injected into someone else's markdown.
       if (!cancelled) {
+        // Commit every piece of note-specific layout together. React batches
+        // these updates, so title metadata, width and editor content change in
+        // one paint instead of walking through several intermediate layouts.
+        hasLoadedRef.current = true
+        tagsRef.current = loaded.tags
+        setNote(loaded)
+        setFullWidth(loaded.fullWidth)
         setInitialBlocks(loaded.external ? blocks : ensureTitleBlock(blocks, loaded.title))
+
+        if (switchSettleFrameRef.current !== null) {
+          cancelAnimationFrame(switchSettleFrameRef.current)
+        }
+        switchSettleFrameRef.current = requestAnimationFrame(() => {
+          switchSettleFrameRef.current = null
+          if (!cancelled) setIsSwitchingNote(false)
+        })
       }
     }
 
@@ -239,13 +478,18 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     // there'd be nothing on screen to say so or to try again from.
     void load().catch((err: unknown) => {
       if (cancelled) return
+      setIsSwitchingNote(false)
       setLoadError(err instanceof Error ? err.message : String(err))
     })
 
     return () => {
       cancelled = true
+      if (switchSettleFrameRef.current !== null) {
+        cancelAnimationFrame(switchSettleFrameRef.current)
+        switchSettleFrameRef.current = null
+      }
     }
-  }, [path, loadAttempt])
+  }, [noteId, loadAttempt])
 
   const editor = useMemo(() => {
     if (initialBlocks === 'loading') return undefined
@@ -253,10 +497,61 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialBlocks])
 
+  // Tags and the date are siblings of BlockNote so they cannot become editable
+  // document content. Measure the live H1 and place them below the title; the
+  // first block reserves enough space to keep the body comfortably below them.
+  useLayoutEffect(() => {
+    const container = rootRef.current?.querySelector<HTMLElement>('.note-editor')
+    const metadata = metadataRef.current
+    if (!container || !metadata || !editor) return
+
+    const observed = new Set<Element>()
+    const resizeObserver = new ResizeObserver(() => sync())
+    const observe = (element: Element): void => {
+      if (observed.has(element)) return
+      observed.add(element)
+      resizeObserver.observe(element)
+    }
+    const sync = (): void => {
+      const title = container.querySelector<HTMLElement>(
+        '.bn-editor > .bn-block-group > .bn-block-outer:first-child h1'
+      )
+      if (!title) return
+      observe(title)
+      observe(metadata)
+      const containerRect = container.getBoundingClientRect()
+      const titleRect = title.getBoundingClientRect()
+      if (titleRect.width === 0) return
+      const metadataHeight = metadata.getBoundingClientRect().height
+      container.style.setProperty(
+        '--note-metadata-top',
+        `${Math.max(0, titleRect.bottom - containerRect.top + 18)}px`
+      )
+      container.style.setProperty('--note-metadata-space', `${metadataHeight + 34}px`)
+    }
+    const mutationObserver = new MutationObserver(sync)
+    mutationObserver.observe(container, { childList: true, subtree: true })
+    window.addEventListener('resize', sync)
+    sync()
+
+    return () => {
+      resizeObserver.disconnect()
+      mutationObserver.disconnect()
+      window.removeEventListener('resize', sync)
+      container.style.removeProperty('--note-metadata-top')
+      container.style.removeProperty('--note-metadata-space')
+    }
+  }, [editor, note?.id])
+
   // Expose the active editor so the app menu's Undo/Redo can drive its history.
   useEffect(() => {
-    onEditorReadyRef.current?.(editor ?? null)
-    return () => onEditorReadyRef.current?.(null)
+    // Capture the callback that registered this exact editor. During a note
+    // switch the parent callback starts pointing at the next note before the
+    // next editor exists; using the live ref in cleanup would unregister the
+    // new id and leave the old editor in the map.
+    const registeredCallback = onEditorReadyRef.current
+    registeredCallback?.(editor ?? null)
+    return () => registeredCallback?.(null)
   }, [editor])
 
   // Right-click menu inside the note body. The main process forwards the
@@ -355,15 +650,19 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   }
 
   // The title is the body's leading `# …` line.
-  const save = async (markdown: string, nextFullWidth: boolean): Promise<Note | undefined> => {
+  const save = async (
+    markdown: string,
+    nextFullWidth: boolean,
+    nextCreatedAt?: string
+  ): Promise<Note | undefined> => {
     if (!note) return undefined
-    const saved = await window.api.notes.save(note.path, {
+    const saved = await window.api.notes.save(noteId, {
       title: titleFromMarkdown(markdown) || 'Untitled',
       body: markdown,
       tags: tagsRef.current,
+      createdAt: nextCreatedAt,
       fullWidth: nextFullWidth
     })
-    livePathRef.current = saved.path
     setNote(saved)
     tagsRef.current = saved.tags
     onSaved(saved)
@@ -371,7 +670,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   }
 
   const currentMarkdown = async (): Promise<string> => {
-    return editor ? editor.blocksToMarkdownLossy(editor.document) : ''
+    return editor ? editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document)) : ''
   }
 
   const persist = async (nextFullWidth: boolean): Promise<Note | undefined> => {
@@ -382,6 +681,76 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => persist(fullWidth), SAVE_DEBOUNCE_MS)
   }
+
+  const persistTranscript = async (): Promise<void> => {
+    const draft = transcriptDraftRef.current
+    if (!draft || !transcriptDirtyRef.current) return
+    if (transcriptSaveTimer.current) {
+      clearTimeout(transcriptSaveTimer.current)
+      transcriptSaveTimer.current = undefined
+    }
+    const version = transcriptEditVersionRef.current
+    setTranscriptSaveStatus('saving')
+    try {
+      const saved = await window.api.meeting.saveTranscript(
+        noteId,
+        draft.segments.map((segment) => segment.text)
+      )
+      if (!saved) throw new Error('Transcript is no longer available.')
+      if (transcriptEditVersionRef.current === version) {
+        transcriptDirtyRef.current = false
+        transcriptDraftRef.current = saved
+        setTranscript(saved)
+        setTranscriptSaveStatus('saved')
+      } else {
+        transcriptSaveTimer.current = setTimeout(
+          () => void persistTranscript(),
+          SAVE_DEBOUNCE_MS
+        )
+      }
+    } catch {
+      if (transcriptEditVersionRef.current === version) setTranscriptSaveStatus('failed')
+    }
+  }
+
+  const handleTranscriptChange = (sourceIndex: number, text: string): void => {
+    setTranscript((current) => {
+      if (!current || !current.segments[sourceIndex]) return current
+      const next = {
+        ...current,
+        segments: current.segments.map((segment, index) =>
+          index === sourceIndex ? { ...segment, text } : segment
+        )
+      }
+      transcriptDraftRef.current = next
+      return next
+    })
+    transcriptDirtyRef.current = true
+    transcriptEditVersionRef.current += 1
+    setTranscriptSaveStatus('edited')
+    if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current)
+    transcriptSaveTimer.current = setTimeout(
+      () => void persistTranscript(),
+      SAVE_DEBOUNCE_MS
+    )
+  }
+
+  const flushTranscript = (): void => {
+    if (!transcriptDirtyRef.current) return
+    void persistTranscript()
+  }
+
+  useEffect(() => {
+    return () => {
+      if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current)
+      const draft = transcriptDraftRef.current
+      if (!draft || !transcriptDirtyRef.current) return
+      void window.api.meeting.saveTranscript(
+        noteId,
+        draft.segments.map((segment) => segment.text)
+      )
+    }
+  }, [noteId])
 
   // Re-assert "first block is the title H1" after a change settles. Deferred to
   // a microtask so the fix-up transaction never dispatches from inside the one
@@ -403,6 +772,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   useEffect(() => {
     const flushOnWindowBlur = (): void => {
       if (!rootRef.current || rootRef.current.offsetParent === null) return
+      if (imagePickingRef.current) return
       if (saveTimer.current) clearTimeout(saveTimer.current)
       void persist(fullWidth)
     }
@@ -420,6 +790,49 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     }
   }
 
+  /**
+   * Everything the header used to show as a permanent glyph. These are real
+   * actions, but occasional ones — a row of icons for each is the header
+   * competing with the document it frames.
+   */
+  const openOverflowMenu = (): void => {
+    const rect = overflowBtnRef.current?.getBoundingClientRect()
+    const x = rect ? rect.right - 210 : 0
+    const y = rect ? rect.bottom + 6 : 80
+    setCtxMenu({
+      x,
+      y,
+      items: [
+        {
+          label: reminderAtRef.current ? 'Change reminder…' : 'Set reminder…',
+          onClick: () => setReminderPopover({ x, y })
+        },
+        ...(reminderAtRef.current
+          ? [{ label: 'Clear reminder', onClick: () => void handleSetReminder(null) }]
+          : []),
+        { separator: true, label: '' },
+        {
+          label: fullWidthRef.current ? 'Use narrow width' : 'Use full width',
+          onClick: () => toggleFullWidth()
+        },
+        {
+          label: outlineVisible ? 'Hide outline' : 'Show outline',
+          onClick: () => setOutlineVisible((visible) => !visible)
+        },
+        {
+          label: 'Find in note…',
+          onClick: () => {
+            setFindOpen(true)
+            setFindFocusTick((t) => t + 1)
+          }
+        },
+        { separator: true, label: '' },
+        { label: 'Copy path', onClick: () => void window.api.notes.copyPath(noteId) },
+        { label: REVEAL_LABEL, onClick: () => void window.api.notes.revealInFinder(noteId) }
+      ]
+    })
+  }
+
   const toggleFullWidth = (): void => {
     const next = !fullWidth
     setFullWidth(next)
@@ -432,25 +845,25 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
   // truth right now and will overwrite shortly anyway).
   useEffect(() => {
     if (!editor || !note?.external) return
-    const { id, path: notePath } = note
+    const { id } = note
     return window.api.notes.subscribeChanged((change) => {
       if (change.kind !== 'upsert' || change.note.id !== id) return
       if (saveTimer.current) return
       void (async () => {
         let latest: Note
         try {
-          latest = await window.api.notes.read(notePath)
+          latest = await window.api.notes.read(id)
         } catch {
           return
         }
-        const current = await editor.blocksToMarkdownLossy(editor.document)
+        const current = await editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document))
         if (latest.body.trim() === current.trim()) {
           setNote((prev) => (prev ? { ...prev, updatedAt: latest.updatedAt } : prev))
           return
         }
         const scratch = createNoteatoEditor()
         const blocks = latest.body.trim()
-          ? linkifyBlocks(await scratch.tryParseMarkdownToBlocks(latest.body))
+          ? restoreImageWidths(linkifyBlocks(await scratch.tryParseMarkdownToBlocks(latest.body)))
           : scratch.document
         applyingExternalRef.current = true
         try {
@@ -488,7 +901,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     }
     let result
     try {
-      result = await window.api.notes.setReminder(base.path, reminderAt)
+      result = await window.api.notes.setReminder(noteId, reminderAt)
     } catch {
       return
     }
@@ -512,7 +925,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     }
     let result
     try {
-      result = await window.api.notes.setPinned(base.path, !base.pinned)
+      result = await window.api.notes.setPinned(noteId, !base.pinned)
     } catch {
       return
     }
@@ -538,7 +951,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
 
   useEffect(() => {
     void refreshTagSuggestions()
-  }, [path])
+  }, [noteId])
 
   // Tags ride along with a normal save, so this uses the same flush-first dance
   // as pin/reminder: a pending autosave may be about to rename the file.
@@ -554,48 +967,91 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     void refreshTagSuggestions()
   }
 
+  const handleSetDate = async (value: string): Promise<void> => {
+    if (!note || note.external) return
+    const createdAt = createdAtWithDate(note.createdAt, value)
+    if (!createdAt) return
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = undefined
+    }
+    await save(await currentMarkdown(), fullWidth, createdAt)
+  }
+
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [])
 
-  // Dragging a heading takes its whole section along: select from the heading
-  // through every following sibling until the next heading or divider, so
-  // BlockNote's drag logic (which drags the selection when the dragged block
-  // is inside one) moves the unit together — including into toggle lists.
-  const selectHeadingSection = (block: NoteatoBlock): void => {
-    if (!editor || block.type !== 'heading') return
-    const siblings = findSiblingGroup(editor.document as NoteatoBlock[], block.id)
-    if (!siblings) return
-    const start = siblings.findIndex((b) => b.id === block.id)
-    if (start === -1) return
-    let end = start
-    for (let i = start + 1; i < siblings.length; i++) {
-      const type = siblings[i].type
-      if (type === 'heading' || type === 'divider') break
-      end = i
-    }
-    if (end === start) return
-    try {
-      editor.setSelection(block.id, siblings[end].id)
-    } catch {
-      /* selection couldn't span the section — fall back to single-block drag */
+  // Images remain directly draggable even though content blocks are not.
+  const handleImageDragStartCapture = (event: React.DragEvent): void => {
+    if (!editor) return
+    const target = event.target as HTMLElement
+    const image = target.closest?.('[data-content-type="image"] .bn-visual-media')
+    if (image) {
+      const blockId = image.closest<HTMLElement>('[data-node-type="blockOuter"]')?.dataset.id
+      const block = blockId ? editor.getBlock(blockId) : undefined
+      if (block?.type === 'image') {
+        editor.getExtension(SideMenuExtension)?.blockDragStart(event, block)
+      }
     }
   }
 
-  // Fires before the drag handle's own dragstart (capture phase): when the
-  // hovered block is a heading, widen the selection to its section first so
-  // BlockNote drags the whole unit.
-  const handleDragStartCapture = (event: React.DragEvent): void => {
+  const handleImagePointerDownCapture = (event: React.PointerEvent): void => {
+    const image = (event.target as HTMLElement).closest?.<HTMLImageElement>(
+      '[data-content-type="image"] .bn-visual-media'
+    )
+    if (image) image.draggable = true
+  }
+
+  const handleDragEndCapture = (event: React.DragEvent): void => {
     if (!editor) return
-    if (!(event.target as HTMLElement).closest?.('.bn-side-menu')) return
+    if (!(event.target as HTMLElement).closest?.('[data-content-type="image"] .bn-visual-media')) {
+      return
+    }
+    editor.getExtension(SideMenuExtension)?.blockDragEnd()
+  }
+
+  const handleDropCapture = (event: React.DragEvent): void => {
+    if (
+      !editor ||
+      event.dataTransfer.types.includes('blocknote/html') ||
+      event.dataTransfer.files.length === 0
+    ) {
+      return
+    }
+    const imageFiles = Array.from(event.dataTransfer.files).filter(
+      (file) =>
+        file.type.startsWith('image/') ||
+        /\.(?:avif|bmp|gif|heic|heif|ico|jpe?g|png|svg|tiff?|webp)$/i.test(file.name)
+    )
+    if (imageFiles.length === 0) return
+
+    event.preventDefault()
+    event.stopPropagation()
     try {
-      const sideMenu = editor.getExtension(SideMenuExtension)
-      const block = (sideMenu?.store?.state as { block?: NoteatoBlock } | undefined)?.block
-      if (block) selectHeadingSection(block)
-    } catch {
-      /* side menu extension unavailable — plain single-block drag */
+      const linked = imageFiles
+        .map((file) => window.api.images.linkDropped(file))
+        .filter((value): value is { name: string; url: string } => value !== null)
+      if (linked.length === 0) throw new Error('Dropped images did not expose local paths')
+
+      const hit = document.elementFromPoint(event.clientX, event.clientY)
+      const blockId = hit?.closest<HTMLElement>('[data-node-type="blockOuter"]')?.dataset.id
+      const anchor = (blockId ? editor.getBlock(blockId) : undefined) ?? editor.document.at(-1)
+      if (!anchor) return
+      const rect = hit?.closest<HTMLElement>('[data-node-type="blockOuter"]')?.getBoundingClientRect()
+      let placement: 'before' | 'after' = rect && event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+      if (anchor.id === editor.document[0]?.id) placement = 'after'
+
+      editor.insertBlocks(
+        linked.map(({ name, url }) => ({ type: 'image', props: { name, url } })),
+        anchor,
+        placement
+      )
+    } catch (error) {
+      console.error('Unable to link dropped image', error)
+      setAiError('Could not add the dropped image.')
     }
   }
 
@@ -642,11 +1098,26 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
     if (!editor) return
     if (!(event.target as HTMLElement).closest?.('.bn-editor')) return
 
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+      event.preventDefault()
+      event.stopPropagation()
+      setOutlineVisible((visible) => !visible)
+      return
+    }
+
     if (event.key === 'Backspace') {
       try {
         const view = editor.prosemirrorView
         if (!view.state.selection.empty || !view.endOfTextblock('backward')) return
         const cursor = editor.getTextCursorPosition()
+        // The title is permanently an H1. BlockNote normally demotes a heading
+        // when Backspace is pressed at its start; restoring it on the next
+        // transaction caused the visible paragraph/H1 flicker.
+        if (cursor.block.id === editor.document[0]?.id) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         const isFormatted =
           cursor.block.type !== 'paragraph' &&
           cursor.block.type !== 'codeBlock' &&
@@ -734,7 +1205,7 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
         <button
           className="empty-state-btn"
           onClick={() => {
-            livePathRef.current = null
+            hasLoadedRef.current = false
             setLoadAttempt((n) => n + 1)
           }}
         >
@@ -746,130 +1217,419 @@ export default function NoteEditor({ path, onSaved, onEditorReady, paneControls 
 
   if (!editor || !note) return <div className="empty-state">Loading…</div>
 
+  // Only the parent, never the whole path. The full location stays reachable
+  // through Copy path / Reveal in Finder in the overflow menu — a filesystem
+  // breadcrumb over every document is IDE furniture, not writing furniture.
   const segments = note.path.split('/')
-  const fileLabel = segments[segments.length - 1].replace(/\.md$/, '')
-  const folderSegments = segments.slice(0, -1)
+  const parentLabel = note.external
+    ? segments[segments.length - 2] || ''
+    : segments.length > 1
+      ? segments[segments.length - 2]
+      : ''
   const reminderAt = note.reminderAt
+  const hasRecording = recording !== null
+  reminderAtRef.current = reminderAt
+  fullWidthRef.current = fullWidth
+
+  const transcriptLabel =
+    recording?.transcriptStatus === 'pending'
+      ? { title: 'Transcribing…', detail: 'This runs on your Mac; long meetings take a while.' }
+      : recording?.transcriptStatus === 'failed'
+        ? { title: 'Transcription failed', detail: 'The recording is safe and still playable.' }
+        : recording
+          ? { title: 'No transcript', detail: 'This recording has not been transcribed.' }
+          : { title: 'Transcript', detail: 'The recording transcript will appear here.' }
+  const transcriptSaveLabel =
+    transcriptSaveStatus === 'saving'
+      ? 'Saving…'
+      : transcriptSaveStatus === 'failed'
+        ? 'Couldn’t save'
+        : transcriptSaveStatus === 'edited'
+          ? 'Edited'
+          : transcriptSaveStatus === 'saved'
+            ? 'Saved'
+            : 'Editable transcript'
+
+  const recordingThisNote = meeting.phase === 'recording' && meeting.noteId === note.id
+  // One recording at a time: while another note owns it, this button reports
+  // why it is unavailable rather than silently doing nothing.
+  const recordingElsewhere = meeting.phase !== 'idle' && !recordingThisNote
+  const recordDisabled = recordingElsewhere || note.external
+  const recordButtonLabel = recordingThisNote
+    ? 'Stop recording'
+    : recordingElsewhere
+      ? 'Another recording is already running'
+      : note.external
+        ? 'Linked notes cannot hold a recording'
+        : 'Record a meeting into this note'
 
   return (
     <div
       ref={rootRef}
-      className="note-editor-shell"
+      className={isSwitchingNote ? 'note-editor-shell switching-note' : 'note-editor-shell'}
+      aria-busy={isSwitchingNote}
       onKeyDownCapture={handleEditorKeyDown}
       onKeyDown={handleEditorKeyDownBubble}
-      onDragStartCapture={handleDragStartCapture}
+      onPointerDownCapture={handleImagePointerDownCapture}
+      onDragStartCapture={handleImageDragStartCapture}
+      onDragEndCapture={handleDragEndCapture}
+      onDropCapture={handleDropCapture}
     >
       {/* Spans the card and stays put while the note scrolls beneath it. */}
       <div className="note-editor-toolbar">
-        <div className="note-breadcrumb" title={note.path}>
-          {folderSegments.map((seg, i) => (
-            <span key={i} className="breadcrumb-seg">
-              {seg}
-              <span className="breadcrumb-sep">/</span>
+        <div className="note-toolbar-leading">
+          {/* Recording belongs to a note, so its control lives in that note's
+              header — where the title used to be. The title is already the
+              first thing in the document below; repeating it here spent the
+              most reachable spot in the pane on a duplicate. */}
+          <button
+            type="button"
+            className={recordingThisNote ? 'note-record-btn recording' : 'note-record-btn'}
+            onClick={() => void window.api.meeting.toggle(note.id)}
+            disabled={recordDisabled}
+            aria-pressed={recordingThisNote}
+            title={recordButtonLabel}
+          >
+            <span className="note-record-mark" aria-hidden="true" />
+            <span className="note-record-text">{recordingThisNote ? 'Stop' : 'Record'}</span>
+            {recordingThisNote && recordElapsed && (
+              <span className="note-record-time">{recordElapsed}</span>
+            )}
+          </button>
+          {parentLabel && (
+            <span className="note-location" title={note.path}>
+              {parentLabel}
             </span>
-          ))}
-          <span className="breadcrumb-file">{fileLabel}</span>
+          )}
         </div>
+        <div className="note-toolbar-drag-space" aria-hidden="true" />
         <div className="toolbar-actions">
           <button
-            className={note.pinned ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
+            className={
+              note.pinned
+                ? 'icon-toggle-btn note-favourite-btn active'
+                : 'icon-toggle-btn note-favourite-btn'
+            }
             onClick={() => void handleTogglePin()}
             title={note.pinned ? 'Remove from favourites' : 'Add to favourites'}
           >
             {note.pinned ? <StarFilled size={15} /> : <Star size={15} />}
           </button>
           <button
-            ref={reminderBtnRef}
-            className={reminderAt ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
-            onClick={() => {
-              if (reminderPopover) {
-                setReminderPopover(null)
-                return
-              }
-              const rect = reminderBtnRef.current?.getBoundingClientRect()
-              setReminderPopover(rect ? { x: rect.left, y: rect.bottom + 6 } : { x: 0, y: 80 })
-            }}
-            title={reminderAt ? `Reminder: ${formatReminderAt(reminderAt)}` : 'Set reminder'}
+            ref={overflowBtnRef}
+            className="icon-toggle-btn note-more-btn"
+            onClick={openOverflowMenu}
+            title="More…"
           >
-            <Bell size={15} />
-          </button>
-          <button
-            className={fullWidth ? 'icon-toggle-btn active' : 'icon-toggle-btn'}
-            onClick={toggleFullWidth}
-            title={fullWidth ? 'Use narrow width' : 'Use full width'}
-          >
-            {fullWidth ? <FoldHorizontal size={15} /> : <UnfoldHorizontal size={15} />}
+            <Dots size={15} />
           </button>
           {paneControls}
         </div>
       </div>
 
-      <TableOfContents editor={editor} />
+      <div
+        className={
+          activeSurface === 'note' ? 'note-writing-surface active' : 'note-writing-surface'
+        }
+      >
+        {outlineVisible && <NoteOutline editor={editor} />}
 
-      <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
-        {findOpen && (
-          <FindReplaceBar
+        <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
+          {findOpen && (
+            <FindReplaceBar
+              editor={editor}
+              focusTick={findFocusTick}
+              onClose={() => setFindOpen(false)}
+            />
+          )}
+
+          {/* The document switcher leads into the title and remains outside
+              contentEditable. */}
+          <div className="note-title-tabs">
+            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'note'}
+                className={activeSurface === 'note' ? 'active' : ''}
+                onClick={() => setActiveSurface('note')}
+              >
+                <FileText size={12} />
+                <span>Note</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'transcription'}
+                className={activeSurface === 'transcription' ? 'active' : ''}
+                disabled={!hasRecording}
+                title="Transcript becomes available when this note has a recording"
+                onClick={() => setActiveSurface('transcription')}
+              >
+                <Microphone size={12} />
+                <span>Transcript</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeSurface === 'meetingNotes'}
+                className={activeSurface === 'meetingNotes' ? 'active' : ''}
+                disabled={!hasRecording}
+                title="Prepared automatically from your note and transcript"
+                onClick={() => setActiveSurface('meetingNotes')}
+              >
+                <MeetingNotesIcon size={12} />
+                <span>Meeting notes</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Tags now sit directly below the title, alongside the date as
+              quiet document attributes. */}
+          <div ref={metadataRef} className="note-metadata-row">
+            <TagBar
+              tags={note.tags}
+              suggestions={tagSuggestions}
+              readOnly={note.external}
+              onChange={(tags) => void handleSetTags(tags)}
+            />
+            <label
+              className={note.external ? 'note-date-badge read-only' : 'note-date-badge'}
+              title={note.external ? 'Date from linked file' : 'Change note date'}
+            >
+              <Calendar size={12} />
+              <span>{noteDateLabel(note.createdAt)}</span>
+              {!note.external && (
+                <input
+                  type="date"
+                  aria-label="Note date"
+                  value={dateInputValue(note.createdAt)}
+                  onChange={(event) => void handleSetDate(event.target.value)}
+                />
+              )}
+            </label>
+          </div>
+
+          <BlockNoteView
             editor={editor}
-            focusTick={findFocusTick}
-            onClose={() => setFindOpen(false)}
-          />
-        )}
-
-        {/* Sits inside the note card so it lines up with the title below it.
-            Linked files keep their frontmatter untouched, so their tags (if the
-            owning tool wrote any) are shown but not editable here. */}
-        <TagBar
-          tags={note.tags}
-          suggestions={tagSuggestions}
-          readOnly={note.external}
-          onChange={(tags) => void handleSetTags(tags)}
-        />
-
-        <BlockNoteView
-          editor={editor}
-          onChange={() => {
-            if (applyingExternalRef.current) return
-            // Linked files are shown exactly as they are on disk — a title
-            // heading is never forced into someone else's markdown.
-            if (!note.external) scheduleTitleFix()
-            if (!aiStreamingRef.current) scheduleSave()
-          }}
-          theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
-          formattingToolbar={false}
-          sideMenu={false}
-          slashMenu={false}
-        >
-          <SelectionAiToolbar editor={editor} aiActions={aiSelectionActions} onOpen={setAiPopup} />
-          <SuggestionMenuController
-            triggerCharacter="/"
-            getItems={async (query) => slashMenuItems(editor, note, query)}
-          />
-          <SuggestionMenuController
-            triggerCharacter="@"
-            getItems={(query) => noteLinkItems(editor, note.id, query)}
-          />
-          <SideMenuController
-            sideMenu={(props) => <SideMenu {...props} dragHandleMenu={BlockDragMenu} />}
-          />
-        </BlockNoteView>
-        {aiPopup && (
-          <SelectionAiPopup
-            editor={editor}
-            blocks={aiPopup.blocks}
-            position={aiPopup.position}
-            onError={setAiError}
-            onStreamingChange={handleAiStreamingChange}
-            onClose={() => setAiPopup(null)}
-          />
-        )}
+            onChange={() => {
+              if (applyingExternalRef.current) return
+              if (imagePickingRef.current) return
+              // Linked files are shown exactly as they are on disk — a title
+              // heading is never forced into someone else's markdown.
+              if (!note.external) scheduleTitleFix()
+              if (!aiStreamingRef.current) scheduleSave()
+            }}
+            theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
+            formattingToolbar={false}
+            sideMenu={false}
+            slashMenu={false}
+          >
+            <SelectionAiToolbar
+              editor={editor}
+              aiActions={aiSelectionActions}
+              onOpen={setAiPopup}
+            />
+            <SuggestionMenuController
+              triggerCharacter="/"
+              getItems={async (query) =>
+                slashMenuItems(
+                  editor,
+                  note,
+                  query,
+                  (picking) => {
+                    imagePickingRef.current = picking
+                    if (picking && saveTimer.current) {
+                      clearTimeout(saveTimer.current)
+                      saveTimer.current = undefined
+                    }
+                  },
+                  scheduleSave
+                )
+              }
+            />
+            <SuggestionMenuController
+              triggerCharacter="@"
+              getItems={(query) => noteLinkItems(editor, note.id, query)}
+            />
+            <SideMenuController
+              sideMenu={NoteSideMenu}
+              floatingUIOptions={{ useFloatingOptions: { placement: 'right-start' } }}
+            />
+          </BlockNoteView>
+          {aiPopup && (
+            <SelectionAiPopup
+              editor={editor}
+              blocks={aiPopup.blocks}
+              position={aiPopup.position}
+              onError={setAiError}
+              onStreamingChange={handleAiStreamingChange}
+              onClose={() => setAiPopup(null)}
+            />
+          )}
+        </div>
       </div>
 
-      {/* Dictation floats over the bottom-right of the note card it writes
-          into, rather than sitting in the toolbar with the note's actions.
-          A sibling of .note-editor so it tracks the card's edge, not the
-          centred text column. */}
-      <div className="note-dictation-dock">
-        <DictationPanel editor={editor} />
+      <div
+        className={
+          activeSurface === 'transcription'
+            ? 'note-transcription-surface active'
+            : 'note-transcription-surface'
+        }
+        role="tabpanel"
+      >
+        <div
+          className={
+            fullWidth ? 'note-transcription-content full-width' : 'note-transcription-content'
+          }
+        >
+          <div className="note-transcription-navigation">
+            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={false}
+                onClick={() => setActiveSurface('note')}
+              >
+                <FileText size={12} />
+                <span>Note</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected
+                className="active"
+                onClick={() => setActiveSurface('transcription')}
+              >
+                <Microphone size={12} />
+                <span>Transcript</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={false}
+                onClick={() => setActiveSurface('meetingNotes')}
+              >
+                <MeetingNotesIcon size={12} />
+                <span>Meeting notes</span>
+              </button>
+            </div>
+          </div>
+          {recording && (
+            <RecordingPlayer
+              recording={recording}
+              onPosition={setPlayhead}
+              registerSeek={(seek) => {
+                seekRef.current = seek
+              }}
+            />
+          )}
+          {transcript ? (
+            <>
+              <div className="transcript-edit-bar" aria-live="polite">
+                <span>Edit any line; changes save automatically.</span>
+                <span className={`transcript-save-state ${transcriptSaveStatus}`}>
+                  {transcriptSaveLabel}
+                </span>
+              </div>
+              <TranscriptView
+                transcript={transcript}
+                playheadSeconds={playhead}
+                onSeek={(seconds) => seekRef.current?.(seconds)}
+                onChange={handleTranscriptChange}
+                onCommit={flushTranscript}
+              />
+            </>
+          ) : (
+            <div className="note-transcription-empty">
+              <Microphone size={18} />
+              <strong>{transcriptLabel.title}</strong>
+              <span>{transcriptLabel.detail}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div
+        className={
+          activeSurface === 'meetingNotes'
+            ? 'note-meeting-notes-surface active'
+            : 'note-meeting-notes-surface'
+        }
+        role="tabpanel"
+      >
+        <div
+          className={
+            fullWidth ? 'note-transcription-content full-width' : 'note-transcription-content'
+          }
+        >
+          <div className="note-transcription-navigation">
+            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
+              <button type="button" role="tab" aria-selected={false} onClick={() => setActiveSurface('note')}>
+                <FileText size={12} />
+                <span>Note</span>
+              </button>
+              <button type="button" role="tab" aria-selected={false} onClick={() => setActiveSurface('transcription')}>
+                <Microphone size={12} />
+                <span>Transcript</span>
+              </button>
+              <button type="button" role="tab" aria-selected className="active" onClick={() => setActiveSurface('meetingNotes')}>
+                <MeetingNotesIcon size={12} />
+                <span>Meeting notes</span>
+              </button>
+            </div>
+          </div>
+          <MeetingNotesView
+            state={meetingNotesState}
+            onRetry={() => void window.api.meeting.retryNotes(noteId)}
+            onOpenSettings={() => void window.api.app.openSettings()}
+            onSave={(markdown) => window.api.meeting.saveNotes(noteId, markdown)}
+            onSelectTemplate={async (template) => {
+              const next = await window.api.meeting.setNotesTemplate(noteId, template)
+              setMeetingNotesState(next)
+            }}
+          />
+        </div>
+      </div>
+
+      {chatOpen && (
+        <button
+          type="button"
+          className="note-chat-drawer-backdrop"
+          aria-label="Close Chat"
+          tabIndex={-1}
+          onClick={() => setChatOpen(false)}
+        />
+      )}
+
+      <div className={chatOpen ? 'note-chat-drawer open' : 'note-chat-drawer'}>
+        <button
+          type="button"
+          className="note-chat-drawer-handle"
+          aria-label={chatOpen ? 'Close Chat' : 'Open Chat'}
+          aria-expanded={chatOpen}
+          title={chatOpen ? 'Close Chat' : 'Chat with this note'}
+          onClick={() => setChatOpen((open) => !open)}
+        />
+        <div className="note-chat-drawer-body" aria-hidden={!chatOpen}>
+          <NoteAiPanel
+            subject={{ id: note.id, title: note.title, external: note.external }}
+            editor={editor}
+            active={chatOpen}
+            activeTab={
+              activeSurface === 'transcription'
+                ? 'Transcript'
+                : activeSurface === 'meetingNotes'
+                  ? 'Meeting notes'
+                  : 'Note'
+            }
+            onError={setAiError}
+            onEditApplied={() => {
+              setActiveSurface('note')
+              setChatOpen(false)
+            }}
+          />
+        </div>
       </div>
 
       {aiError && <div className="ai-error-toast">{aiError}</div>}

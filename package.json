@@ -1,7 +1,7 @@
 {
   "name": "noteato",
   "version": "1.2.0",
-  "description": "A minimal, bloat-free, block-based note taking app for Mac — markdown, dictation, side-by-side panes. No accounts, no cloud, no lock-in.",
+  "description": "A minimal, bloat-free, block-based note taking app for Mac \u2014 markdown, dictation, side-by-side panes. No accounts, no cloud, no lock-in.",
   "main": "./out/main/index.js",
   "author": "Shashank Bhat",
   "license": "MIT",
@@ -16,18 +16,25 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "clean": "rm -rf dist out",
-    "build:mac": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64",
-    "build:mac:arm64": "npm run clean && electron-vite build && electron-builder --mac --arm64",
-    "build:mac:intel": "npm run clean && electron-vite build && electron-builder --mac --x64",
-    "release": "npm run clean && electron-vite build && electron-builder --mac --arm64 --x64 --publish always",
+    "build:mac": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --arm64 --x64",
+    "build:mac:arm64": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --arm64",
+    "build:mac:intel": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --x64",
+    "release": "npm run clean && npm run build:native && electron-vite build && electron-builder --mac --arm64 --publish always",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench:search": "node bench/search/run.mjs",
+    "bench:memory": "electron bench/memory/main.cjs",
+    "bench": "npm run bench:search && npm run bench:memory",
+    "build:native": "node scripts/build-native.mjs"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
@@ -39,6 +46,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
@@ -47,6 +55,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^3.2.7"
   }
 }

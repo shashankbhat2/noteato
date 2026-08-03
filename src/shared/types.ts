@@ -89,11 +89,56 @@ export type ScratchChange =
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontChoice = 'system' | 'serif' | 'mono' | 'rounded'
-export type AccentChoice = 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
+export type AccentChoice = 'neutral' | 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
 export type AiProvider = 'none' | 'anthropic' | 'openai'
 export type SyncPreference = 'none' | 'icloud' | 'noteatoPro'
 /** Which screen edge the compact notes panel docks to (and reveals from). */
 export type ScreenEdge = 'left' | 'right'
+
+/**
+ * Where a meeting recording is in its life. `transcribing` is declared here so
+ * every surface handles it from the start; nothing enters it until transcription
+ * lands, because a state the app can display but never reach is still a state
+ * the UI has to be right about.
+ */
+export type MeetingPhase = 'idle' | 'recording' | 'transcribing'
+
+export interface MeetingState {
+  phase: MeetingPhase
+  /** Epoch ms the recording began, or null when idle. Elapsed time is derived
+   *  from this rather than counted in the renderer, so the pill stays correct
+   *  across a renderer reload and cannot drift from the actual recording. */
+  startedAt: number | null
+  /**
+   * The note this recording belongs to. New meetings create their folder-backed
+   * note before recording starts, so null is only a brief legacy/fallback state.
+   */
+  noteId: string | null
+}
+
+/** Peak input levels, 0–1, pushed to the recording pill about ten times a second. */
+export interface MeetingLevels {
+  mic: number
+  system: number
+}
+
+export interface MeetingError {
+  code: string
+  message: string
+}
+
+/** A note's recording, as the renderer needs it to play and (later) transcribe. */
+export interface NoteRecording {
+  noteId: string
+  captureDir: string
+  durationSeconds: number
+  /** Primary playable audio: mixed for new captures, mic-only for legacy ones. */
+  micPath: string
+  /** Legacy second track only; new captures expose one mixed recording. */
+  systemPath: string | null
+  transcriptStatus: 'none' | 'pending' | 'ready' | 'failed'
+  createdAt: string
+}
 
 export interface Settings {
   onboardingCompleted: boolean
@@ -111,9 +156,12 @@ export interface Settings {
   anthropicApiKey: string
   openaiApiKey: string
   aiSelectionActions: boolean
-  aiAgentEnabled: boolean
-  /** Show the assistant chat on the Home view. */
-  homeAssistantEnabled: boolean
+  /**
+   * Seconds of microphone audio the agent keeps buffered so a capture can
+   * begin before the hotkey is pressed. 0 closes the microphone entirely —
+   * the setting's whole point, so it must not merely buffer and discard.
+   */
+  preRollSeconds: number
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
   /** Make the compact notes/reminders edge window available from the menu bar. */
@@ -152,6 +200,8 @@ export interface SaveOptions {
   title: string
   body: string
   tags?: string[]
+  /** User-selected calendar date for the note, stored in frontmatter. */
+  createdAt?: string
   fullWidth?: boolean
 }
 
@@ -162,3 +212,10 @@ export interface AiCompleteRequest {
   model?: string
   provider?: Exclude<AiProvider, 'none'>
 }
+
+/**
+ * The whole-note actions in the floating dock. Deliberately a closed set: AI
+ * acts on a note through explicit actions with visible output, not through a
+ * chat surface (revamp brief §9/§11).
+ */
+export type AiNoteAction = 'summarize' | 'improve' | 'extract' | 'proofread' | 'ask'

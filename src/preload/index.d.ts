@@ -2,7 +2,11 @@ import type { ElectronAPI } from '@electron-toolkit/preload'
 import type {
   AiCompleteRequest,
   DeletedEntry,
+  MeetingError,
+  MeetingLevels,
+  MeetingState,
   Note,
+  NoteRecording,
   NoteChange,
   NoteSummary,
   NotionImportResult,
@@ -15,6 +19,8 @@ import type {
   SidebarModeState,
   TrashEntry
 } from '../shared/types'
+import type { MeetingTranscript } from '../shared/meetingTranscript'
+import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
 
 export interface ContextMenuParams {
   x: number
@@ -27,15 +33,21 @@ export interface ContextMenuParams {
 }
 
 interface NoteatoApi {
+  images: {
+    chooseLocal: () => Promise<{ name: string; url: string } | null>
+    linkDropped: (file: File) => { name: string; url: string } | null
+    resolveLocal: (fileUrl: string) => Promise<string>
+  }
   notes: {
     list: () => Promise<NoteSummary[]>
-    read: (path: string) => Promise<Note>
+    read: (id: string) => Promise<Note>
     create: (title?: string) => Promise<Note>
-    save: (path: string, options: SaveOptions) => Promise<Note>
-    setPinned: (path: string, pinned: boolean) => Promise<NoteSummary | null>
-    setReminder: (path: string, reminderAt: string | null) => Promise<NoteSummary | null>
-    delete: (path: string) => Promise<DeletedEntry>
-    removeExternal: (path: string) => Promise<boolean>
+    save: (id: string, options: SaveOptions) => Promise<Note>
+    setPinned: (id: string, pinned: boolean) => Promise<NoteSummary | null>
+    setReminder: (id: string, reminderAt: string | null) => Promise<NoteSummary | null>
+    delete: (id: string) => Promise<DeletedEntry>
+    removeExternal: (id: string) => Promise<boolean>
+    removeLinkedFolder: (rootPath: string) => Promise<boolean>
     restore: (
       trashName: string,
       originalPath: string,
@@ -48,8 +60,8 @@ interface NoteatoApi {
     takeExternalOpens: () => Promise<Note[]>
     subscribeExternalOpen: (callback: (note: Note) => void) => () => void
     getDir: () => Promise<string>
-    copyPath: (path: string) => Promise<string>
-    revealInFinder: (path: string) => Promise<void>
+    copyPath: (id: string) => Promise<string>
+    revealInFinder: (id: string) => Promise<void>
     chooseFolder: () => Promise<string | null>
     import: () => Promise<Note[]>
     openFolder: () => Promise<NoteSummary[]>
@@ -78,6 +90,36 @@ interface NoteatoApi {
     setPinned: (pinned: boolean) => Promise<SidebarModeState>
     subscribeState: (callback: (state: SidebarModeState) => void) => () => void
   }
+  meeting: {
+    getState: () => Promise<MeetingState>
+    getRecording: (noteId: string) => Promise<NoteRecording | null>
+    getTranscript: (noteId: string) => Promise<MeetingTranscript | null>
+    saveTranscript: (noteId: string, texts: string[]) => Promise<MeetingTranscript | null>
+    getNotesState: (noteId: string) => Promise<MeetingNotesState>
+    getNotesMarkdown: (noteId: string) => Promise<string | null>
+    retryNotes: (noteId: string) => Promise<MeetingNotesState>
+    saveNotes: (noteId: string, markdown: string) => Promise<boolean>
+    setNotesTemplate: (
+      noteId: string,
+      template: MeetingNotesTemplateId
+    ) => Promise<MeetingNotesState>
+    /** Create a folder-backed meeting note, openable before capture completes. */
+    startNew: () => Promise<Note | null>
+    /** Omit `noteId` to use the folder-backed new-meeting path. */
+    start: (noteId?: string | null) => Promise<MeetingState>
+    stop: () => Promise<MeetingState>
+    discard: () => Promise<MeetingState>
+    toggle: (noteId?: string | null) => Promise<MeetingState>
+    subscribeState: (callback: (state: MeetingState) => void) => () => void
+    subscribeLevels: (callback: (levels: MeetingLevels) => void) => () => void
+    subscribeError: (callback: (error: MeetingError) => void) => () => void
+    subscribeRecorded: (callback: (noteId: string) => void) => () => void
+    subscribeTranscript: (callback: (noteId: string) => void) => () => void
+    subscribeNotes: (callback: (state: MeetingNotesState) => void) => () => void
+    subscribeModelProgress: (
+      callback: (p: { received: number; total: number }) => void
+    ) => () => void
+  }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>
     subscribeFired: (callback: (note: NoteSummary) => void) => () => void
@@ -92,6 +134,7 @@ interface NoteatoApi {
     ) => Promise<string>
   }
   app: {
+    getVersion: () => Promise<string>
     closeWindow: () => Promise<void>
     toggleMaximize: () => Promise<void>
     spellcheckerLanguages: () => Promise<string[]>

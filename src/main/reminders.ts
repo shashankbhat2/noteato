@@ -92,7 +92,7 @@ export class ReminderScheduler {
   private fireLibrary(note: NoteSummary): void {
     let cleared: NoteSummary | null
     try {
-      cleared = this.noteStore.setReminder(note.path, null)
+      cleared = this.noteStore.setReminder(note.id, null)
     } catch {
       cleared = null
     }

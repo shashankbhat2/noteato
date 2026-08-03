@@ -1,5 +1,5 @@
 import { app, Menu, nativeImage, Tray, type MenuItemConstructorOptions } from 'electron'
-import { SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
+import { MEETING_ACCELERATOR, SIDEBAR_MODE_ACCELERATOR } from '../shared/globalShortcuts'
 
 // A small render of the tray glyph, embedded inline so the tray works
 // identically in dev and packaged builds without wiring a separate resource
@@ -15,7 +15,9 @@ export class TrayManager {
     private showMainWindow: () => void,
     private showSidebar: () => void,
     private isSidebarEnabled: () => boolean,
-    private onQuit: () => void
+    private onQuit: () => void,
+    private isRecording: () => boolean,
+    private onToggleMeeting: () => void
   ) {}
 
   setEnabled(enabled: boolean): void {
@@ -25,12 +27,24 @@ export class TrayManager {
     } else this.destroy()
   }
 
+  /**
+   * Rebuild after meeting state changed. The menu is a snapshot taken when it
+   * was built, so "Record meeting" would otherwise still say Record while a
+   * recording is running.
+   */
+  refresh(): void {
+    this.tray?.setContextMenu(this.buildMenu())
+  }
+
   private create(): void {
     if (this.tray) return
+    // Use the embedded monochrome glyph in both dev and packaged builds. An
+    // .icns is an application icon, not a menu-bar asset; loading it from the
+    // DMG bundle produced an empty/illegible 18px tray image on macOS.
     const icon = nativeImage
       .createFromDataURL(`data:image/png;base64,${ICON_BASE64}`)
-      .resize({ width: 18, height: 18 })
-    icon.setTemplateImage(true)
+      .resize({ width: 18, height: 18, quality: 'best' })
+    icon.setTemplateImage(process.platform === 'darwin')
     this.tray = new Tray(icon)
     this.tray.setToolTip('Noteato')
     this.tray.setContextMenu(this.buildMenu())
@@ -42,6 +56,16 @@ export class TrayManager {
         label: 'Show Noteato',
         click: () => this.showMainWindow()
       },
+      { type: 'separator' },
+      {
+        label: this.isRecording() ? 'End meeting' : 'Record meeting',
+        // Display-only hint, as below: GlobalShortcutManager owns the real
+        // registration and a second handler here would fire it twice.
+        accelerator: MEETING_ACCELERATOR,
+        registerAccelerator: false,
+        click: () => this.onToggleMeeting()
+      },
+      { type: 'separator' },
       ...(this.isSidebarEnabled()
         ? [
             {

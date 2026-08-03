@@ -18,4 +18,34 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
+
+  # Reports the §10 numbers on every run. Deliberately not gating yet: the
+  # budgets are missed today (see bench/README.md), so a gate switched on now
+  # would make main permanently red.
+  benchmarks:
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: search (budget 150 ms)
+        run: npm run bench:search -- --json | tee bench-search.json
+
+      - name: electron idle floor (budget 150 MB)
+        run: npm run bench:memory -- --json | tee bench-memory.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks
+          path: bench-*.json
+          if-no-files-found: warn

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { IconMicrophone as Microphone, IconPlus as Plus } from '@tabler/icons-react'
 import type { DeletedEntry, Note, NoteSummary, TrashEntry } from '../../../shared/types'
 import {
   MAX_PANES,
@@ -8,15 +9,13 @@ import {
   type Pane,
   type PaneView
 } from '../panes'
-import { useTheme } from '../theme'
+import ShortcutsHelp from './ShortcutsHelp'
 import { linkifyBlocks } from '../linkify'
 import { OPEN_NOTE_LINK_EVENT, type NoteatoEditor } from '../noteLink'
 import Sidebar from './Sidebar'
 import TitleBar from './TitleBar'
 import PaneControls from './PaneControls'
 import TrashView from './TrashView'
-import HomeView from './HomeView'
-import AgentPanel from './AgentPanel'
 import NoteEditor from './NoteEditor'
 import SettingsModal from './SettingsModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -27,8 +26,6 @@ import ImportModal from './ImportModal'
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
 const OPEN_PANES_KEY = 'noteato:panes'
-const RECENT_NOTES_KEY = 'noteato:recentNotes'
-const RECENT_NOTES_MAX = 8
 
 // Last session's panes, stored by note id — paths can go stale between
 // sessions, so they're re-resolved against the current note list on restore.
@@ -50,7 +47,7 @@ function readStoredPanes(): StoredPanes | null {
       (entry: unknown): entry is StoredPane =>
         typeof entry === 'object' &&
         entry !== null &&
-        ['note', 'home', 'assistant', 'trash'].includes((entry as StoredPane).view?.kind)
+        ['note', 'empty', 'trash'].includes((entry as StoredPane).view?.kind)
     )
     return {
       panes,
@@ -76,32 +73,21 @@ interface OpenTarget {
 const noteView = (note: OpenTarget): PaneView => ({
   kind: 'note',
   id: note.id,
-  path: note.path,
   title: note.title
 })
 
 export default function MainLayout() {
-  const { aiAgentEnabled } = useTheme()
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [trash, setTrash] = useState<TrashEntry[]>([])
-  // The working area, left to right. Always at least one pane: closing the
-  // last one falls back to Home rather than leaving an empty shell.
-  const [panes, setPanes] = useState<Pane[]>(() => [makePane({ kind: 'home' })])
+  // The working area, left to right. Always at least one pane: closing the last
+  // one leaves the two creation paths available rather than an empty shell.
+  const [panes, setPanes] = useState<Pane[]>(() => [makePane({ kind: 'empty' })])
   const [focusedKey, setFocusedKey] = useState<string>('')
   const [paneRatios, setPaneRatios] = useState<number[]>([1])
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
-  /** Id of the note pane focused most recently — the assistant's subject. */
-  const [lastNoteId, setLastNoteId] = useState<string | null>(null)
   const [draggingNote, setDraggingNote] = useState<NoteSummary | null>(null)
-  const [recentIds, setRecentIds] = useState<string[]>(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(RECENT_NOTES_KEY) ?? '[]')
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
@@ -132,36 +118,7 @@ export default function MainLayout() {
     else editorsRef.current.delete(id)
   }
 
-  const getAgentMarkdown = async (noteId: string): Promise<string | null> => {
-    const editor = editorsRef.current.get(noteId)
-    return editor ? editor.blocksToMarkdownLossy(editor.document) : null
-  }
 
-  const applyAgentMarkdown = async (noteId: string, markdown: string): Promise<string[]> => {
-    const editor = editorsRef.current.get(noteId)
-    if (!editor || !markdown.trim()) return []
-    const parsed = linkifyBlocks(await editor.tryParseMarkdownToBlocks(markdown))
-    if (parsed.length === 0) return []
-    const { insertedBlocks } = editor.replaceBlocks(editor.document, parsed)
-    const ids = insertedBlocks.map((block) => block.id)
-    window.requestAnimationFrame(() => {
-      for (const id of ids) {
-        const element = document.querySelector<HTMLElement>(
-          `[data-node-type="blockOuter"][data-id="${CSS.escape(id)}"]`
-        )
-        if (element) element.dataset.agentChanged = 'true'
-      }
-      window.setTimeout(() => {
-        for (const id of ids) {
-          const element = document.querySelector<HTMLElement>(
-            `[data-node-type="blockOuter"][data-id="${CSS.escape(id)}"]`
-          )
-          if (element) delete element.dataset.agentChanged
-        }
-      }, 2600)
-    })
-    return ids
-  }
 
   const toggleSidebar = (): void => {
     setSidebarCollapsed((prev) => {
@@ -242,10 +199,9 @@ export default function MainLayout() {
     const index = panes.findIndex((pane) => pane.key === key)
     if (index === -1) return
     if (panes.length === 1) {
-      // Nothing left to fall back to — Home takes the pane over.
-      const home = makePane({ kind: 'home' })
-      commitPanes([home])
-      setFocusedKey(home.key)
+      const empty = makePane({ kind: 'empty' })
+      commitPanes([empty])
+      setFocusedKey(empty.key)
       return
     }
     const next = panes.filter((pane) => pane.key !== key)
@@ -342,8 +298,10 @@ export default function MainLayout() {
         const view = pane.view
         if (view.kind !== 'note') return pane
         const found = list.find((note) => note.id === view.id)
-        if (!found || (found.path === view.path && found.title === view.title)) return pane
-        return { ...pane, view: { ...view, path: found.path, title: found.title } }
+        // Only the label can drift now — the id a pane holds is stable across
+        // renames, which is the whole point of keying on it.
+        if (!found || found.title === view.title) return pane
+        return { ...pane, view: { ...view, title: found.title } }
       })
     )
   }
@@ -361,7 +319,7 @@ export default function MainLayout() {
         .filter((entry): entry is StoredPane => entry !== null)
         .slice(0, MAX_PANES)
         .map((entry) => ({ ...makePane(entry.view), pinned: entry.pinned }))
-      const next = restored.length > 0 ? restored : [makePane({ kind: 'home' })]
+      const next = restored.length > 0 ? restored : [makePane({ kind: 'empty' })]
       commitPanes(next)
       const at = stored?.focusedIndex ?? 0
       setFocusedKey(next[Math.min(Math.max(at, 0), next.length - 1)].key)
@@ -481,46 +439,18 @@ export default function MainLayout() {
 
   // Create a note the agent asked for. The library is flat, so all it picks is
   // a title.
-  const handleAgentCreateNote = async (title: string, markdown: string): Promise<Note | null> => {
-    const clean = title.replace(/\.md$/i, '').trim() || 'Untitled'
-    const created = await window.api.notes.create(clean)
-    const saved = await window.api.notes.save(created.path, { title: clean, body: markdown })
-    await refresh()
-    return saved
-  }
-
-  // Feeds the Home view's Recent cards, and gives the assistant a subject that
-  // survives focus moving into the chat itself (see assistantContext).
-  useEffect(() => {
-    if (focusedPane?.view.kind !== 'note') return
-    const id = focusedPane.view.id
-    setLastNoteId(id)
-    setRecentIds((prev) => {
-      const next = [id, ...prev.filter((x) => x !== id)].slice(0, RECENT_NOTES_MAX)
-      localStorage.setItem(RECENT_NOTES_KEY, JSON.stringify(next))
-      return next
-    })
-  }, [focusedPane])
 
   // A pane's stored path is its bootstrap value and can lag behind a rename, so
   // OS-level actions resolve the note's current path by id — refreshing once if
   // the local list is the stale one.
-  const notePathOf = async (id: string): Promise<string | null> => {
-    const known = notes.find((n) => n.id === id)
-    if (known) return known.path
-    return (await refresh()).find((n) => n.id === id)?.path ?? null
-  }
-
-  // The main process rejects paths it can no longer resolve (a linked file
-  // unlinked or deleted since the list was built) — nothing useful to report.
+  // The main process rejects ids it can no longer resolve (a note deleted or
+  // unlinked since the list was built) — nothing useful to report.
   const copyNotePath = async (id: string): Promise<void> => {
-    const path = await notePathOf(id)
-    if (path) await window.api.notes.copyPath(path).catch(() => {})
+    await window.api.notes.copyPath(id).catch(() => {})
   }
 
   const revealNote = async (id: string): Promise<void> => {
-    const path = await notePathOf(id)
-    if (path) await window.api.notes.revealInFinder(path).catch(() => {})
+    await window.api.notes.revealInFinder(id).catch(() => {})
   }
 
   const handleCreate = async (title = 'Untitled'): Promise<void> => {
@@ -529,11 +459,18 @@ export default function MainLayout() {
     openInFocused(noteView(note))
   }
 
+  const handleCreateMeeting = async (): Promise<void> => {
+    const note = await window.api.meeting.startNew()
+    if (!note) return
+    await refresh()
+    openInFocused(noteView(note))
+  }
+
   // Rename from the sidebar. Saving with a new title also slug-renames the
   // file, so re-point the open pane (if any) to the new path.
   const handleRenameNote = async (note: NoteSummary, title: string): Promise<void> => {
-    const full = await window.api.notes.read(note.path)
-    const saved = await window.api.notes.save(note.path, {
+    const full = await window.api.notes.read(note.id)
+    const saved = await window.api.notes.save(note.id, {
       title,
       body: full.body,
       tags: full.tags,
@@ -544,12 +481,12 @@ export default function MainLayout() {
   }
 
   const handleTogglePin = async (note: NoteSummary): Promise<void> => {
-    await window.api.notes.setPinned(note.path, !note.pinned)
+    await window.api.notes.setPinned(note.id, !note.pinned)
     await refresh()
   }
 
   const handleSetReminder = async (note: NoteSummary, reminderAt: string | null): Promise<void> => {
-    const updated = await window.api.notes.setReminder(note.path, reminderAt)
+    const updated = await window.api.notes.setReminder(note.id, reminderAt)
     if (!updated) return
     setNotes((prev) =>
       prev.map((n) => (n.id === updated.id ? { ...n, reminderAt: updated.reminderAt } : n))
@@ -584,7 +521,7 @@ export default function MainLayout() {
       await refresh()
       return
     }
-    const token = await window.api.notes.delete(c.note.path)
+    const token = await window.api.notes.delete(c.note.id)
     closeNotePanes(c.note.id)
     await refresh()
     showUndo(token, `Deleted “${c.note.title || 'Untitled'}”`)
@@ -647,7 +584,7 @@ export default function MainLayout() {
 
   const handleRemoveExternal = async (note: NoteSummary): Promise<void> => {
     if (!note.external) return
-    await window.api.notes.removeExternal(note.path)
+    await window.api.notes.removeExternal(note.id)
     closeNotePanes(note.id)
     await refresh()
   }
@@ -655,7 +592,7 @@ export default function MainLayout() {
   // Unlink a whole registered folder; close any panes showing notes from it.
   const handleRemoveLinkedFolder = async (rootPath: string): Promise<void> => {
     const affected = notes.filter((n) => n.externalRoot === rootPath)
-    await window.api.notes.removeExternal(rootPath)
+    await window.api.notes.removeLinkedFolder(rootPath)
     affected.forEach((n) => closeNotePanes(n.id))
     await refresh()
   }
@@ -761,11 +698,10 @@ export default function MainLayout() {
           break
         }
         case 'close-pane': {
-          // ⌘W closes the pane, or puts the last note away by falling back to
-          // Home. Pressed on a lone Home pane there is nothing left to close,
-          // so it takes its usual meaning and closes the window.
+          // ⌘W puts the last note away. Pressed again on the empty state, it
+          // takes its usual window-level meaning.
           const only = panesRef.current.length === 1
-          if (only && panesRef.current[0].view.kind === 'home') window.api.app.closeWindow()
+          if (only && panesRef.current[0].view.kind === 'empty') window.api.app.closeWindow()
           else h.closePane(h.focusedKey)
           break
         }
@@ -785,35 +721,6 @@ export default function MainLayout() {
     }
   }, [])
 
-  const assistantOpen = panes.some((pane) => pane.view.kind === 'assistant')
-
-  const toggleAssistant = (): void => {
-    const existing = panes.find((pane) => pane.view.kind === 'assistant')
-    if (existing) closePane(existing.key)
-    else openInNewPane({ kind: 'assistant' })
-  }
-
-  /**
-   * The notes the assistant is working on: whatever else is on screen. The
-   * focused note pane is the subject, and a second note pane rides along as
-   * read-only context. With nothing beside it there is no subject — better
-   * than guessing at a note the user can't see.
-   */
-  const assistantContext = (): { note: OpenTarget | null; splitNote: OpenTarget | null } => {
-    const others = panes
-      .map((pane) => pane.view)
-      .filter((view): view is Extract<PaneView, { kind: 'note' }> => view.kind === 'note')
-    // The last note pane you were in leads — not the currently focused pane,
-    // which is the assistant itself the moment you click into the chat. Using
-    // the live focus would silently switch the subject to whichever note
-    // happens to be leftmost as soon as you started typing.
-    const lead =
-      (lastNoteId ? others.find((view) => view.id === lastNoteId) : undefined) ??
-      others[0] ??
-      null
-    return { note: lead, splitNote: others.find((view) => view.id !== lead?.id) ?? null }
-  }
-
   const renderPaneBody = (pane: Pane, index: number): React.ReactNode => {
     const view = pane.view
     const controls = (
@@ -822,7 +729,7 @@ export default function MainLayout() {
         count={panes.length}
         onMove={movePane}
         onClose={() => closePane(pane.key)}
-        canClose={panes.length > 1 || view.kind !== 'home'}
+        canClose={panes.length > 1 || view.kind !== 'empty'}
         pinned={Boolean(pane.pinned)}
         onTogglePin={() => togglePanePin(pane.key)}
       />
@@ -831,27 +738,12 @@ export default function MainLayout() {
       case 'note':
         return (
           <NoteEditor
-            path={view.path}
+            noteId={view.id}
             onSaved={handleNoteSaved}
             onEditorReady={(editor) => registerEditor(view.id, editor)}
             paneControls={controls}
           />
         )
-      case 'assistant': {
-        const { note, splitNote } = assistantContext()
-        return (
-          <AgentPanel
-            note={note}
-            splitNote={splitNote}
-            notes={notes}
-            getMarkdown={getAgentMarkdown}
-            applyMarkdown={applyAgentMarkdown}
-            createNote={handleAgentCreateNote}
-            onOpenNote={(target) => openInFocused(noteView(target))}
-            paneControls={controls}
-          />
-        )
-      }
       case 'trash':
         return (
           <TrashView
@@ -862,28 +754,37 @@ export default function MainLayout() {
             paneControls={controls}
           />
         )
-      case 'home':
+      case 'empty':
         return (
-          <HomeView
-            notes={notes}
-            recentIds={recentIds}
-            onOpenNote={(target) => openInFocused(noteView(target))}
-            onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
-            paneControls={controls}
-          />
+          <div className="empty-pane">
+            <div className="empty-pane-actions">
+              <button className="empty-pane-new" onClick={() => void handleCreate()}>
+                <Plus size={16} />
+                <span>New note</span>
+              </button>
+              <button
+                className="empty-pane-new empty-pane-meeting"
+                onClick={() => void handleCreateMeeting()}
+              >
+                <Microphone size={16} />
+                <span>New meeting</span>
+              </button>
+            </div>
+          </div>
         )
     }
   }
 
   return (
     <div className="app-shell">
+      <div
+        className={sidebarCollapsed ? 'window-drag-edge sidebar-collapsed' : 'window-drag-edge'}
+        aria-hidden="true"
+      />
       <TitleBar
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={toggleSidebar}
-        onOpenAssistant={toggleAssistant}
         onOpenSettings={() => setSettingsOpen(true)}
-        assistantOpen={assistantOpen}
-        assistantAvailable={aiAgentEnabled}
       />
       <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
         <Sidebar
@@ -908,8 +809,14 @@ export default function MainLayout() {
             setDropSide(null)
           }}
           onOpenTrash={() => openInFocused({ kind: 'trash' })}
-          onOpenHome={() => openInFocused({ kind: 'home' })}
           onOpenImport={() => setImportOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenStorageLocation={() => {
+            void window.api.notes.chooseFolder().then((dir) => {
+              if (dir) void refresh()
+            })
+          }}
+          onOpenHelp={() => setHelpOpen(true)}
           onSearch={() => setSearchOpen(true)}
           onCreateNote={() => void handleCreate()}
         />
@@ -927,26 +834,16 @@ export default function MainLayout() {
               )}
               <main
                 className={
-                  `editor-pane${pane.view.kind === 'assistant' ? ' fills-pane' : ''}` +
+                  'editor-pane' +
                   (pane.key === focusedKey && panes.length > 1 ? ' focused' : '')
                 }
                 style={{ flex: `${ratios[index]} 1 0%` }}
                 onFocusCapture={() => setFocusedKey(pane.key)}
                 onMouseDown={() => setFocusedKey(pane.key)}
               >
-                {/* A note's shell has to span the pane even when the note is
-                    short, so the dictation button docks to the pane's bottom
-                    rather than to the end of the text. A flex column is what
-                    makes `flex: 1` on the shell resolve — a percentage height
-                    can't, since the wrapper's own height is auto. The assistant
-                    manages its own scrolling and needs a bounded height. */}
-                <div
-                  style={
-                    pane.view.kind === 'assistant'
-                      ? { height: '100%' }
-                      : { display: 'flex', flexDirection: 'column', minHeight: '100%' }
-                  }
-                >
+                {/* A note's shell spans the pane so its Note / Transcription /
+                    Chat surfaces all switch inside the same stable frame. */}
+                <div className="pane-content">
                   {renderPaneBody(pane, index)}
                 </div>
               </main>
@@ -987,6 +884,7 @@ export default function MainLayout() {
           )}
         </div>
       </div>
+      {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
       {settingsOpen && (
         <SettingsModal onClose={() => setSettingsOpen(false)} onNotesDirChanged={refresh} />
       )}
@@ -1000,7 +898,7 @@ export default function MainLayout() {
       {searchOpen && (
         <SearchModal
           onClose={() => setSearchOpen(false)}
-          onSelect={(r) => openInFocused({ kind: 'note', id: r.id, path: r.path, title: r.title })}
+          onSelect={(r) => openInFocused({ kind: 'note', id: r.id, title: r.title })}
         />
       )}
       {notionGuideOpen && (

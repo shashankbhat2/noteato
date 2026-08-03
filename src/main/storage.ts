@@ -108,6 +108,20 @@ function makeSnippet(body: string, idx: number, len: number): string {
 /** Name the pre-flattening backup is restored under, if it ever is. */
 const FLATTEN_BACKUP_NAME = 'Folders (before flattening)'
 
+/**
+ * A capture's own directory: an ISO-ish timestamp plus a short suffix, written
+ * by the agent (AgentCore/CaptureWriter). Matching on shape rather than on a
+ * marker file because the reconciler has to recognise one even if the capture
+ * was interrupted before everything landed.
+ */
+const CAPTURE_DIR = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9]{4,}$/
+
+/** True for `<capture>/note.md` — a note that lives with its audio. */
+function isCaptureNote(relPath: string): boolean {
+  const parts = relPath.split('/')
+  return parts.length === 2 && parts[1] === 'note.md' && CAPTURE_DIR.test(parts[0])
+}
+
 export class NoteStore {
   private notesDir: string
   // Deleted notes/folders are moved here (not permanently removed) so a delete
@@ -144,7 +158,10 @@ export class NoteStore {
 
     const paths: string[] = []
     this.walkNotes(this.notesDir, '', paths)
-    const nested = paths.filter((p) => p.includes('/'))
+    // A captured note is nested *on purpose* — it lives beside the audio it was
+    // derived from. Flattening one would move the markdown out and orphan the
+    // recording, which is the one file here that cannot be regenerated.
+    const nested = paths.filter((p) => p.includes('/') && !isCaptureNote(p))
     if (nested.length === 0) {
       this.flattenFlag.write({ done: true })
       return
@@ -254,6 +271,55 @@ export class NoteStore {
     return this.openedRows().map(({ path, kind }) => ({ path, kind }))
   }
 
+  // --- Identity -------------------------------------------------------------
+  //
+  // A note's identity is its `id`, not its path. The path is where it happens
+  // to live right now: renaming a note renames its file, and anything holding
+  // a path would be pointing at nothing the moment a title changed.
+  //
+  // The index is a cache over what `list()` already computes, rebuilt on a
+  // miss rather than maintained eagerly — the library is also edited from
+  // outside the app, so an index this process kept by hand would drift.
+  private idIndex = new Map<string, string>()
+
+  private rebuildIdIndex(): void {
+    this.idIndex.clear()
+    for (const summary of this.list()) this.idIndex.set(summary.id, summary.path)
+  }
+
+  /**
+   * The path a note currently lives at.
+   *
+   * A cached entry is trusted only if the file is still there *and* still
+   * claims that id — otherwise a note deleted outside Noteato, or a filename
+   * reused by a different note, would resolve to the wrong file.
+   */
+  resolvePath(id: string): string {
+    const cached = this.idIndex.get(id)
+    if (cached && this.pathStillHolds(cached, id)) return cached
+    this.rebuildIdIndex()
+    const found = this.idIndex.get(id)
+    if (found === undefined) throw new Error(`No note with id ${id}`)
+    return found
+  }
+
+  /** True when `relPath` exists and the note there still has this id. */
+  private pathStillHolds(relPath: string, id: string): boolean {
+    try {
+      if (isAbsolute(relPath)) return existsSync(relPath) && `ext:${relPath}` === id
+      const full = this.resolveWithin(relPath)
+      if (!existsSync(full)) return false
+      return parseNoteFile(readFileSync(full, 'utf-8')).meta.id === id
+    } catch {
+      return false
+    }
+  }
+
+  /** Note the id→path pair a mutation just produced, so the next read is warm. */
+  private remember(summary: { id: string; path: string }): void {
+    this.idIndex.set(summary.id, summary.path)
+  }
+
   getNotesDir(): string {
     return this.notesDir
   }
@@ -309,8 +375,8 @@ export class NoteStore {
    * reveal in Finder). Managed notes resolve under the notes dir; linked files
    * must still be registered, so this can't be used to probe the filesystem.
    */
-  absolutePath(notePath: string): string {
-    return this.resolveNotePath(notePath)
+  absolutePath(id: string): string {
+    return this.resolveNotePath(this.resolvePath(id))
   }
 
   private walkNotes(dir: string, prefix: string, out: string[]): void {
@@ -431,7 +497,7 @@ export class NoteStore {
     return summaries
   }
 
-  read(relPath: string): Note {
+  readByPath(relPath: string): Note {
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
       if (!root) throw new Error('External note is not linked to Noteato.')
@@ -472,7 +538,7 @@ export class NoteStore {
       // library uses (this is Noteato's own directory).
       const managedPath = rel.replace(/\\/g, '/')
       const existing = this.toSummary(managedPath)
-      if (existing) return this.read(managedPath)
+      if (existing) return this.readByPath(managedPath)
 
       const raw = readFileSync(full, 'utf-8')
       const { body } = parseNoteFile(raw)
@@ -488,14 +554,14 @@ export class NoteStore {
         reminderAt: null
       }
       writeFileSync(full, serializeNoteFile(meta, body), 'utf-8')
-      return this.read(managedPath)
+      return this.readByPath(managedPath)
     }
 
     // Outside the library: link in place, never write to the file.
     this.db
       .prepare("INSERT OR IGNORE INTO opened_files (path, kind, added_at) VALUES (?, 'file', ?)")
       .run(full, new Date().toISOString())
-    return this.read(full)
+    return this.readByPath(full)
   }
 
   /** Link a folder in place; its markdown files appear as external notes. */
@@ -510,16 +576,44 @@ export class NoteStore {
     return this.list().filter((note) => note.externalRoot === full)
   }
 
-  removeExternal(notePath: string): boolean {
+  /** Read a note by identity. Everything outside this class uses this. */
+  read(id: string): Note {
+    return this.readByPath(this.resolvePath(id))
+  }
+
+  /** Unlink a single externally linked note, by identity. */
+  removeExternal(id: string): boolean {
+    const notePath = this.resolvePath(id)
     if (!isAbsolute(notePath)) return false
-    const row = this.openedRow(notePath)
+    this.idIndex.delete(id)
+    return this.unlinkRegistered(notePath)
+  }
+
+  /**
+   * Unlink a registered folder, by its path.
+   *
+   * Deliberately not the same call as removeExternal: a folder is not a note
+   * and has no id, so routing it through an id-keyed method would mean
+   * inventing one. Kept separate rather than overloaded.
+   */
+  removeLinkedFolder(rootPath: string): boolean {
+    if (!isAbsolute(rootPath)) return false
+    const removed = this.unlinkRegistered(rootPath)
+    // The notes it surfaced are gone from the library, so their cached
+    // locations are stale.
+    if (removed) this.idIndex.clear()
+    return removed
+  }
+
+  private unlinkRegistered(path: string): boolean {
+    const row = this.openedRow(path)
     if (!row) return false
     const remove = this.db.transaction(() => {
-      this.db.prepare('DELETE FROM opened_files WHERE path = ?').run(notePath)
+      this.db.prepare('DELETE FROM opened_files WHERE path = ?').run(path)
       // Removing a folder also drops pin/reminder metadata entries created
       // for its children, so they don't linger as standalone links.
       if (row.kind === 'folder') {
-        this.db.prepare("DELETE FROM opened_files WHERE path LIKE ? || '/%'").run(notePath)
+        this.db.prepare("DELETE FROM opened_files WHERE path LIKE ? || '/%'").run(path)
       }
     })
     remove()
@@ -543,11 +637,56 @@ export class NoteStore {
     }
     writeFileSync(this.resolveWithin(path), serializeNoteFile(meta, ''), 'utf-8')
 
+    this.remember({ id, path })
     return { ...meta, path, folder: '', excerpt: '', body: '' }
   }
 
-  save(relPath: string, options: SaveOptions): Note {
-    const existing = this.read(relPath)
+  /** Create the Markdown half of a self-contained meeting capture. */
+  createCaptureNote(directory: string, title: string, id: string = randomUUID()): Note {
+    const path = `${directory}/note.md`
+    if (!isCaptureNote(path)) throw new Error(`Invalid meeting directory: ${directory}`)
+    const now = new Date().toISOString()
+    const meta: NoteMeta = {
+      id,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      tags: [],
+      fullWidth: false,
+      pinned: false,
+      reminderAt: null
+    }
+    const full = this.resolveWithin(path)
+    mkdirSync(dirname(full), { recursive: true })
+    writeFileSync(full, serializeNoteFile(meta, ''), 'utf-8')
+    this.remember({ id, path })
+    return { ...meta, path, folder: directory, excerpt: '', body: '' }
+  }
+
+  /** Move a note beside its first recording without changing its stable id. */
+  moveIntoCapture(id: string, captureDir: string): Note {
+    const current = this.resolvePath(id)
+    if (isAbsolute(current)) throw new Error('Linked notes cannot be moved into a recording.')
+    const relativeCapture = relative(this.notesDir, captureDir)
+    const outside =
+      !relativeCapture ||
+      isAbsolute(relativeCapture) ||
+      relativeCapture === '..' ||
+      relativeCapture.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+    if (outside) throw new Error('Recording folder is outside the notes library.')
+
+    const target = `${relativeCapture.replaceAll('\\', '/')}/note.md`
+    if (current === target) return this.readByPath(current)
+    const destination = this.resolveWithin(target)
+    if (existsSync(destination)) throw new Error('Recording folder already contains a note.')
+    renameSync(this.resolveWithin(current), destination)
+    this.remember({ id, path: target })
+    return this.readByPath(target)
+  }
+
+  save(id: string, options: SaveOptions): Note {
+    const relPath = this.resolvePath(id)
+    const existing = this.readByPath(relPath)
     const external = isAbsolute(relPath)
     // A title set outside the editor (sidebar rename) rewrites the body's
     // leading title block; editor saves derive the title from that block, so
@@ -561,13 +700,13 @@ export class NoteStore {
       // the file (and the file's identity on disk) is left untouched.
       const raw = readFileSync(relPath, 'utf-8')
       writeFileSync(relPath, replaceExternalBody(raw, body), 'utf-8')
-      return this.read(relPath)
+      return this.readByPath(relPath)
     }
 
     const meta: NoteMeta = {
       id: existing.id,
       title: options.title,
-      createdAt: existing.createdAt,
+      createdAt: options.createdAt ?? existing.createdAt,
       updatedAt: new Date().toISOString(),
       tags: options.tags ?? existing.tags,
       fullWidth: options.fullWidth ?? existing.fullWidth,
@@ -576,24 +715,32 @@ export class NoteStore {
     }
 
     let targetPath = relPath
-    const desiredPath = `${slugify(options.title)}.md`
+    // A captured note lives with the audio it came from, in a directory named
+    // for when it was taken. Renaming the file would move the markdown out and
+    // strand the recording — the one file here that cannot be regenerated. Its
+    // location is deliberately independent of its title (revamp brief §4.3).
+    const desiredPath = isCaptureNote(relPath) ? relPath : `${slugify(options.title)}.md`
     if (desiredPath !== relPath && !existsSync(this.resolveWithin(desiredPath))) {
       renameSync(this.resolveNotePath(relPath), this.resolveWithin(desiredPath))
       targetPath = desiredPath
     }
 
     writeFileSync(this.resolveNotePath(targetPath), serializeNoteFile(meta, body), 'utf-8')
+    // A rename moved the file; the index has to learn the new location before
+    // anything else asks for this id.
+    this.remember({ id: meta.id, path: targetPath })
     return {
       ...meta,
       path: targetPath,
-      folder: '',
+      folder: folderOf(targetPath),
       excerpt: stripLeadingH1(body).trim().slice(0, 160),
       body
     }
   }
 
   // Toggle pin without bumping updatedAt, so pinning never reorders the list.
-  setPinned(relPath: string, pinned: boolean): NoteSummary | null {
+  setPinned(id: string, pinned: boolean): NoteSummary | null {
+    const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
       if (!root) return null
@@ -619,7 +766,8 @@ export class NoteStore {
 
   // Set or clear a note's one-shot reminder without bumping updatedAt, mirroring
   // setPinned — reminders shouldn't reorder the recency-sorted sidebar list.
-  setReminder(relPath: string, reminderAt: string | null): NoteSummary | null {
+  setReminder(id: string, reminderAt: string | null): NoteSummary | null {
+    const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) {
       const root = this.externalRootOf(relPath)
       if (!root) return null
@@ -674,13 +822,49 @@ export class NoteStore {
     return { trashName, originalPath: relPath, isFolder }
   }
 
-  delete(relPath: string): DeletedEntry {
+  delete(id: string): DeletedEntry {
+    const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) throw new Error('Use Remove from Noteato for linked files.')
+    const recording = this.db
+      .prepare('SELECT capture_dir FROM recordings WHERE note_id = ?')
+      .get(id) as { capture_dir: string } | undefined
+    this.idIndex.delete(id)
     let title = baseName(relPath).replace(/\.(md|markdown)$/i, '')
     try {
-      title = this.read(relPath).title || title
+      title = this.readByPath(relPath).title || title
     } catch {
       /* unreadable — keep the filename */
+    }
+    // A meeting note and its recording are one artifact. Moving only note.md
+    // would leave audio behind that could no longer be reached or restored.
+    const noteFolder = dirname(this.resolveWithin(relPath))
+    let ownsRecordingFolder = false
+    if (recording?.capture_dir) {
+      try {
+        ownsRecordingFolder = realpathSync(noteFolder) === realpathSync(recording.capture_dir)
+      } catch {
+        ownsRecordingFolder = noteFolder === recording.capture_dir
+      }
+    }
+    if (isCaptureNote(relPath) || ownsRecordingFolder) {
+      return this.moveToTrash(folderOf(relPath), true, title)
+    }
+
+    // Older ordinary-note recordings kept note.md and the capture directory
+    // apart. Bundle them before trashing so deleting the note removes all of
+    // its audio while keeping the app's Restore action lossless.
+    if (recording?.capture_dir) {
+      const captureRelative = relative(this.notesDir, recording.capture_dir)
+      const outside =
+        !captureRelative ||
+        isAbsolute(captureRelative) ||
+        captureRelative === '..' ||
+        captureRelative.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+      const bundledNote = join(recording.capture_dir, 'note.md')
+      if (!outside && existsSync(recording.capture_dir) && !existsSync(bundledNote)) {
+        renameSync(this.resolveWithin(relPath), bundledNote)
+        return this.moveToTrash(captureRelative.replaceAll('\\', '/'), true, title)
+      }
     }
     return this.moveToTrash(relPath, false, title)
   }
@@ -762,8 +946,11 @@ export class NoteStore {
     let target = originalPath
     let counter = 1
     if (isFolder) {
+      const captureFolder = isCaptureNote(`${originalPath}/note.md`)
       while (existsSync(this.resolveWithin(target))) {
-        target = `${originalPath}-${counter}`
+        // Keep the timestamp capture shape valid so the scanner continues to
+        // treat note.md and its audio as one self-contained meeting.
+        target = captureFolder ? `${originalPath}${counter}` : `${originalPath}-${counter}`
         counter += 1
       }
     } else {
@@ -790,7 +977,18 @@ export class NoteStore {
         unlinkSync(from)
       }
     }
-    return isFolder ? null : this.toSummary(target)
+    if (!isFolder) return this.toSummary(target)
+
+    const captureNotePath = `${target}/note.md`
+    const summary = this.toSummary(captureNotePath)
+    if (!summary) return null
+    this.remember({ id: summary.id, path: captureNotePath })
+    // A collision can change the restored folder's absolute path. Keep the
+    // recording index pointed at the folder that now contains audio.m4a.
+    this.db
+      .prepare('UPDATE recordings SET capture_dir = ? WHERE note_id = ?')
+      .run(this.resolveWithin(target), summary.id)
+    return summary
   }
 
   // --- Full-text search ----------------------------------------------------
@@ -840,7 +1038,7 @@ export class NoteStore {
 
       let body: string
       try {
-        body = this.read(summary.path).body
+        body = this.readByPath(summary.path).body
       } catch {
         continue
       }

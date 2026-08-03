@@ -13,8 +13,6 @@ interface ThemeContextValue {
   setAccent: (accent: AccentChoice) => void
   aiSelectionActions: boolean
   setAiSelectionActions: (value: boolean) => void
-  aiAgentEnabled: boolean
-  setAiAgentEnabled: (value: boolean) => void
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -23,12 +21,10 @@ const ThemeContext = createContext<ThemeContextValue>({
   setTheme: () => {},
   fontFamily: 'system',
   setFontFamily: () => {},
-  accent: 'ember',
+  accent: 'neutral',
   setAccent: () => {},
   aiSelectionActions: true,
-  setAiSelectionActions: () => {},
-  aiAgentEnabled: false,
-  setAiAgentEnabled: () => {}
+  setAiSelectionActions: () => {}
 })
 
 // Resolve the setting to a concrete light/dark for the CSS `data-theme` attribute.
@@ -44,9 +40,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeMode>('light')
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light')
   const [fontFamily, setFontFamilyState] = useState<FontChoice>('system')
-  const [accent, setAccentState] = useState<AccentChoice>('ember')
+  const [accent, setAccentState] = useState<AccentChoice>('neutral')
   const [aiSelectionActions, setAiSelectionActionsState] = useState(true)
-  const [aiAgentEnabled, setAiAgentEnabledState] = useState(false)
 
   useEffect(() => {
     window.api.settings.get().then((settings) => {
@@ -54,7 +49,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setFontFamilyState(settings.fontFamily)
       setAccentState(settings.accent)
       setAiSelectionActionsState(settings.aiSelectionActions)
-      setAiAgentEnabledState(settings.aiAgentEnabled)
       const resolved = resolveTheme(settings.theme)
       setResolvedTheme(resolved)
       document.documentElement.dataset.theme = resolved
@@ -101,11 +95,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     window.api.settings.set({ aiSelectionActions: next })
   }
 
-  const setAiAgentEnabled = (next: boolean): void => {
-    setAiAgentEnabledState(next)
-    window.api.settings.set({ aiAgentEnabled: next })
-  }
-
   return (
     <ThemeContext.Provider
       value={{
@@ -117,9 +106,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         accent,
         setAccent,
         aiSelectionActions,
-        setAiSelectionActions,
-        aiAgentEnabled,
-        setAiAgentEnabled
+        setAiSelectionActions
       }}
     >
       {children}

@@ -4,9 +4,14 @@
  */
 
 export type PaneView =
-  | { kind: 'note'; id: string; path: string; title: string }
-  | { kind: 'home' }
-  | { kind: 'assistant' }
+  /**
+   * A note pane holds an id, never a path. Renaming a note renames its file,
+   * so a pane keyed on location would lose the note the moment its title
+   * changed. `title` rides along only so the pane can label itself without a
+   * read.
+   */
+  | { kind: 'note'; id: string; title: string }
+  | { kind: 'empty' }
   | { kind: 'trash' }
 
 export interface Pane {
@@ -25,7 +30,7 @@ export interface Pane {
   pinned?: boolean
 }
 
-/** Two notes and the assistant is the useful ceiling; past that panes are too narrow to write in. */
+/** Three panes is the useful ceiling; past that panes are too narrow to write in. */
 export const MAX_PANES = 3
 
 /** Narrowest a pane can be dragged, in px — below this the note body has no room. */

@@ -28,6 +28,13 @@ export const AI_MODELS: Record<Exclude<AiProvider, 'none'>, AiModelOption[]> = {
   ]
 }
 
+/** Provider defaults for the per-note Chat composer. Kept explicit instead of
+ * relying on list order, which is ranked by capability rather than preference. */
+export const DEFAULT_CHAT_MODELS: Record<Exclude<AiProvider, 'none'>, string> = {
+  anthropic: 'claude-haiku-4-5',
+  openai: 'gpt-5.6-luna'
+}
+
 export const CHEAP_AI_MODELS: Record<Exclude<AiProvider, 'none'>, AiModelOption[]> = {
   anthropic: AI_MODELS.anthropic.filter((m) => m.cheap),
   openai: AI_MODELS.openai.filter((m) => m.cheap)

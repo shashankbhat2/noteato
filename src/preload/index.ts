@@ -1,9 +1,15 @@
 import { electronAPI } from '@electron-toolkit/preload'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { basename } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type {
   AiCompleteRequest,
   DeletedEntry,
+  MeetingError,
+  MeetingLevels,
+  MeetingState,
   Note,
+  NoteRecording,
   NoteChange,
   NoteSummary,
   NotionImportResult,
@@ -16,6 +22,8 @@ import type {
   SidebarModeState,
   TrashEntry
 } from '../shared/types'
+import type { MeetingTranscript } from '../shared/meetingTranscript'
+import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
 
 let nextAiStreamRequestId = 0
 
@@ -31,18 +39,31 @@ export interface ContextMenuParams {
 }
 
 const api = {
+  images: {
+    chooseLocal: (): Promise<{ name: string; url: string } | null> =>
+      ipcRenderer.invoke('images:chooseLocal'),
+    linkDropped: (file: File): { name: string; url: string } | null => {
+      const filePath = webUtils.getPathForFile(file)
+      return filePath ? { name: basename(filePath), url: pathToFileURL(filePath).href } : null
+    },
+    resolveLocal: (fileUrl: string): Promise<string> =>
+      ipcRenderer.invoke('images:resolveLocal', fileUrl)
+  },
   notes: {
     list: () => ipcRenderer.invoke('notes:list'),
-    read: (path: string) => ipcRenderer.invoke('notes:read', path),
+    read: (id: string) => ipcRenderer.invoke('notes:read', id),
     create: (title?: string) => ipcRenderer.invoke('notes:create', title),
-    save: (path: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', path, options),
-    setPinned: (path: string, pinned: boolean): Promise<NoteSummary | null> =>
-      ipcRenderer.invoke('notes:setPinned', path, pinned),
-    setReminder: (path: string, reminderAt: string | null): Promise<NoteSummary | null> =>
-      ipcRenderer.invoke('notes:setReminder', path, reminderAt),
-    delete: (path: string): Promise<DeletedEntry> => ipcRenderer.invoke('notes:delete', path),
-    removeExternal: (path: string): Promise<boolean> =>
-      ipcRenderer.invoke('notes:removeExternal', path),
+    save: (id: string, options: SaveOptions) => ipcRenderer.invoke('notes:save', id, options),
+    setPinned: (id: string, pinned: boolean): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:setPinned', id, pinned),
+    setReminder: (id: string, reminderAt: string | null): Promise<NoteSummary | null> =>
+      ipcRenderer.invoke('notes:setReminder', id, reminderAt),
+    delete: (id: string): Promise<DeletedEntry> => ipcRenderer.invoke('notes:delete', id),
+    removeExternal: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke('notes:removeExternal', id),
+    /** Folders have no id — they are unlinked by path. */
+    removeLinkedFolder: (rootPath: string): Promise<boolean> =>
+      ipcRenderer.invoke('notes:removeLinkedFolder', rootPath),
     restore: (
       trashName: string,
       originalPath: string,
@@ -61,9 +82,9 @@ const api = {
       return () => ipcRenderer.removeListener('notes:external-open', listener)
     },
     getDir: () => ipcRenderer.invoke('notes:getDir'),
-    copyPath: (path: string): Promise<string> => ipcRenderer.invoke('notes:copyPath', path),
-    revealInFinder: (path: string): Promise<void> =>
-      ipcRenderer.invoke('notes:revealInFinder', path),
+    copyPath: (id: string): Promise<string> => ipcRenderer.invoke('notes:copyPath', id),
+    revealInFinder: (id: string): Promise<void> =>
+      ipcRenderer.invoke('notes:revealInFinder', id),
     chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('notes:chooseFolder'),
     import: (): Promise<Note[]> => ipcRenderer.invoke('notes:import'),
     openFolder: (): Promise<NoteSummary[]> => ipcRenderer.invoke('notes:openFolder'),
@@ -115,6 +136,77 @@ const api = {
       return () => ipcRenderer.removeListener('sidebar:state-changed', listener)
     }
   },
+  meeting: {
+    getState: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:getState'),
+    getRecording: (noteId: string): Promise<NoteRecording | null> =>
+      ipcRenderer.invoke('meeting:getRecording', noteId),
+    getTranscript: (noteId: string): Promise<MeetingTranscript | null> =>
+      ipcRenderer.invoke('meeting:getTranscript', noteId),
+    saveTranscript: (noteId: string, texts: string[]): Promise<MeetingTranscript | null> =>
+      ipcRenderer.invoke('meeting:saveTranscript', noteId, texts),
+    getNotesState: (noteId: string): Promise<MeetingNotesState> =>
+      ipcRenderer.invoke('meeting:getNotesState', noteId),
+    getNotesMarkdown: (noteId: string): Promise<string | null> =>
+      ipcRenderer.invoke('meeting:getNotesMarkdown', noteId),
+    retryNotes: (noteId: string): Promise<MeetingNotesState> =>
+      ipcRenderer.invoke('meeting:retryNotes', noteId),
+    saveNotes: (noteId: string, markdown: string): Promise<boolean> =>
+      ipcRenderer.invoke('meeting:saveNotes', noteId, markdown),
+    setNotesTemplate: (
+      noteId: string,
+      template: MeetingNotesTemplateId
+    ): Promise<MeetingNotesState> =>
+      ipcRenderer.invoke('meeting:setNotesTemplate', noteId, template),
+    /** Create a folder-backed meeting note, openable before capture completes. */
+    startNew: (): Promise<Note | null> => ipcRenderer.invoke('meeting:startNew'),
+    /** Omit `noteId` to use the folder-backed new-meeting path. */
+    start: (noteId?: string | null): Promise<MeetingState> =>
+      ipcRenderer.invoke('meeting:start', noteId ?? null),
+    stop: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:stop'),
+    discard: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:discard'),
+    toggle: (noteId?: string | null): Promise<MeetingState> =>
+      ipcRenderer.invoke('meeting:toggle', noteId ?? null),
+    subscribeState: (callback: (state: MeetingState) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, state: MeetingState): void => callback(state)
+      ipcRenderer.on('meeting:state-changed', listener)
+      return () => ipcRenderer.removeListener('meeting:state-changed', listener)
+    },
+    subscribeLevels: (callback: (levels: MeetingLevels) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, levels: MeetingLevels): void =>
+        callback(levels)
+      ipcRenderer.on('meeting:levels', listener)
+      return () => ipcRenderer.removeListener('meeting:levels', listener)
+    },
+    subscribeError: (callback: (error: MeetingError) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, error: MeetingError): void => callback(error)
+      ipcRenderer.on('meeting:error', listener)
+      return () => ipcRenderer.removeListener('meeting:error', listener)
+    },
+    subscribeRecorded: (callback: (noteId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, noteId: string): void => callback(noteId)
+      ipcRenderer.on('meeting:recorded', listener)
+      return () => ipcRenderer.removeListener('meeting:recorded', listener)
+    },
+    subscribeTranscript: (callback: (noteId: string) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, noteId: string): void => callback(noteId)
+      ipcRenderer.on('meeting:transcript-changed', listener)
+      return () => ipcRenderer.removeListener('meeting:transcript-changed', listener)
+    },
+    subscribeNotes: (callback: (state: MeetingNotesState) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, state: MeetingNotesState): void =>
+        callback(state)
+      ipcRenderer.on('meeting:notes-state', listener)
+      return () => ipcRenderer.removeListener('meeting:notes-state', listener)
+    },
+    subscribeModelProgress: (callback: (p: { received: number; total: number }) => void) => {
+      const listener = (
+        _e: Electron.IpcRendererEvent,
+        p: { received: number; total: number }
+      ): void => callback(p)
+      ipcRenderer.on('meeting:model-progress', listener)
+      return () => ipcRenderer.removeListener('meeting:model-progress', listener)
+    }
+  },
   reminders: {
     takeFired: (): Promise<NoteSummary[]> => ipcRenderer.invoke('reminders:takeFired'),
     subscribeFired: (callback: (note: NoteSummary) => void) => {
@@ -147,6 +239,7 @@ const api = {
     }
   },
   app: {
+    getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
     closeWindow: () => ipcRenderer.invoke('app:closeWindow'),
     toggleMaximize: () => ipcRenderer.invoke('app:toggleMaximize'),
     spellcheckerLanguages: (): Promise<string[]> =>

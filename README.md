@@ -47,18 +47,15 @@ Notion is a great tool that happens to also be a browser tab pretending to be an
 
 ### AI (optional, bring your own key)
 
-- **Enhance selected text** — improve, proofread, summarize, or extract key points, streamed in place with Copy/Insert/Replace controls.
-- **Ask about this note** — a popup scoped to the current note's content.
-- **Assistant** — opens in a pane of its own, with per-note history, @-mentions of other notes as read-only context, creating new notes from chat, full-note edits, and a stop button with real cancellation. Everything it can see rides in a scrollable rail inside the composer.
+- **One floating panel** for the whole window, holding dictation and the note-level AI. Its subject is whichever note pane has focus, and it names that note — move between panes and the context moves with you.
+- **Enhance** — Summarize, Key points, Improve writing, Proofread. One result, with Copy and Insert.
+- **Ask** — a conversation about the focused note, threaded per note, so switching away and back returns you to where you left off.
+- **Enhance selected text** — the same actions in place from the selection bubble menu, streamed into the note with Copy/Insert/Replace controls.
 - Anthropic or OpenAI, your key, stored locally. No Noteato backend sits between the app and the provider, and every AI feature is off by default.
-
-<p align="center">
-  <img src="ss/assistant.png" width="100%" alt="Noteato assistant working beside an open note" />
-</p>
 
 ### Voice & quick capture
 
-- **Dictation** — press the mic button and talk; [Deepgram Nova-3](https://deepgram.com/) streams your words directly into the open note. Say “scratch that” or “undo that” to remove the last dictated phrase. Bring your own API key.
+- **Dictation** — hit the mic in the floating panel and talk; [Deepgram Nova-3](https://deepgram.com/) streams your words directly into the open note. Say “scratch that” or “undo that” to remove the last dictated phrase. Bring your own API key.
 - **Compact side panel** (`⌘⌥S`) — a narrow always-on-top window for quick capture and reminders, separate from your markdown library. Rest the pointer against the screen edge to reveal it; click away to dismiss. Which edge, and how long the pointer has to rest, are both settings.
 
 <p align="center">

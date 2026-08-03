@@ -1,0 +1,24 @@
+{
+  // Tests reach into both halves of the app — main-process modules and pure
+  // renderer helpers — so they get a project of their own rather than being
+  // wedged into either. Not composite: nothing builds against this, it only
+  // has to typecheck.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "types": ["node", "react", "react-dom"]
+  },
+  // Only the tests are listed. This project is not composite, so TypeScript
+  // follows imports into src/ on its own — which is what lets a test reach a
+  // main-process module and a renderer helper without either project having
+  // to know about the other.
+  "include": ["test/**/*", "vitest.config.*"]
+}

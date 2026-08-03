@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconBell as Bell,
   IconClock as Clock,
+  IconMicrophone as Microphone,
   IconNotes as Notes,
   IconPin as Pin,
   IconPinned as Pinned,
+  IconPlayerStopFilled as Stop,
   IconPlus as Plus,
   IconSearch as Search,
   IconSettings as SettingsIcon,
   IconX as X
 } from '@tabler/icons-react'
-import type { ScratchNote, SidebarModeState } from '../../../shared/types'
+import type { MeetingState, ScratchNote, SidebarModeState } from '../../../shared/types'
 import ScratchEditor from './ScratchEditor'
 import ScratchSearchModal from './ScratchSearchModal'
 import SidebarSettingsPopover from './SidebarSettingsPopover'
@@ -66,6 +68,16 @@ export default function SidebarModeWindow() {
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [meeting, setMeeting] = useState<MeetingState>({
+    phase: 'idle',
+    startedAt: null,
+    noteId: null
+  })
+
+  useEffect(() => {
+    void window.api.meeting.getState().then(setMeeting)
+    return window.api.meeting.subscribeState(setMeeting)
+  }, [])
 
   const refresh = useCallback(async (): Promise<void> => {
     const list = await window.api.scratch.list()
@@ -233,6 +245,17 @@ export default function SidebarModeWindow() {
           </button>
         </nav>
         <div className="sidebar-mode-window-actions">
+          {/* This panel is built to be used while another app has focus, which
+              is exactly when a meeting starts — so recording belongs here. */}
+          <button
+            className={meeting.phase === 'recording' ? 'recording' : undefined}
+            onClick={() => void window.api.meeting.toggle()}
+            disabled={meeting.phase === 'transcribing'}
+            aria-pressed={meeting.phase === 'recording'}
+            title={meeting.phase === 'recording' ? 'End meeting' : 'Record meeting'}
+          >
+            {meeting.phase === 'recording' ? <Stop size={13} /> : <Microphone size={14} />}
+          </button>
           {/* Search opens the same find-a-note modal the main window uses,
               rather than sitting in the header taking width from the tabs. */}
           <button onClick={() => setSearchOpen(true)} title="Search notes">
