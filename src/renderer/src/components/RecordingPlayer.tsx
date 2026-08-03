@@ -7,6 +7,7 @@ import {
 } from '@tabler/icons-react'
 import type { NoteRecording } from '../../../shared/types'
 import { elapsedLabel } from '../../../shared/elapsed'
+import { recordingMediaUrl } from '../../../shared/recordingMedia'
 
 const SKIP_SECONDS = 15
 const SPEEDS = [1, 1.25, 1.5, 2] as const
@@ -19,19 +20,12 @@ interface Props {
   registerSeek?: (seek: (seconds: number) => void) => void
 }
 
-function fileUrl(path: string): string {
-  // encodeURI leaves the separators alone but escapes spaces and the rest,
-  // which vault paths routinely contain.
-  return `file://${encodeURI(path)}`
-}
-
 /**
- * Floating transport for a note's recording, over the transcript surface.
+ * Transport for a note's recording, above its transcript.
  *
- * A meeting is two files — your microphone and the system audio — recorded from
- * the same instant. They play together as one timeline: the mic element is the
- * clock and the system element is slaved to it, so seeking, pausing and rate
- * changes stay in step without either track being mixed down on disk.
+ * New meetings expose one mixed recording. The optional follower remains for
+ * captures made by older builds, where microphone and system audio were stored
+ * separately and must still play as one timeline.
  */
 export default function RecordingPlayer({ recording, onPosition, registerSeek }: Props) {
   const micRef = useRef<HTMLAudioElement>(null)
@@ -109,21 +103,32 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
       setPlaying(false)
       systemRef.current?.pause()
     }
+    const onError = (): void => setFailed(true)
 
     mic.addEventListener('timeupdate', onTime)
     mic.addEventListener('loadedmetadata', onLoaded)
     mic.addEventListener('play', onPlay)
     mic.addEventListener('pause', onPause)
     mic.addEventListener('ended', onEnded)
-    mic.addEventListener('error', () => setFailed(true))
+    mic.addEventListener('error', onError)
     return () => {
       mic.removeEventListener('timeupdate', onTime)
       mic.removeEventListener('loadedmetadata', onLoaded)
       mic.removeEventListener('play', onPlay)
       mic.removeEventListener('pause', onPause)
       mic.removeEventListener('ended', onEnded)
+      mic.removeEventListener('error', onError)
     }
   }, [onPosition, resync])
+
+  useEffect(() => {
+    setFailed(false)
+    setPlaying(false)
+    setPosition(0)
+    setDuration(recording.durationSeconds)
+    micRef.current?.load()
+    systemRef.current?.load()
+  }, [recording.noteId, recording.durationSeconds])
 
   useEffect(() => registerSeek?.(seekTo), [registerSeek, seekTo])
 
@@ -141,11 +146,22 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
     }
   }, [])
 
+  const progressPercent =
+    duration > 0 ? Math.min(100, Math.max(0, (position / duration) * 100)) : 0
+
   return (
     <div className="recording-player" role="group" aria-label="Recording playback">
-      <audio ref={micRef} src={fileUrl(recording.micPath)} preload="metadata" />
+      <audio
+        ref={micRef}
+        src={recordingMediaUrl(recording.noteId, 'mic', recording.durationSeconds)}
+        preload="metadata"
+      />
       {recording.systemPath && (
-        <audio ref={systemRef} src={fileUrl(recording.systemPath)} preload="metadata" />
+        <audio
+          ref={systemRef}
+          src={recordingMediaUrl(recording.noteId, 'system', recording.durationSeconds)}
+          preload="metadata"
+        />
       )}
 
       {failed ? (
@@ -187,6 +203,9 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
             max={Math.max(1, duration)}
             step={0.1}
             value={Math.min(position, duration)}
+            style={{
+              background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${progressPercent}%, var(--subtleBorder) ${progressPercent}%, var(--subtleBorder) 100%)`
+            }}
             onChange={(event) => seekTo(Number(event.target.value))}
             aria-label="Seek"
           />

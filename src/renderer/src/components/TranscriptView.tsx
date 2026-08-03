@@ -1,11 +1,47 @@
+import { useLayoutEffect, useRef } from 'react'
 import type { MeetingTranscript } from '../../../shared/meetingTranscript'
-import { chronological, displayName, timestamp } from '../../../shared/meetingTranscript'
+import { displayName, timestamp } from '../../../shared/meetingTranscript'
 
 interface Props {
   transcript: MeetingTranscript
   /** Highlights the segment being played and lets a click seek to it. */
   playheadSeconds?: number
   onSeek?: (seconds: number) => void
+  onChange?: (sourceIndex: number, text: string) => void
+  onCommit?: () => void
+}
+
+function TranscriptText({
+  value,
+  label,
+  onChange,
+  onCommit
+}: {
+  value: string
+  label: string
+  onChange: (text: string) => void
+  onCommit?: () => void
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    element.style.height = '0px'
+    element.style.height = `${element.scrollHeight}px`
+  }, [value])
+
+  return (
+    <textarea
+      ref={ref}
+      className="transcript-text"
+      value={value}
+      rows={1}
+      spellCheck
+      aria-label={`${label} transcript text`}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={onCommit}
+    />
+  )
 }
 
 /**
@@ -15,8 +51,16 @@ interface Props {
  * — so attribution is a fact about where the samples came from rather than an
  * inference about how a voice sounds.
  */
-export default function TranscriptView({ transcript, playheadSeconds, onSeek }: Props) {
-  const segments = chronological(transcript)
+export default function TranscriptView({
+  transcript,
+  playheadSeconds,
+  onSeek,
+  onChange,
+  onCommit
+}: Props) {
+  const segments = transcript.segments
+    .map((segment, sourceIndex) => ({ segment, sourceIndex }))
+    .sort((a, b) => a.segment.start - b.segment.start)
 
   if (segments.length === 0) {
     return (
@@ -29,7 +73,7 @@ export default function TranscriptView({ transcript, playheadSeconds, onSeek }: 
 
   return (
     <div className="transcript-view">
-      {segments.map((segment, index) => {
+      {segments.map(({ segment, sourceIndex }) => {
         const active =
           playheadSeconds !== undefined &&
           playheadSeconds >= segment.start &&
@@ -37,7 +81,7 @@ export default function TranscriptView({ transcript, playheadSeconds, onSeek }: 
 
         return (
           <div
-            key={`${segment.speaker}-${segment.start}-${index}`}
+            key={`${segment.speaker}-${segment.start}-${sourceIndex}`}
             className={
               active
                 ? `transcript-segment ${segment.speaker} active`
@@ -55,7 +99,12 @@ export default function TranscriptView({ transcript, playheadSeconds, onSeek }: 
                 {timestamp(segment.start)}
               </button>
             </div>
-            <p className="transcript-text">{segment.text}</p>
+            <TranscriptText
+              value={segment.text}
+              label={displayName(segment)}
+              onChange={(text) => onChange?.(sourceIndex, text)}
+              onCommit={onCommit}
+            />
           </div>
         )
       })}

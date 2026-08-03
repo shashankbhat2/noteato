@@ -1,9 +1,19 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type Database from 'better-sqlite3'
 import type { NoteRecording } from '../../shared/types'
-import type { MeetingTranscript } from '../../shared/meetingTranscript'
-import { MIC_FILE, SYSTEM_FILE } from './captureDir'
+import {
+  applyTranscriptEdits,
+  type MeetingTranscript
+} from '../../shared/meetingTranscript'
+import {
+  DEFAULT_MEETING_NOTES_TEMPLATE,
+  isMeetingNotesTemplate,
+  MEETING_NOTES_FILE,
+  MEETING_NOTES_TEMPLATE_FILE,
+  type MeetingNotesTemplateId
+} from '../../shared/meetingNotes'
+import { AUDIO_FILE, LEGACY_SYSTEM_FILE } from './captureDir'
 import { MEETING_FILE } from './transcribe'
 
 interface Row {
@@ -62,10 +72,10 @@ export class RecordingStore {
       .get(noteId) as Row | undefined
     if (!row) return null
 
-    const micPath = join(row.capture_dir, MIC_FILE)
+    const micPath = join(row.capture_dir, AUDIO_FILE)
     if (!existsSync(micPath)) return null
 
-    const systemPath = join(row.capture_dir, SYSTEM_FILE)
+    const systemPath = join(row.capture_dir, LEGACY_SYSTEM_FILE)
     return {
       noteId: row.note_id,
       captureDir: row.capture_dir,
@@ -84,6 +94,22 @@ export class RecordingStore {
     )
   }
 
+  updateAfterAppend(
+    noteId: string,
+    durationSeconds: number,
+    systemCaptured: boolean
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE recordings
+         SET duration_seconds = ?,
+             system_captured = CASE WHEN system_captured = 1 OR ? = 1 THEN 1 ELSE 0 END,
+             transcript_status = 'ready'
+         WHERE note_id = ?`
+      )
+      .run(durationSeconds, systemCaptured ? 1 : 0, noteId)
+  }
+
   /**
    * The merged transcript, read from the capture directory rather than the
    * database — it is derived data the user can inspect, back up or delete along
@@ -100,6 +126,89 @@ export class RecordingStore {
       // A truncated or hand-edited file is a missing transcript, not a crash.
       return null
     }
+  }
+
+  /** Persist edited prose without allowing the renderer to alter timestamps. */
+  saveTranscript(noteId: string, texts: readonly string[]): MeetingTranscript | null {
+    const recording = this.get(noteId)
+    const current = this.readTranscript(noteId)
+    if (!recording || !current) return null
+    const next = applyTranscriptEdits(current, texts)
+    writeFileSync(join(recording.captureDir, MEETING_FILE), JSON.stringify(next, null, 2), 'utf-8')
+    return next
+  }
+
+  writeTranscript(noteId: string, transcript: MeetingTranscript): boolean {
+    const recording = this.get(noteId)
+    if (!recording) return false
+    const path = join(recording.captureDir, MEETING_FILE)
+    const temporary = `${path}.writing`
+    writeFileSync(temporary, JSON.stringify(transcript, null, 2), 'utf-8')
+    renameSync(temporary, path)
+    return true
+  }
+
+  removeTranscript(noteId: string): void {
+    const recording = this.get(noteId)
+    if (!recording) return
+    rmSync(join(recording.captureDir, MEETING_FILE), { force: true })
+  }
+
+  readMeetingNotes(noteId: string): string | null {
+    const recording = this.get(noteId)
+    if (!recording) return null
+    const path = join(recording.captureDir, MEETING_NOTES_FILE)
+    if (!existsSync(path)) return null
+    try {
+      return readFileSync(path, 'utf-8')
+    } catch {
+      return null
+    }
+  }
+
+  /** Replace only after a complete model response, never with a partial stream. */
+  writeMeetingNotes(noteId: string, markdown: string): boolean {
+    const recording = this.get(noteId)
+    if (!recording) return false
+    const path = join(recording.captureDir, MEETING_NOTES_FILE)
+    const temporary = `${path}.writing`
+    writeFileSync(temporary, markdown, 'utf-8')
+    renameSync(temporary, path)
+    return true
+  }
+
+  readMeetingNotesTemplate(noteId: string): MeetingNotesTemplateId {
+    const recording = this.get(noteId)
+    if (!recording) return DEFAULT_MEETING_NOTES_TEMPLATE
+    try {
+      const value = readFileSync(
+        join(recording.captureDir, MEETING_NOTES_TEMPLATE_FILE),
+        'utf-8'
+      ).trim()
+      return isMeetingNotesTemplate(value) ? value : DEFAULT_MEETING_NOTES_TEMPLATE
+    } catch {
+      return DEFAULT_MEETING_NOTES_TEMPLATE
+    }
+  }
+
+  writeMeetingNotesTemplate(noteId: string, template: MeetingNotesTemplateId): boolean {
+    const recording = this.get(noteId)
+    if (!recording) return false
+    writeFileSync(
+      join(recording.captureDir, MEETING_NOTES_TEMPLATE_FILE),
+      `${template}\n`,
+      'utf-8'
+    )
+    return true
+  }
+
+  meetingNotesNeedUpdate(noteId: string): boolean {
+    const recording = this.get(noteId)
+    if (!recording) return false
+    const transcriptPath = join(recording.captureDir, MEETING_FILE)
+    if (!existsSync(transcriptPath)) return false
+    const notesPath = join(recording.captureDir, MEETING_NOTES_FILE)
+    return !existsSync(notesPath)
   }
 
   remove(noteId: string): void {

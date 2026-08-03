@@ -5,6 +5,7 @@ import {
   defaultBlockSpecs,
   defaultInlineContentSpecs
 } from '@blocknote/core'
+import { en } from '@blocknote/core/locales'
 import { codeBlockOptions } from '@blocknote/code-block'
 import { createReactInlineContentSpec } from '@blocknote/react'
 import { IconFileText as FileText } from '@tabler/icons-react'
@@ -113,10 +114,23 @@ export const noteatoSchema = BlockNoteSchema.create({
 export type NoteatoEditor = typeof noteatoSchema.BlockNoteEditor
 export type NoteatoBlock = typeof noteatoSchema.Block
 
+// The empty-block prompt is scaffolding, not content. BlockNote's default
+// quotes the slash — "Enter text or type '/' for commands" — which reads as a
+// sentence someone already wrote into the note. This says the same thing in
+// fewer words; styles.css takes care of the size and the italics.
+const noteatoDictionary = {
+  ...en,
+  placeholders: {
+    ...en.placeholders,
+    default: 'Write, or press / for commands'
+  }
+}
+
 export function createNoteatoEditor(initialContent?: NoteatoBlock[]): NoteatoEditor {
   return BlockNoteEditor.create({
     schema: noteatoSchema,
     initialContent,
+    dictionary: noteatoDictionary,
     // Stored file:// URLs remain lightweight markdown links. Their previews
     // resolve through the main process because the renderer cannot read local
     // files directly.

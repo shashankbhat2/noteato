@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { IconMicrophone as Microphone, IconPlus as Plus } from '@tabler/icons-react'
 import type { DeletedEntry, Note, NoteSummary, TrashEntry } from '../../../shared/types'
 import {
   MAX_PANES,
@@ -15,7 +16,6 @@ import Sidebar from './Sidebar'
 import TitleBar from './TitleBar'
 import PaneControls from './PaneControls'
 import TrashView from './TrashView'
-import HomeView from './HomeView'
 import NoteEditor from './NoteEditor'
 import SettingsModal from './SettingsModal'
 import ConfirmDialog from './ConfirmDialog'
@@ -26,8 +26,6 @@ import ImportModal from './ImportModal'
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
 const OPEN_PANES_KEY = 'noteato:panes'
-const RECENT_NOTES_KEY = 'noteato:recentNotes'
-const RECENT_NOTES_MAX = 8
 
 // Last session's panes, stored by note id — paths can go stale between
 // sessions, so they're re-resolved against the current note list on restore.
@@ -49,7 +47,7 @@ function readStoredPanes(): StoredPanes | null {
       (entry: unknown): entry is StoredPane =>
         typeof entry === 'object' &&
         entry !== null &&
-        ['note', 'home', 'trash'].includes((entry as StoredPane).view?.kind)
+        ['note', 'empty', 'trash'].includes((entry as StoredPane).view?.kind)
     )
     return {
       panes,
@@ -81,23 +79,13 @@ const noteView = (note: OpenTarget): PaneView => ({
 export default function MainLayout() {
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [trash, setTrash] = useState<TrashEntry[]>([])
-  // The working area, left to right. Always at least one pane: closing the
-  // last one falls back to Home rather than leaving an empty shell.
-  const [panes, setPanes] = useState<Pane[]>(() => [makePane({ kind: 'home' })])
+  // The working area, left to right. Always at least one pane: closing the last
+  // one leaves the two creation paths available rather than an empty shell.
+  const [panes, setPanes] = useState<Pane[]>(() => [makePane({ kind: 'empty' })])
   const [focusedKey, setFocusedKey] = useState<string>('')
   const [paneRatios, setPaneRatios] = useState<number[]>([1])
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
-  /** Id of the note pane focused most recently — feeds Home's Recent cards. */
-  const [lastNoteId, setLastNoteId] = useState<string | null>(null)
   const [draggingNote, setDraggingNote] = useState<NoteSummary | null>(null)
-  const [recentIds, setRecentIds] = useState<string[]>(() => {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(RECENT_NOTES_KEY) ?? '[]')
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -211,10 +199,9 @@ export default function MainLayout() {
     const index = panes.findIndex((pane) => pane.key === key)
     if (index === -1) return
     if (panes.length === 1) {
-      // Nothing left to fall back to — Home takes the pane over.
-      const home = makePane({ kind: 'home' })
-      commitPanes([home])
-      setFocusedKey(home.key)
+      const empty = makePane({ kind: 'empty' })
+      commitPanes([empty])
+      setFocusedKey(empty.key)
       return
     }
     const next = panes.filter((pane) => pane.key !== key)
@@ -332,7 +319,7 @@ export default function MainLayout() {
         .filter((entry): entry is StoredPane => entry !== null)
         .slice(0, MAX_PANES)
         .map((entry) => ({ ...makePane(entry.view), pinned: entry.pinned }))
-      const next = restored.length > 0 ? restored : [makePane({ kind: 'home' })]
+      const next = restored.length > 0 ? restored : [makePane({ kind: 'empty' })]
       commitPanes(next)
       const at = stored?.focusedIndex ?? 0
       setFocusedKey(next[Math.min(Math.max(at, 0), next.length - 1)].key)
@@ -453,18 +440,6 @@ export default function MainLayout() {
   // Create a note the agent asked for. The library is flat, so all it picks is
   // a title.
 
-  // Feeds the Home view's Recent cards.
-  useEffect(() => {
-    if (focusedPane?.view.kind !== 'note') return
-    const id = focusedPane.view.id
-    setLastNoteId(id)
-    setRecentIds((prev) => {
-      const next = [id, ...prev.filter((x) => x !== id)].slice(0, RECENT_NOTES_MAX)
-      localStorage.setItem(RECENT_NOTES_KEY, JSON.stringify(next))
-      return next
-    })
-  }, [focusedPane])
-
   // A pane's stored path is its bootstrap value and can lag behind a rename, so
   // OS-level actions resolve the note's current path by id — refreshing once if
   // the local list is the stale one.
@@ -480,6 +455,13 @@ export default function MainLayout() {
 
   const handleCreate = async (title = 'Untitled'): Promise<void> => {
     const note = await window.api.notes.create(title)
+    await refresh()
+    openInFocused(noteView(note))
+  }
+
+  const handleCreateMeeting = async (): Promise<void> => {
+    const note = await window.api.meeting.startNew()
+    if (!note) return
     await refresh()
     openInFocused(noteView(note))
   }
@@ -716,11 +698,10 @@ export default function MainLayout() {
           break
         }
         case 'close-pane': {
-          // ⌘W closes the pane, or puts the last note away by falling back to
-          // Home. Pressed on a lone Home pane there is nothing left to close,
-          // so it takes its usual meaning and closes the window.
+          // ⌘W puts the last note away. Pressed again on the empty state, it
+          // takes its usual window-level meaning.
           const only = panesRef.current.length === 1
-          if (only && panesRef.current[0].view.kind === 'home') window.api.app.closeWindow()
+          if (only && panesRef.current[0].view.kind === 'empty') window.api.app.closeWindow()
           else h.closePane(h.focusedKey)
           break
         }
@@ -748,7 +729,7 @@ export default function MainLayout() {
         count={panes.length}
         onMove={movePane}
         onClose={() => closePane(pane.key)}
-        canClose={panes.length > 1 || view.kind !== 'home'}
+        canClose={panes.length > 1 || view.kind !== 'empty'}
         pinned={Boolean(pane.pinned)}
         onTogglePin={() => togglePanePin(pane.key)}
       />
@@ -773,15 +754,23 @@ export default function MainLayout() {
             paneControls={controls}
           />
         )
-      case 'home':
+      case 'empty':
         return (
-          <HomeView
-            notes={notes}
-            recentIds={recentIds}
-            onOpenNote={(target) => openInFocused(noteView(target))}
-            onSetReminder={(note, reminderAt) => void handleSetReminder(note, reminderAt)}
-            paneControls={controls}
-          />
+          <div className="empty-pane">
+            <div className="empty-pane-actions">
+              <button className="empty-pane-new" onClick={() => void handleCreate()}>
+                <Plus size={16} />
+                <span>New note</span>
+              </button>
+              <button
+                className="empty-pane-new empty-pane-meeting"
+                onClick={() => void handleCreateMeeting()}
+              >
+                <Microphone size={16} />
+                <span>New meeting</span>
+              </button>
+            </div>
+          </div>
         )
     }
   }

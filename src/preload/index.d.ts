@@ -20,6 +20,7 @@ import type {
   TrashEntry
 } from '../shared/types'
 import type { MeetingTranscript } from '../shared/meetingTranscript'
+import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
 
 export interface ContextMenuParams {
   x: number
@@ -93,7 +94,18 @@ interface NoteatoApi {
     getState: () => Promise<MeetingState>
     getRecording: (noteId: string) => Promise<NoteRecording | null>
     getTranscript: (noteId: string) => Promise<MeetingTranscript | null>
-    /** Omit `noteId` to record into a new note. */
+    saveTranscript: (noteId: string, texts: string[]) => Promise<MeetingTranscript | null>
+    getNotesState: (noteId: string) => Promise<MeetingNotesState>
+    getNotesMarkdown: (noteId: string) => Promise<string | null>
+    retryNotes: (noteId: string) => Promise<MeetingNotesState>
+    saveNotes: (noteId: string, markdown: string) => Promise<boolean>
+    setNotesTemplate: (
+      noteId: string,
+      template: MeetingNotesTemplateId
+    ) => Promise<MeetingNotesState>
+    /** Create a folder-backed meeting note, openable before capture completes. */
+    startNew: () => Promise<Note | null>
+    /** Omit `noteId` to use the folder-backed new-meeting path. */
     start: (noteId?: string | null) => Promise<MeetingState>
     stop: () => Promise<MeetingState>
     discard: () => Promise<MeetingState>
@@ -103,6 +115,7 @@ interface NoteatoApi {
     subscribeError: (callback: (error: MeetingError) => void) => () => void
     subscribeRecorded: (callback: (noteId: string) => void) => () => void
     subscribeTranscript: (callback: (noteId: string) => void) => () => void
+    subscribeNotes: (callback: (state: MeetingNotesState) => void) => () => void
     subscribeModelProgress: (
       callback: (p: { received: number; total: number }) => void
     ) => () => void

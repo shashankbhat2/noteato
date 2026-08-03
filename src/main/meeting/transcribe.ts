@@ -9,7 +9,12 @@ import {
 import { ASR_SAMPLE_RATE, decodeForAsr } from '../asr/decode'
 import { MODEL_ENGINE, ensureModel } from '../asr/model'
 import type { SherpaServer } from '../asr/sherpaServer'
-import { MIC_FILE, SYSTEM_FILE } from './captureDir'
+import {
+  AUDIO_FILE,
+  LEGACY_SYSTEM_FILE,
+  MIC_TEMP_FILE,
+  SYSTEM_TEMP_FILE
+} from './captureDir'
 
 export const MEETING_FILE = 'meeting.json'
 
@@ -57,8 +62,11 @@ export async function transcribeCapture(
 ): Promise<MeetingTranscript> {
   await ensureModel(onProgress)
 
-  const micPath = join(captureDir, MIC_FILE)
-  const systemPath = join(captureDir, SYSTEM_FILE)
+  const micTemp = join(captureDir, MIC_TEMP_FILE)
+  const systemTemp = join(captureDir, SYSTEM_TEMP_FILE)
+  const micPath = existsSync(micTemp) ? micTemp : join(captureDir, AUDIO_FILE)
+  const legacySystem = join(captureDir, LEGACY_SYSTEM_FILE)
+  const systemPath = existsSync(systemTemp) ? systemTemp : legacySystem
 
   // Sequential on purpose: two decodes plus two inferences in parallel contend
   // for the same cores and finish no sooner, but double peak memory.

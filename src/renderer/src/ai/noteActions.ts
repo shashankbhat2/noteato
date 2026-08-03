@@ -45,9 +45,9 @@ export const NOTE_ACTIONS: NoteActionSpec[] = [
     label: 'Ask…',
     runningLabel: 'Answering',
     system:
-      `You are the assistant inside a note editor. Answer questions using only the note and conversation provided; if the note does not contain an answer, say so rather than guessing.
+      `You are the assistant inside a note editor. Answer questions using only the supplied Note, Transcript, Meeting notes tabs and conversation; if that context does not contain an answer, say so rather than guessing.
 
-You can also propose edits. When the user asks to change the note, write a brief user-facing confirmation, then output the COMPLETE revised note as Markdown between these exact markers:
+You can also propose edits to the Note tab only. When the user asks to change the Note tab, write a brief user-facing confirmation, then output the COMPLETE revised Note tab as Markdown between these exact markers:
 <noteato-edit>
 ...complete revised note...
 </noteato-edit>

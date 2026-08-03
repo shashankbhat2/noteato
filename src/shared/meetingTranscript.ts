@@ -167,3 +167,50 @@ export function meetingMarkdown(
     )
     .join('\n')
 }
+
+/**
+ * Replace only editable prose while preserving attribution and every audio
+ * timestamp. The renderer sends text by source index so a chronological view
+ * can be rearranged without making timing metadata editable over IPC.
+ */
+export function applyTranscriptEdits(
+  transcript: MeetingTranscript,
+  texts: readonly string[]
+): MeetingTranscript {
+  if (texts.length !== transcript.segments.length) {
+    throw new Error('Transcript changed while it was being edited. Reload and try again.')
+  }
+  return {
+    ...transcript,
+    segments: transcript.segments.map((segment, index) => ({
+      ...segment,
+      text: String(texts[index] ?? '')
+    }))
+  }
+}
+
+/**
+ * Add a later recording to an existing transcript without disturbing edits to
+ * the earlier material. The second capture starts at zero, so every timestamp
+ * is shifted by the duration already present in the playable audio.
+ */
+export function appendMeetingTranscript(
+  existing: MeetingTranscript,
+  addition: MeetingTranscript,
+  offsetSeconds: number = existing.durationSeconds
+): MeetingTranscript {
+  const offset = Math.max(0, offsetSeconds)
+  return {
+    ...existing,
+    version: Math.max(existing.version, addition.version),
+    durationSeconds: Math.max(existing.durationSeconds, offset) + addition.durationSeconds,
+    segments: [
+      ...existing.segments,
+      ...addition.segments.map((segment) => ({
+        ...segment,
+        start: segment.start + offset,
+        end: segment.end + offset
+      }))
+    ]
+  }
+}

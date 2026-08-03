@@ -1,7 +1,12 @@
 import type { MeetingState } from '../../shared/types'
 import { MeetingSession } from './session'
 import { MeetingAudioProcess, type AudioError, type AudioLevels } from './audioProcess'
-import { createCaptureDir, removeCaptureDir, type CapturePaths } from './captureDir'
+import {
+  createCaptureDir,
+  removeCaptureAudio,
+  removeCaptureDir,
+  type CapturePaths
+} from './captureDir'
 
 export interface MeetingRecording {
   /** Absolute path to the capture directory holding the audio. */
@@ -34,6 +39,7 @@ export class MeetingRecorder {
   private session = new MeetingSession()
   private audio: MeetingAudioProcess | null = null
   private capture: CapturePaths | null = null
+  private preserveCaptureDir = false
   private discarding = false
 
   constructor(private options: Options) {
@@ -48,12 +54,12 @@ export class MeetingRecorder {
     return this.session.isRecording()
   }
 
-  start(noteId: string | null = null): boolean {
+  start(noteId: string | null = null, preparedCapture?: CapturePaths): boolean {
     if (!this.session.start(noteId)) return false
 
     let capture: CapturePaths
     try {
-      capture = createCaptureDir(this.options.getVault())
+      capture = preparedCapture ?? createCaptureDir(this.options.getVault())
     } catch (error) {
       this.session.discard()
       this.options.onError({
@@ -63,6 +69,10 @@ export class MeetingRecorder {
       return false
     }
     this.capture = capture
+    // A prepared capture already owns note.md. Failed or discarded audio must
+    // never take that note with it; an ordinary note's separate capture folder
+    // can still be removed wholesale.
+    this.preserveCaptureDir = preparedCapture !== undefined
     this.discarding = false
 
     const audio = new MeetingAudioProcess({
@@ -73,10 +83,15 @@ export class MeetingRecorder {
         const { noteId, startedAt } = this.session.getState()
         this.audio = null
         const dir = this.capture?.dir
+        const preserveCaptureDir = this.preserveCaptureDir
         this.capture = null
+        this.preserveCaptureDir = false
 
         if (this.discarding || !dir) {
-          if (dir) removeCaptureDir(dir)
+          if (dir) {
+            if (preserveCaptureDir) removeCaptureAudio(dir)
+            else removeCaptureDir(dir)
+          }
           this.discarding = false
           this.session.stop()
           return
@@ -104,16 +119,20 @@ export class MeetingRecorder {
       },
       onError: (error) => {
         this.audio = null
-        // A failed start leaves an empty capture folder; do not litter the
-        // user's vault with it.
-        if (this.capture) removeCaptureDir(this.capture.dir)
+        // A new-meeting capture already contains its note. Preserve that note
+        // if permissions or a device fail, while removing partial audio.
+        if (this.capture) {
+          if (this.preserveCaptureDir) removeCaptureAudio(this.capture.dir)
+          else removeCaptureDir(this.capture.dir)
+        }
         this.capture = null
+        this.preserveCaptureDir = false
         this.session.discard()
         this.options.onError(error)
       }
     })
 
-    if (!audio.start(capture.micPath, capture.systemPath)) {
+    if (!audio.start(capture.micPath, capture.systemPath, capture.audioPath)) {
       // start() already reported through onError, which reset the session.
       return false
     }
@@ -138,8 +157,12 @@ export class MeetingRecorder {
     if (!this.session.isRecording()) return false
     this.discarding = true
     if (!this.audio) {
-      if (this.capture) removeCaptureDir(this.capture.dir)
+      if (this.capture) {
+        if (this.preserveCaptureDir) removeCaptureAudio(this.capture.dir)
+        else removeCaptureDir(this.capture.dir)
+      }
       this.capture = null
+      this.preserveCaptureDir = false
       this.discarding = false
       return this.session.discard()
     }

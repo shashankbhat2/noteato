@@ -23,6 +23,7 @@ import type {
   TrashEntry
 } from '../shared/types'
 import type { MeetingTranscript } from '../shared/meetingTranscript'
+import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
 
 let nextAiStreamRequestId = 0
 
@@ -141,7 +142,24 @@ const api = {
       ipcRenderer.invoke('meeting:getRecording', noteId),
     getTranscript: (noteId: string): Promise<MeetingTranscript | null> =>
       ipcRenderer.invoke('meeting:getTranscript', noteId),
-    /** Omit `noteId` to record into a new note. */
+    saveTranscript: (noteId: string, texts: string[]): Promise<MeetingTranscript | null> =>
+      ipcRenderer.invoke('meeting:saveTranscript', noteId, texts),
+    getNotesState: (noteId: string): Promise<MeetingNotesState> =>
+      ipcRenderer.invoke('meeting:getNotesState', noteId),
+    getNotesMarkdown: (noteId: string): Promise<string | null> =>
+      ipcRenderer.invoke('meeting:getNotesMarkdown', noteId),
+    retryNotes: (noteId: string): Promise<MeetingNotesState> =>
+      ipcRenderer.invoke('meeting:retryNotes', noteId),
+    saveNotes: (noteId: string, markdown: string): Promise<boolean> =>
+      ipcRenderer.invoke('meeting:saveNotes', noteId, markdown),
+    setNotesTemplate: (
+      noteId: string,
+      template: MeetingNotesTemplateId
+    ): Promise<MeetingNotesState> =>
+      ipcRenderer.invoke('meeting:setNotesTemplate', noteId, template),
+    /** Create a folder-backed meeting note, openable before capture completes. */
+    startNew: (): Promise<Note | null> => ipcRenderer.invoke('meeting:startNew'),
+    /** Omit `noteId` to use the folder-backed new-meeting path. */
     start: (noteId?: string | null): Promise<MeetingState> =>
       ipcRenderer.invoke('meeting:start', noteId ?? null),
     stop: (): Promise<MeetingState> => ipcRenderer.invoke('meeting:stop'),
@@ -173,6 +191,12 @@ const api = {
       const listener = (_e: Electron.IpcRendererEvent, noteId: string): void => callback(noteId)
       ipcRenderer.on('meeting:transcript-changed', listener)
       return () => ipcRenderer.removeListener('meeting:transcript-changed', listener)
+    },
+    subscribeNotes: (callback: (state: MeetingNotesState) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, state: MeetingNotesState): void =>
+        callback(state)
+      ipcRenderer.on('meeting:notes-state', listener)
+      return () => ipcRenderer.removeListener('meeting:notes-state', listener)
     },
     subscribeModelProgress: (callback: (p: { received: number; total: number }) => void) => {
       const listener = (

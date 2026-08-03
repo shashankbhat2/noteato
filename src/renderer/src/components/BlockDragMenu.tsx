@@ -4,12 +4,14 @@ import {
   DragHandleMenu,
   useBlockNoteEditor,
   useComponentsContext,
+  useExtension,
   useExtensionState
 } from '@blocknote/react'
 import {
   IconBlockquote as TextQuote,
   IconCode as Code,
   IconCopyPlus as CopyPlus,
+  IconDotsVertical as DotsVertical,
   IconH1 as Heading1,
   IconH2 as Heading2,
   IconH3 as Heading3,
@@ -149,8 +151,8 @@ function DeleteBlockItem() {
   )
 }
 
-// Notion-style vertical drag-handle menu: turn-into rows for the block type,
-// then the common block actions.
+// Notion-style vertical block menu: turn-into rows for the block type, then the
+// common block actions.
 export default function BlockDragMenu() {
   return (
     <DragHandleMenu>
@@ -158,5 +160,45 @@ export default function BlockDragMenu() {
       <DuplicateBlockItem />
       <DeleteBlockItem />
     </DragHandleMenu>
+  )
+}
+
+/**
+ * The gutter button that opens that menu.
+ *
+ * BlockNote's own DragHandleButton hard-codes `draggable` and starts a block
+ * drag on dragstart; blocks here are moved by editing, not by dragging, so this
+ * is the same button without the drag — and with a menu glyph rather than the
+ * grip, which would promise a drag that never happens.
+ */
+export function BlockMenuButton() {
+  const Components = useComponentsContext()!
+  const editor = useBlockNoteEditor()
+  const sideMenu = useExtension(SideMenuExtension, { editor })
+  const block = useExtensionState(SideMenuExtension, {
+    editor,
+    selector: (state) => state?.block
+  })
+  if (block === undefined) return null
+
+  return (
+    <Components.Generic.Menu.Root
+      onOpenChange={(open: boolean) => {
+        // Keeps the gutter menu pinned to this block while its menu is open.
+        if (open) sideMenu.freezeMenu()
+        else sideMenu.unfreezeMenu()
+      }}
+      position="left"
+    >
+      <Components.Generic.Menu.Trigger>
+        <Components.SideMenu.Button
+          label="Block options"
+          draggable={false}
+          className="bn-button"
+          icon={<DotsVertical size={17} />}
+        />
+      </Components.Generic.Menu.Trigger>
+      <BlockDragMenu />
+    </Components.Generic.Menu.Root>
   )
 }

@@ -56,6 +56,9 @@ class Statement {
     if (sql.startsWith('SELECT * FROM opened_files WHERE path = ?')) {
       return this.db.openedFiles.find((row) => row.path === params[0])
     }
+    if (sql.startsWith('SELECT capture_dir FROM recordings WHERE note_id = ?')) {
+      return this.db.recordings.get(String(params[0]))
+    }
     throw new Error(`better-sqlite3 stub: unhandled get() for ${sql}`)
   }
 
@@ -131,6 +134,11 @@ class Statement {
       this.db.openedFiles = this.db.openedFiles.filter((row) => row.path !== params[0])
       return { changes: 1 }
     }
+    if (sql.startsWith('UPDATE recordings SET capture_dir = ? WHERE note_id = ?')) {
+      const row = this.db.recordings.get(String(params[1]))
+      if (row) row.capture_dir = String(params[0])
+      return { changes: row ? 1 : 0 }
+    }
     throw new Error(`better-sqlite3 stub: unhandled run() for ${sql}`)
   }
 }
@@ -139,6 +147,7 @@ class FakeDatabase {
   kv = new Map<string, string>()
   openedFiles: OpenedFileRow[] = []
   trash: TrashRow[] = []
+  recordings = new Map<string, { capture_dir: string }>()
 
   prepare(sql: string): Statement {
     return new Statement(this, sql)

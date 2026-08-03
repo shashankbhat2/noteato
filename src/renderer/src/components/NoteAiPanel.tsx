@@ -9,6 +9,11 @@ import {
   IconSquare as Square
 } from '@tabler/icons-react'
 import type { Settings } from '../../../shared/types'
+import { meetingMarkdown } from '../../../shared/meetingTranscript'
+import {
+  noteAssistantPrompt,
+  type NoteAssistantTab
+} from '../../../shared/noteAssistantContext'
 import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
 import { parseChatOutput } from '../../../shared/chatEdits'
 import type { NoteatoEditor } from '../noteLink'
@@ -43,12 +48,14 @@ export default function NoteAiPanel({
   subject,
   editor,
   active,
+  activeTab,
   onError,
   onEditApplied
 }: {
   subject: AiPanelSubject
   editor: NoteatoEditor
   active: boolean
+  activeTab: NoteAssistantTab
   onError: (message: string) => void
   onEditApplied: () => void
 }) {
@@ -60,6 +67,7 @@ export default function NoteAiPanel({
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [applyingEditIndex, setApplyingEditIndex] = useState<number | null>(null)
   const cancelRef = useRef<(() => void) | null>(null)
+  const sendLockRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const modelSelectRef = useRef<HTMLDivElement>(null)
@@ -202,62 +210,83 @@ export default function NoteAiPanel({
 
   const send = async (): Promise<void> => {
     const question = input.trim()
-    if (!question || pending || !chatEnabled) return
+    if (!question || pending || sendLockRef.current || !chatEnabled) return
+    sendLockRef.current = true
 
-    let sourceMarkdown: string
     try {
-      sourceMarkdown = noteMarkdown()
-    } catch {
-      onError('Could not read the current note for Chat.')
-      return
-    }
+      let sourceMarkdown: string
+      try {
+        sourceMarkdown = noteMarkdown()
+      } catch {
+        onError('Could not read the current note for Chat.')
+        return
+      }
 
-    if (isRecording) toggleDictation()
-    dictatedChunksRef.current = []
-    setInput('')
+      const [meetingTranscript, meetingNotesMarkdown] = await Promise.all([
+        window.api.meeting.getTranscript(subject.id).catch(() => null),
+        window.api.meeting.getNotesMarkdown(subject.id).catch(() => null)
+      ])
+      const transcriptMarkdown = meetingTranscript
+        ? meetingMarkdown(meetingTranscript)
+        : '(No transcript for this note.)'
+      const preparedMeetingNotes =
+        meetingNotesMarkdown?.trim() || '(No meeting notes for this note.)'
 
-    const history = [...thread, { role: 'user' as const, content: question }]
-    setThreads((previous) => ({ ...previous, [subject.id]: history }))
-    const transcript = history
-      .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
-      .join('\n\n')
-    const prompt = `CURRENT NOTE — preserve this Markdown when proposing edits:\n\n${sourceMarkdown}\n\n--- CONVERSATION ---\n\n${transcript}`
+      if (isRecording) toggleDictation()
+      dictatedChunksRef.current = []
+      setInput('')
 
-    let live = ''
-    const final = await stream(noteActionSpec('ask').system, prompt, (text) => {
-      live = text
-      const parsed = parseChatOutput(text)
+      const history = [...thread, { role: 'user' as const, content: question }]
+      setThreads((previous) => ({ ...previous, [subject.id]: history }))
+      const transcript = history
+        .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
+        .join('\n\n')
+      const prompt = noteAssistantPrompt({
+        activeTab,
+        noteMarkdown: sourceMarkdown,
+        transcriptMarkdown,
+        meetingNotesMarkdown: preparedMeetingNotes,
+        conversation: transcript
+      })
+
+      let live = ''
+      const final = await stream(noteActionSpec('ask').system, prompt, (text) => {
+        live = text
+        const parsed = parseChatOutput(text)
+        setThreads((previous) => ({
+          ...previous,
+          [subject.id]: [
+            ...history,
+            {
+              role: 'assistant',
+              content: parsed.message || 'Preparing an edit…',
+              ...(parsed.proposedMarkdown
+                ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
+                : {})
+            }
+          ]
+        }))
+      })
+      const parsed = parseChatOutput(final ?? live)
+      if (parsed.hasEditMarker && !parsed.proposedMarkdown) {
+        onError('The proposed edit was incomplete. Try asking for a smaller change.')
+      }
       setThreads((previous) => ({
         ...previous,
         [subject.id]: [
           ...history,
           {
             role: 'assistant',
-            content: parsed.message || 'Preparing an edit…',
+            content: parsed.message || 'I could not complete that response.',
             ...(parsed.proposedMarkdown
               ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
               : {})
           }
         ]
       }))
-    })
-    const parsed = parseChatOutput(final ?? live)
-    if (parsed.hasEditMarker && !parsed.proposedMarkdown) {
-      onError('The proposed edit was incomplete. Try asking for a smaller change.')
+    } finally {
+      sendLockRef.current = false
     }
-    setThreads((previous) => ({
-      ...previous,
-      [subject.id]: [
-        ...history,
-        {
-          role: 'assistant',
-          content: parsed.message || 'I could not complete that response.',
-          ...(parsed.proposedMarkdown
-            ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
-            : {})
-        }
-      ]
-    }))
   }
 
   const applyProposedEdit = async (index: number, turn: ChatTurn): Promise<void> => {
@@ -323,8 +352,8 @@ export default function NoteAiPanel({
           <>
             {thread.length === 0 && (
               <div className="note-chat-empty">
-                <strong>Ask from the context of this note.</strong>
-                <span>Questions and responses stay scoped to this note.</span>
+                <strong>Ask across this note’s tabs.</strong>
+                <span>Note, transcript and meeting notes are included as context.</span>
               </div>
             )}
             {thread.map((turn, index) => (

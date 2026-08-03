@@ -1,4 +1,6 @@
-import { join } from 'path'
+import { basename, join } from 'path'
+import { existsSync, linkSync, renameSync, rmSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import {
   app,
@@ -8,6 +10,8 @@ import {
   dialog,
   ipcMain,
   nativeTheme,
+  net,
+  protocol,
   session,
   shell
 } from 'electron'
@@ -39,9 +43,32 @@ import { removeStaleAgent } from './staleAgent'
 import { MeetingRecorder } from './meeting/recorder'
 import { RecordingStore } from './meeting/recordingStore'
 import { transcribeCapture } from './meeting/transcribe'
+import { MeetingNotesGenerator } from './meeting/meetingNotesGenerator'
+import { appendMeetingAudio } from './meeting/audioProcess'
+import {
+  AUDIO_FILE,
+  createCaptureDir,
+  removeCaptureDir,
+  removeCaptureInputs
+} from './meeting/captureDir'
+import { appendMeetingTranscript } from '../shared/meetingTranscript'
+import type { MeetingNotesTemplateId } from '../shared/meetingNotes'
 import { SherpaServer } from './asr/sherpaServer'
 import { RecorderWindow } from './recorderWindow'
 import { linkLocalImage, resolveLocalImage } from './localImages'
+import {
+  parseRecordingMediaUrl,
+  RECORDING_MEDIA_SCHEME
+} from '../shared/recordingMedia'
+
+// Audio/video elements need the stream privilege to issue range requests.
+// This must run before Electron becomes ready.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: RECORDING_MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
 
 const appDb = getAppDb()
 const settingsStore = createSettingsStore()
@@ -72,6 +99,25 @@ const reminderScheduler = new ReminderScheduler(
 const recorderWindow = new RecorderWindow(appDb)
 const recordingStore = new RecordingStore(appDb)
 const sherpaServer = new SherpaServer()
+const meetingNotesGenerator = new MeetingNotesGenerator({
+  getSettings: () => settingsStore.read(),
+  readNote: (noteId) => noteStore.read(noteId),
+  readTranscript: (noteId) => recordingStore.readTranscript(noteId),
+  readSaved: (noteId) => recordingStore.readMeetingNotes(noteId),
+  writeSaved: (noteId, markdown) => recordingStore.writeMeetingNotes(noteId, markdown),
+  getTemplate: (noteId) => recordingStore.readMeetingNotesTemplate(noteId),
+  setTemplate: (noteId, template) =>
+    recordingStore.writeMeetingNotesTemplate(noteId, template),
+  needsUpdate: (noteId) => recordingStore.meetingNotesNeedUpdate(noteId),
+  emit: (state) => broadcastMeeting('meeting:notes-state', state)
+})
+const meetingTitle = (startedAt: number): string =>
+  `Meeting — ${new Date(startedAt).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })}`
 const meetingRecorder = new MeetingRecorder({
   getVault: () => noteStore.getNotesDir(),
   onStateChange: (state) => {
@@ -92,48 +138,109 @@ const meetingRecorder = new MeetingRecorder({
     if (error.code === 'screen_recording_denied') explainScreenRecording()
   },
   onCommitted: async (recording) => {
-    // A recording started from the tray or the accelerator carries no note —
-    // the ordinary case, since a meeting starts while you are looking at Zoom.
-    // Give it one, so the audio is reachable from the library rather than only
-    // from the filesystem.
+    // Untargeted callers normally prepare note.md before capture begins. Keep
+    // this fallback for old callers and interrupted upgrades: the note still
+    // belongs inside the capture folder beside its audio.
     let noteId = recording.noteId
     if (!noteId) {
-      const title = `Meeting — ${new Date(recording.startedAt).toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-      })}`
-      noteId = noteStore.create(title).id
+      noteId = noteStore.createCaptureNote(
+        basename(recording.dir),
+        meetingTitle(recording.startedAt)
+      ).id
     }
 
-    recordingStore.add({
-      noteId,
-      captureDir: recording.dir,
-      durationSeconds: recording.seconds,
-      systemCaptured: recording.systemCaptured
-    })
-
-    reminderScheduler.rebuildAll()
-    broadcastNoteChange({ kind: 'refresh' })
-    broadcastMeeting('meeting:recorded', noteId)
+    // A second capture for the same note is staged in its own folder. Nothing
+    // points at it until its audio and transcript have both been appended, so
+    // a failed repeat recording cannot overwrite the meeting already on disk.
+    const existing = recordingStore.get(noteId)
+    const existingTranscript = existing ? recordingStore.readTranscript(noteId) : null
+    if (!existing) {
+      // Whether capture began from New meeting or an ordinary note, its first
+      // completed recording turns it into one self-contained folder artifact.
+      noteStore.moveIntoCapture(noteId, recording.dir)
+      recordingStore.add({
+        noteId,
+        captureDir: recording.dir,
+        durationSeconds: recording.seconds,
+        systemCaptured: recording.systemCaptured
+      })
+      reminderScheduler.rebuildAll()
+      broadcastNoteChange({ kind: 'refresh' })
+      broadcastMeeting('meeting:recorded', noteId)
+    }
 
     // Transcription runs while the session is still in `transcribing`, so the
     // pill keeps reporting work that is genuinely still happening.
     recordingStore.setTranscriptStatus(noteId, 'pending')
     broadcastMeeting('meeting:transcript-changed', noteId)
     try {
-      await transcribeCapture(sherpaServer, recording.dir, (received, total) => {
+      const addition = await transcribeCapture(sherpaServer, recording.dir, (received, total) => {
         // Only meaningful on the first meeting, when the model is downloading.
         broadcastMeeting('meeting:model-progress', { received, total })
       })
-      recordingStore.setTranscriptStatus(noteId, 'ready')
+
+      if (existing) {
+        const baseTranscript = existingTranscript ?? {
+          version: addition.version,
+          engine: addition.engine,
+          durationSeconds: existing.durationSeconds,
+          segments: []
+        }
+        const appendedTranscript = {
+          ...appendMeetingTranscript(baseTranscript, addition, existing.durationSeconds),
+          durationSeconds: existing.durationSeconds + recording.seconds
+        }
+        const additionAudio = join(recording.dir, AUDIO_FILE)
+        const appendedAudio = join(existing.captureDir, '.audio-appending.m4a')
+        const audioBackup = join(existing.captureDir, '.audio-before-append.m4a')
+
+        rmSync(appendedAudio, { force: true })
+        rmSync(audioBackup, { force: true })
+        await appendMeetingAudio(existing.micPath, additionAudio, appendedAudio)
+
+        // A hard link is an instant, zero-copy rollback point. The final audio
+        // rename is atomic; if a later transcript/DB write fails, restore the
+        // old inode and leave the staged capture available for recovery.
+        try {
+          linkSync(existing.micPath, audioBackup)
+          renameSync(appendedAudio, existing.micPath)
+          if (!recordingStore.writeTranscript(noteId, appendedTranscript)) {
+            throw new Error('could not save the appended transcript')
+          }
+          recordingStore.updateAfterAppend(
+            noteId,
+            appendedTranscript.durationSeconds,
+            recording.systemCaptured
+          )
+          rmSync(audioBackup, { force: true })
+          removeCaptureDir(recording.dir)
+        } catch (error) {
+          if (existsSync(audioBackup)) renameSync(audioBackup, existing.micPath)
+          if (existingTranscript) recordingStore.writeTranscript(noteId, existingTranscript)
+          else recordingStore.removeTranscript(noteId)
+          throw error
+        } finally {
+          rmSync(appendedAudio, { force: true })
+          rmSync(audioBackup, { force: true })
+        }
+        broadcastMeeting('meeting:recorded', noteId)
+      } else {
+        recordingStore.setTranscriptStatus(noteId, 'ready')
+      }
+
+      // Give any final block edit in the open meeting-notes tab time to save;
+      // the generator reads that document back as the draft it must preserve.
+      meetingNotesGenerator.schedule(noteId)
     } catch (error) {
-      recordingStore.setTranscriptStatus(noteId, 'failed')
+      recordingStore.setTranscriptStatus(noteId, existingTranscript ? 'ready' : 'failed')
       // Rethrown so the recorder reports it; the audio is safe either way, and
       // a failed transcript is worth saying out loud rather than swallowing.
       throw error
     } finally {
+      // The separate channels exist only to retain Me/Them attribution during
+      // transcription. Once that work finishes, the folder exposes one audio
+      // file regardless of whether transcription succeeded.
+      removeCaptureInputs(recording.dir)
       broadcastMeeting('meeting:transcript-changed', noteId)
     }
   }
@@ -144,9 +251,41 @@ function broadcastMeeting(channel: string, payload: unknown): void {
     window.webContents.send(channel, payload)
   }
 }
+
+/** Create/open the self-contained meeting note before capture starts. */
+function startNewMeeting(): Note | null {
+  if (meetingRecorder.getState().phase !== 'idle') return null
+
+  const startedAt = new Date()
+  const capture = createCaptureDir(noteStore.getNotesDir(), startedAt)
+  let note: Note
+  try {
+    note = noteStore.createCaptureNote(
+      basename(capture.dir),
+      meetingTitle(startedAt.getTime())
+    )
+  } catch (error) {
+    removeCaptureDir(capture.dir)
+    throw error
+  }
+
+  // Even if the native helper reports a synchronous startup error, retain and
+  // open the note the user explicitly created. The recorder removes any
+  // partial audio without deleting note.md.
+  meetingRecorder.start(note.id, capture)
+  broadcastNoteChange({ kind: 'upsert', note })
+  return note
+}
+
+function toggleUntargetedMeeting(): void {
+  const state = meetingRecorder.getState()
+  if (state.phase === 'idle') startNewMeeting()
+  else if (state.phase === 'recording') meetingRecorder.stop()
+}
+
 const globalShortcutManager = new GlobalShortcutManager(
   () => sidebarModeManager.toggle(),
-  () => meetingRecorder.toggle()
+  () => toggleUntargetedMeeting()
 )
 
 /**
@@ -209,7 +348,7 @@ const trayManager = new TrayManager(
     recorderWindow.destroy()
   },
   () => meetingRecorder.isRecording(),
-  () => meetingRecorder.toggle()
+  () => toggleUntargetedMeeting()
 )
 
 /**
@@ -655,6 +794,13 @@ function registerIpcHandlers(): void {
     const runtime = runtimeSettings(next)
     if (patch.theme) nativeTheme.themeSource = patch.theme
     if ('spellcheckLanguage' in patch) applySpellcheckLanguage(next.spellcheckLanguage)
+    if (
+      'aiProvider' in patch ||
+      'anthropicApiKey' in patch ||
+      'openaiApiKey' in patch
+    ) {
+      meetingNotesGenerator.resumeConfigured()
+    }
     if ('sidebarModeEnabled' in patch || 'onboardingCompleted' in patch) {
       sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
       globalShortcutManager.sync(runtime)
@@ -696,8 +842,31 @@ function registerIpcHandlers(): void {
   ipcMain.handle('meeting:getTranscript', (_e, noteId: string) =>
     recordingStore.readTranscript(noteId)
   )
+  ipcMain.handle('meeting:saveTranscript', (_e, noteId: string, texts: string[]) => {
+    return recordingStore.saveTranscript(noteId, texts)
+  })
+  ipcMain.handle('meeting:getNotesState', (_e, noteId: string) =>
+    meetingNotesGenerator.ensure(noteId)
+  )
+  ipcMain.handle('meeting:getNotesMarkdown', (_e, noteId: string) =>
+    recordingStore.readMeetingNotes(noteId)
+  )
+  ipcMain.handle('meeting:retryNotes', (_e, noteId: string) => {
+    meetingNotesGenerator.retry(noteId)
+    return meetingNotesGenerator.getState(noteId)
+  })
+  ipcMain.handle('meeting:saveNotes', (_e, noteId: string, markdown: string) =>
+    meetingNotesGenerator.saveManual(noteId, markdown)
+  )
+  ipcMain.handle(
+    'meeting:setNotesTemplate',
+    (_e, noteId: string, template: MeetingNotesTemplateId) =>
+      meetingNotesGenerator.selectTemplate(noteId, template)
+  )
+  ipcMain.handle('meeting:startNew', () => startNewMeeting())
   ipcMain.handle('meeting:start', (_e, noteId: string | null = null) => {
-    meetingRecorder.start(noteId)
+    if (noteId) meetingRecorder.start(noteId)
+    else startNewMeeting()
     return meetingRecorder.getState()
   })
   ipcMain.handle('meeting:stop', () => {
@@ -709,7 +878,8 @@ function registerIpcHandlers(): void {
     return meetingRecorder.getState()
   })
   ipcMain.handle('meeting:toggle', (_e, noteId: string | null = null) => {
-    meetingRecorder.toggle(noteId)
+    if (noteId) meetingRecorder.toggle(noteId)
+    else toggleUntargetedMeeting()
     return meetingRecorder.getState()
   })
 
@@ -767,6 +937,23 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.noteato.app')
   nativeTheme.themeSource = settingsStore.read().theme
 
+  protocol.handle(RECORDING_MEDIA_SCHEME, (request) => {
+    const target = parseRecordingMediaUrl(request.url)
+    if (!target) return new Response(null, { status: 404 })
+
+    const recording = recordingStore.get(target.noteId)
+    const path = target.track === 'mic' ? recording?.micPath : recording?.systemPath
+    if (!path) return new Response(null, { status: 404 })
+
+    // Electron's file handler streams from disk and preserves Range requests,
+    // which makes long recordings seekable without loading them into memory.
+    return net.fetch(pathToFileURL(path).href, {
+      method: request.method,
+      headers: request.headers,
+      bypassCustomProtocolHandlers: true
+    })
+  })
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
     // Restoring the Dock icon flips the app back to a regular Dock app; the
@@ -793,7 +980,9 @@ app.whenReady().then(() => {
   createMainWindow()
   reminderScheduler.rebuildAll()
   const runtime = runtimeSettings()
-  sidebarModeManager.setEnabled(runtime.sidebarModeEnabled)
+  // Sidebar mode stays available from the tray, shortcut and edge reveal, but
+  // a fresh app launch should remain quiet instead of opening the notes panel.
+  if (!runtime.sidebarModeEnabled) sidebarModeManager.setEnabled(false)
   globalShortcutManager.sync(runtime)
   edgeHoverWatcher.sync()
   syncTray()
@@ -818,6 +1007,7 @@ app.on('will-quit', () => {
   // Close the helper's files rather than killing it: an m4a without its moov
   // atom is an hour of audio nobody can play.
   meetingRecorder.shutdown()
+  meetingNotesGenerator.destroy()
   sherpaServer.stop()
   recorderWindow.destroy()
   globalShortcutManager.destroy()

@@ -1,7 +1,10 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { app } from 'electron'
+
+const run = promisify(execFile)
 
 /** Peak levels, 0–1, roughly ten times a second. */
 export interface AudioLevels {
@@ -51,13 +54,24 @@ export function helperPath(): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null
 }
 
+/** Build a concatenated recording at `outputPath`; callers atomically install it. */
+export async function appendMeetingAudio(
+  existingPath: string,
+  additionPath: string,
+  outputPath: string
+): Promise<void> {
+  const binary = helperPath()
+  if (!binary) throw new Error('the meeting audio helper is not installed')
+  await run(binary, ['--append', existingPath, additionPath, outputPath])
+}
+
 /**
  * One meeting recording, as a child process.
  *
- * The helper writes both audio files itself; this class only starts it, relays
- * its line protocol, and stops it. Nothing here touches audio data — which is
- * the point, because an hour of PCM through Node would buy nothing and risk
- * everything.
+ * The helper writes two hidden working tracks and one mixed recording; this
+ * class only starts it, relays its line protocol, and stops it. Nothing here
+ * touches audio data — which is the point, because an hour of PCM through Node
+ * would buy nothing and risk everything.
  */
 export class MeetingAudioProcess {
   private child: ChildProcess | null = null
@@ -66,16 +80,20 @@ export class MeetingAudioProcess {
 
   constructor(private handlers: Handlers) {}
 
-  start(micPath: string, systemPath: string): boolean {
+  start(micPath: string, systemPath: string, outputPath: string): boolean {
     const binary = helperPath()
     if (!binary) {
       this.fail('helper_missing', 'the meeting audio helper is not installed')
       return false
     }
 
-    const child = spawn(binary, ['--mic', micPath, '--system', systemPath], {
-      stdio: ['pipe', 'pipe', 'pipe']
-    })
+    const child = spawn(
+      binary,
+      ['--mic', micPath, '--system', systemPath, '--output', outputPath],
+      {
+        stdio: ['pipe', 'pipe', 'pipe']
+      }
+    )
     this.child = child
 
     child.stdout?.setEncoding('utf8')

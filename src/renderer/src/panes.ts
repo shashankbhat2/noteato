@@ -11,7 +11,7 @@ export type PaneView =
    * read.
    */
   | { kind: 'note'; id: string; title: string }
-  | { kind: 'home' }
+  | { kind: 'empty' }
   | { kind: 'trash' }
 
 export interface Pane {

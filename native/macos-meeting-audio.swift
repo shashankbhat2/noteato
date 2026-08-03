@@ -1,5 +1,6 @@
-// Captures a meeting: the microphone ("me") and system audio ("them"), on two
-// separate channels, written straight to disk as AAC.
+// Captures a meeting as one playable AAC file. Microphone ("me") and system
+// audio ("them") are written to hidden working tracks during capture so they
+// can still be transcribed separately, then mixed into the user-facing file.
 //
 // This is a dumb pipe with no UI, no window, no menu bar and no state of its
 // own. Electron owns the session; this process is spawned when a recording
@@ -11,7 +12,9 @@
 // or suspended.
 //
 // Protocol
-//   argv:    --mic <path> --system <path> [--sample-rate N]
+//   argv:    --mic <temp-path> --system <temp-path> --output <path>
+//            [--sample-rate N]
+//            --append <existing-m4a> <new-m4a> <output-m4a>
 //   stdout:  one JSON object per line
 //              {"type":"ready"}
 //              {"type":"level","mic":0.12,"system":0.04}     ~10/s
@@ -31,7 +34,14 @@ import ScreenCaptureKit
 
 // MARK: - Line protocol
 
-let stdoutQueue = DispatchQueue(label: "com.noteato.meeting-audio.stdout")
+/// Serialises writes so two threads cannot interleave halves of a line.
+///
+/// Every caller must reach this through `emit`, and nothing may run *on* this
+/// queue: `emit` uses `sync`, and dispatching sync onto the queue you are
+/// already executing on is a deterministic trap, not a deadlock you might get
+/// away with. An earlier version scheduled the level timer here and died on its
+/// first tick.
+private let stdoutQueue = DispatchQueue(label: "com.noteato.meeting-audio.stdout")
 
 func emit(_ object: [String: Any], to handle: FileHandle = .standardOutput) {
     guard let data = try? JSONSerialization.data(withJSONObject: object),
@@ -52,12 +62,14 @@ func fail(_ code: String, _ message: String) -> Never {
 struct Options {
     var micPath: String
     var systemPath: String
+    var outputPath: String
     var sampleRate: Double
 }
 
 func parseOptions() -> Options {
     var mic: String?
     var system: String?
+    var output: String?
     var sampleRate = 48_000.0
 
     var args = Array(CommandLine.arguments.dropFirst())
@@ -70,6 +82,9 @@ func parseOptions() -> Options {
         case "--system":
             guard !args.isEmpty else { fail("bad_arguments", "--system needs a path") }
             system = args.removeFirst()
+        case "--output":
+            guard !args.isEmpty else { fail("bad_arguments", "--output needs a path") }
+            output = args.removeFirst()
         case "--sample-rate":
             guard !args.isEmpty, let value = Double(args.removeFirst()) else {
                 fail("bad_arguments", "--sample-rate needs a number")
@@ -80,10 +95,15 @@ func parseOptions() -> Options {
         }
     }
 
-    guard let mic, let system else {
-        fail("bad_arguments", "--mic and --system are both required")
+    guard let mic, let system, let output else {
+        fail("bad_arguments", "--mic, --system and --output are all required")
     }
-    return Options(micPath: mic, systemPath: system, sampleRate: sampleRate)
+    return Options(
+        micPath: mic,
+        systemPath: system,
+        outputPath: output,
+        sampleRate: sampleRate
+    )
 }
 
 // MARK: - AAC writer
@@ -187,6 +207,132 @@ final class ChannelWriter {
     }
 }
 
+// MARK: - Final mix
+
+/// Mix the two capture tracks without ever holding the whole meeting in memory.
+/// The working files decode to mono Float32, so an 8192-frame buffer is enough
+/// no matter how long the recording runs.
+func mixCapture(micPath: String, systemPath: String, outputPath: String) throws {
+    let fileManager = FileManager.default
+    let micFile = try AVAudioFile(forReading: URL(fileURLWithPath: micPath))
+    let format = micFile.processingFormat
+    guard format.channelCount == 1 else {
+        throw NSError(
+            domain: "noteato", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "microphone working track is not mono"]
+        )
+    }
+
+    let systemFile: AVAudioFile?
+    if fileManager.fileExists(atPath: systemPath) {
+        let candidate = try AVAudioFile(forReading: URL(fileURLWithPath: systemPath))
+        guard candidate.processingFormat.channelCount == 1,
+              candidate.processingFormat.sampleRate == format.sampleRate else {
+            throw NSError(
+                domain: "noteato", code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "capture tracks use incompatible formats"]
+            )
+        }
+        systemFile = candidate
+    } else {
+        systemFile = nil
+    }
+
+    if fileManager.fileExists(atPath: outputPath) {
+        try fileManager.removeItem(atPath: outputPath)
+    }
+    let settings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: format.sampleRate,
+        AVNumberOfChannelsKey: 1,
+        AVEncoderBitRateKey: 96_000
+    ]
+    let outputFile = try AVAudioFile(
+        forWriting: URL(fileURLWithPath: outputPath),
+        settings: settings
+    )
+
+    let capacity: AVAudioFrameCount = 8192
+    guard let micBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity),
+          let systemBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity),
+          let mixedBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity),
+          let micSamples = micBuffer.floatChannelData?[0],
+          let systemSamples = systemBuffer.floatChannelData?[0],
+          let mixedSamples = mixedBuffer.floatChannelData?[0]
+    else {
+        throw NSError(
+            domain: "noteato", code: 5,
+            userInfo: [NSLocalizedDescriptionKey: "could not allocate audio mix buffers"]
+        )
+    }
+
+    while true {
+        micBuffer.frameLength = 0
+        systemBuffer.frameLength = 0
+        try micFile.read(into: micBuffer, frameCount: capacity)
+        if let systemFile {
+            try systemFile.read(into: systemBuffer, frameCount: capacity)
+        }
+
+        let frames = max(micBuffer.frameLength, systemBuffer.frameLength)
+        if frames == 0 { break }
+        mixedBuffer.frameLength = frames
+        for frame in 0..<Int(frames) {
+            let mic = frame < Int(micBuffer.frameLength) ? micSamples[frame] : 0
+            let system = frame < Int(systemBuffer.frameLength) ? systemSamples[frame] : 0
+            mixedSamples[frame] = max(-1, min(1, mic + system))
+        }
+        try outputFile.write(from: mixedBuffer)
+    }
+}
+
+/// Concatenate completed mixed captures into a fresh file. The caller writes
+/// to a temporary destination and atomically swaps it into place, so a failed
+/// append can never damage the recording the user already had.
+func appendCapture(existingPath: String, newPath: String, outputPath: String) throws {
+    let existing = try AVAudioFile(forReading: URL(fileURLWithPath: existingPath))
+    let addition = try AVAudioFile(forReading: URL(fileURLWithPath: newPath))
+    let format = existing.processingFormat
+    guard addition.processingFormat.channelCount == format.channelCount,
+          addition.processingFormat.sampleRate == format.sampleRate else {
+        throw NSError(
+            domain: "noteato", code: 6,
+            userInfo: [NSLocalizedDescriptionKey: "recordings use incompatible audio formats"]
+        )
+    }
+
+    let fileManager = FileManager.default
+    if fileManager.fileExists(atPath: outputPath) {
+        try fileManager.removeItem(atPath: outputPath)
+    }
+    let settings: [String: Any] = [
+        AVFormatIDKey: kAudioFormatMPEG4AAC,
+        AVSampleRateKey: format.sampleRate,
+        AVNumberOfChannelsKey: format.channelCount,
+        AVEncoderBitRateKey: 96_000
+    ]
+    let output = try AVAudioFile(
+        forWriting: URL(fileURLWithPath: outputPath),
+        settings: settings
+    )
+    let capacity: AVAudioFrameCount = 8192
+    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+        throw NSError(
+            domain: "noteato", code: 7,
+            userInfo: [NSLocalizedDescriptionKey: "could not allocate audio append buffer"]
+        )
+    }
+
+    for input in [existing, addition] {
+        while true {
+            buffer.frameLength = 0
+            try input.read(into: buffer, frameCount: capacity)
+            if buffer.frameLength == 0 { break }
+            try output.write(from: buffer)
+        }
+    }
+}
+
 // MARK: - System audio
 
 /// ScreenCaptureKit audio-only tap.
@@ -287,6 +433,27 @@ final class SystemAudioCapture: NSObject, SCStreamOutput {
 
 // MARK: - Main
 
+// File-only append mode deliberately exits before any permission checks or
+// capture setup. It is also useful in packaged builds because it uses the same
+// signed AVFoundation helper already shipped for recording.
+let rawArguments = Array(CommandLine.arguments.dropFirst())
+if rawArguments.first == "--append" {
+    guard rawArguments.count == 4 else {
+        fail("bad_arguments", "--append needs existing, new and output paths")
+    }
+    do {
+        try appendCapture(
+            existingPath: rawArguments[1],
+            newPath: rawArguments[2],
+            outputPath: rawArguments[3]
+        )
+        emit(["type": "appended"])
+        exit(0)
+    } catch {
+        fail("write_failed", "could not append recording: \(error)")
+    }
+}
+
 let options = parseOptions()
 
 guard #available(macOS 13.0, *) else {
@@ -350,8 +517,11 @@ if let systemStartError {
 
 emit(["type": "ready"])
 
-// Level updates for the pill.
-let levelTimer = DispatchSource.makeTimerSource(queue: stdoutQueue)
+// Level updates for the pill. This must not run on stdoutQueue: emit() enters
+// that queue synchronously to keep each protocol line atomic.
+let levelTimer = DispatchSource.makeTimerSource(
+    queue: DispatchQueue(label: "com.noteato.meeting-audio.levels")
+)
 levelTimer.schedule(deadline: .now() + 0.1, repeating: 0.1)
 levelTimer.setEventHandler {
     emit([
@@ -378,6 +548,31 @@ func shutDown() -> Never {
     // Order matters: finish() closes each file and writes its moov atom.
     micWriter.finish()
     systemWriter.finish()
+
+    // Keep the speaker-separated files for transcription, but expose only one
+    // recording to the user. If mixing itself fails, preserve the irreplaceable
+    // mic track as the playable recording instead of failing the whole session.
+    do {
+        try mixCapture(
+            micPath: options.micPath,
+            systemPath: options.systemPath,
+            outputPath: options.outputPath
+        )
+    } catch {
+        do {
+            let fileManager = FileManager.default
+            if fileManager.fileExists(atPath: options.outputPath) {
+                try fileManager.removeItem(atPath: options.outputPath)
+            }
+            try fileManager.copyItem(atPath: options.micPath, toPath: options.outputPath)
+            FileHandle.standardError.write(
+                "meeting audio mix failed; kept microphone audio: \(error)\n"
+                    .data(using: .utf8)!
+            )
+        } catch {
+            fail("write_failed", "could not create the final recording: \(error)")
+        }
+    }
 
     emit([
         "type": "done",

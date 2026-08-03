@@ -12,7 +12,7 @@ interface Props {
   count: number
   onMove: (from: number, to: number) => void
   onClose: () => void
-  /** False for the lone Home pane, which closing would only replace with itself. */
+  /** False for the lone empty pane, where close belongs to the window. */
   canClose: boolean
   /** Pinned panes keep their note when you open something from the sidebar. */
   pinned: boolean
@@ -24,9 +24,9 @@ interface Props {
  * rearrange or close a pane from, so these ride along in the pane's own top
  * corner.
  *
- * Close is always offered — with one pane it puts Home back, which is how you
- * put a note away. The move arrows appear only once there is a second pane for
- * them to trade places with.
+ * Close is always offered — with one pane it returns to the centred new-note
+ * action. The move arrows appear only once there is a second pane to trade
+ * places with.
  */
 export default function PaneControls({
   index,

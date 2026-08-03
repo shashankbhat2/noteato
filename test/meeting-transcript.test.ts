@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendMeetingTranscript,
+  applyTranscriptEdits,
   chronological,
   displayName,
   meetingMarkdown,
@@ -166,5 +168,47 @@ describe('meeting transcript', () => {
     )
 
     expect(JSON.parse(JSON.stringify(meeting))).toEqual(meeting)
+  })
+
+  it('edits prose without changing speaker or audio timing metadata', () => {
+    const meeting = mergeTranscripts(
+      channel('helo', [['helo', 0, 0.4]]),
+      channel('yes', [['yes', 1, 1.3]]),
+      'test'
+    )
+    const edited = applyTranscriptEdits(meeting, ['hello', 'yes, exactly'])
+
+    expect(edited.segments.map((segment) => segment.text)).toEqual(['hello', 'yes, exactly'])
+    expect(edited.segments.map(({ speaker, start, end }) => ({ speaker, start, end }))).toEqual(
+      meeting.segments.map(({ speaker, start, end }) => ({ speaker, start, end }))
+    )
+  })
+
+  it('rejects stale transcript edits with the wrong segment count', () => {
+    const meeting = mergeTranscripts(channel('hello', [['hello', 0, 0.4]]), channel('', []), 'test')
+    expect(() => applyTranscriptEdits(meeting, [])).toThrow(/changed while/)
+  })
+
+  it('appends a later recording after the existing audio timeline', () => {
+    const existing = mergeTranscripts(
+      channel('first session', [['first session', 1, 2]], 12),
+      channel('', [], 12),
+      'test'
+    )
+    existing.segments[0].text = 'edited first session'
+    const addition = mergeTranscripts(
+      channel('', [], 4),
+      channel('follow up', [['follow up', 0.5, 1.5]], 4),
+      'test'
+    )
+
+    const appended = appendMeetingTranscript(existing, addition)
+
+    expect(appended.durationSeconds).toBe(16)
+    expect(appended.segments.map((segment) => segment.text)).toEqual([
+      'edited first session',
+      'follow up'
+    ])
+    expect(appended.segments[1]).toMatchObject({ start: 12.5, end: 13.5 })
   })
 })

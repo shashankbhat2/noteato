@@ -6,7 +6,8 @@ import {
   IconPlus as Plus,
   IconSearch as Search,
   IconStar as Star,
-  IconStarFilled as StarFilled
+  IconStarFilled as StarFilled,
+  IconTrash as Trash
 } from '@tabler/icons-react'
 import type { NoteSummary } from '../../../shared/types'
 import appPackage from '../../../../package.json'
@@ -293,17 +294,28 @@ export default function Sidebar({
       {/* Utilities: reachable, but not competing with the library above them. */}
       <div className="sidebar-foot">
         {version && <span className="sidebar-version">v{version}</span>}
-        <button
-          className="sidebar-foot-btn icon-only"
-          title="More…"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect()
-            setUtilityMenu({ x: rect.left, y: rect.top })
-          }}
-        >
-          <Dots size={15} />
-          {trashCount > 0 && <span className="sidebar-trash-dot" />}
-        </button>
+        <div className="sidebar-foot-actions">
+          <button
+            className="sidebar-foot-btn icon-only"
+            title={`Trash${trashCount > 0 ? ` (${trashCount})` : ''}`}
+            aria-label={`Trash${trashCount > 0 ? `, ${trashCount} items` : ''}`}
+            onClick={onOpenTrash}
+          >
+            <Trash size={15} />
+            {trashCount > 0 && <span className="sidebar-trash-dot" aria-hidden="true" />}
+          </button>
+          <button
+            className="sidebar-foot-btn icon-only"
+            title="More…"
+            aria-label="More"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect()
+              setUtilityMenu({ x: rect.left, y: rect.top })
+            }}
+          >
+            <Dots size={15} />
+          </button>
+        </div>
       </div>
 
       {menu && (
@@ -315,7 +327,6 @@ export default function Sidebar({
           y={utilityMenu.y}
           items={[
             { label: 'Import…', onClick: onOpenImport },
-            { label: `Trash${trashCount > 0 ? ` (${trashCount})` : ''}`, onClick: onOpenTrash },
             { separator: true, label: '' },
             { label: 'Storage location…', onClick: onOpenStorageLocation },
             { label: 'Settings…', onClick: onOpenSettings },

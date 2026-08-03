@@ -641,6 +641,49 @@ export class NoteStore {
     return { ...meta, path, folder: '', excerpt: '', body: '' }
   }
 
+  /** Create the Markdown half of a self-contained meeting capture. */
+  createCaptureNote(directory: string, title: string, id: string = randomUUID()): Note {
+    const path = `${directory}/note.md`
+    if (!isCaptureNote(path)) throw new Error(`Invalid meeting directory: ${directory}`)
+    const now = new Date().toISOString()
+    const meta: NoteMeta = {
+      id,
+      title,
+      createdAt: now,
+      updatedAt: now,
+      tags: [],
+      fullWidth: false,
+      pinned: false,
+      reminderAt: null
+    }
+    const full = this.resolveWithin(path)
+    mkdirSync(dirname(full), { recursive: true })
+    writeFileSync(full, serializeNoteFile(meta, ''), 'utf-8')
+    this.remember({ id, path })
+    return { ...meta, path, folder: directory, excerpt: '', body: '' }
+  }
+
+  /** Move a note beside its first recording without changing its stable id. */
+  moveIntoCapture(id: string, captureDir: string): Note {
+    const current = this.resolvePath(id)
+    if (isAbsolute(current)) throw new Error('Linked notes cannot be moved into a recording.')
+    const relativeCapture = relative(this.notesDir, captureDir)
+    const outside =
+      !relativeCapture ||
+      isAbsolute(relativeCapture) ||
+      relativeCapture === '..' ||
+      relativeCapture.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+    if (outside) throw new Error('Recording folder is outside the notes library.')
+
+    const target = `${relativeCapture.replaceAll('\\', '/')}/note.md`
+    if (current === target) return this.readByPath(current)
+    const destination = this.resolveWithin(target)
+    if (existsSync(destination)) throw new Error('Recording folder already contains a note.')
+    renameSync(this.resolveWithin(current), destination)
+    this.remember({ id, path: target })
+    return this.readByPath(target)
+  }
+
   save(id: string, options: SaveOptions): Note {
     const relPath = this.resolvePath(id)
     const existing = this.readByPath(relPath)
@@ -689,7 +732,7 @@ export class NoteStore {
     return {
       ...meta,
       path: targetPath,
-      folder: '',
+      folder: folderOf(targetPath),
       excerpt: stripLeadingH1(body).trim().slice(0, 160),
       body
     }
@@ -782,12 +825,46 @@ export class NoteStore {
   delete(id: string): DeletedEntry {
     const relPath = this.resolvePath(id)
     if (isAbsolute(relPath)) throw new Error('Use Remove from Noteato for linked files.')
+    const recording = this.db
+      .prepare('SELECT capture_dir FROM recordings WHERE note_id = ?')
+      .get(id) as { capture_dir: string } | undefined
     this.idIndex.delete(id)
     let title = baseName(relPath).replace(/\.(md|markdown)$/i, '')
     try {
       title = this.readByPath(relPath).title || title
     } catch {
       /* unreadable — keep the filename */
+    }
+    // A meeting note and its recording are one artifact. Moving only note.md
+    // would leave audio behind that could no longer be reached or restored.
+    const noteFolder = dirname(this.resolveWithin(relPath))
+    let ownsRecordingFolder = false
+    if (recording?.capture_dir) {
+      try {
+        ownsRecordingFolder = realpathSync(noteFolder) === realpathSync(recording.capture_dir)
+      } catch {
+        ownsRecordingFolder = noteFolder === recording.capture_dir
+      }
+    }
+    if (isCaptureNote(relPath) || ownsRecordingFolder) {
+      return this.moveToTrash(folderOf(relPath), true, title)
+    }
+
+    // Older ordinary-note recordings kept note.md and the capture directory
+    // apart. Bundle them before trashing so deleting the note removes all of
+    // its audio while keeping the app's Restore action lossless.
+    if (recording?.capture_dir) {
+      const captureRelative = relative(this.notesDir, recording.capture_dir)
+      const outside =
+        !captureRelative ||
+        isAbsolute(captureRelative) ||
+        captureRelative === '..' ||
+        captureRelative.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+      const bundledNote = join(recording.capture_dir, 'note.md')
+      if (!outside && existsSync(recording.capture_dir) && !existsSync(bundledNote)) {
+        renameSync(this.resolveWithin(relPath), bundledNote)
+        return this.moveToTrash(captureRelative.replaceAll('\\', '/'), true, title)
+      }
     }
     return this.moveToTrash(relPath, false, title)
   }
@@ -869,8 +946,11 @@ export class NoteStore {
     let target = originalPath
     let counter = 1
     if (isFolder) {
+      const captureFolder = isCaptureNote(`${originalPath}/note.md`)
       while (existsSync(this.resolveWithin(target))) {
-        target = `${originalPath}-${counter}`
+        // Keep the timestamp capture shape valid so the scanner continues to
+        // treat note.md and its audio as one self-contained meeting.
+        target = captureFolder ? `${originalPath}${counter}` : `${originalPath}-${counter}`
         counter += 1
       }
     } else {
@@ -897,7 +977,18 @@ export class NoteStore {
         unlinkSync(from)
       }
     }
-    return isFolder ? null : this.toSummary(target)
+    if (!isFolder) return this.toSummary(target)
+
+    const captureNotePath = `${target}/note.md`
+    const summary = this.toSummary(captureNotePath)
+    if (!summary) return null
+    this.remember({ id: summary.id, path: captureNotePath })
+    // A collision can change the restored folder's absolute path. Keep the
+    // recording index pointed at the folder that now contains audio.m4a.
+    this.db
+      .prepare('UPDATE recordings SET capture_dir = ? WHERE note_id = ?')
+      .run(this.resolveWithin(target), summary.id)
+    return summary
   }
 
   // --- Full-text search ----------------------------------------------------

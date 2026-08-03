@@ -110,9 +110,8 @@ export interface MeetingState {
    *  across a renderer reload and cannot drift from the actual recording. */
   startedAt: number | null
   /**
-   * The note this recording belongs to. `null` means it was started from the
-   * tray or the accelerator with no note in hand — the usual case, since you
-   * start a meeting from inside Zoom — and it will commit to a new note.
+   * The note this recording belongs to. New meetings create their folder-backed
+   * note before recording starts, so null is only a brief legacy/fallback state.
    */
   noteId: string | null
 }
@@ -133,9 +132,9 @@ export interface NoteRecording {
   noteId: string
   captureDir: string
   durationSeconds: number
-  /** Absolute path to the microphone track — "me". */
+  /** Primary playable audio: mixed for new captures, mic-only for legacy ones. */
   micPath: string
-  /** Absolute path to the system-audio track — "them", or null if never heard. */
+  /** Legacy second track only; new captures expose one mixed recording. */
   systemPath: string | null
   transcriptStatus: 'none' | 'pending' | 'ready' | 'failed'
   createdAt: string

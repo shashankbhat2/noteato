@@ -156,6 +156,16 @@ describe('captured notes', () => {
     expect(store.read('capture-id-1').title).toBe('Capture 1 Aug, 14:32')
   })
 
+  it('creates a new meeting note inside its capture folder with an empty body', () => {
+    store = new NoteStore(db, dir)
+    const created = store.createCaptureNote(captureDirName, 'Meeting — Aug 1, 2:32 PM')
+
+    expect(created.path).toBe(`${captureDirName}/note.md`)
+    expect(created.folder).toBe(captureDirName)
+    expect(store.read(created.id).body.trim()).toBe('')
+    expect(existsSync(join(dir, captureDirName, 'note.md'))).toBe(true)
+  })
+
   // The bug this guards: flattening moves nested notes to the root. Doing that
   // to a capture would leave the markdown at the top level and its recording
   // stranded in a directory nothing points at.
@@ -192,5 +202,82 @@ describe('captured notes', () => {
     expect(saved.path).toBe(`${captureDirName}/note.md`)
     expect(existsSync(join(dir, captureDirName, 'audio.m4a'))).toBe(true)
     expect(store.read('capture-id-1').title).toBe('Thoughts on the launch')
+  })
+
+  it('moves and restores a meeting note together with its audio', () => {
+    writeCapture(dir)
+    store = new NoteStore(db, dir)
+
+    const deleted = store.delete('capture-id-1')
+    expect(deleted.isFolder).toBe(true)
+    expect(deleted.originalPath).toBe(captureDirName)
+    expect(existsSync(join(dir, captureDirName))).toBe(false)
+
+    expect(store.restore(deleted.trashName, deleted.originalPath, deleted.isFolder)?.id).toBe(
+      'capture-id-1'
+    )
+    expect(existsSync(join(dir, captureDirName, 'note.md'))).toBe(true)
+    expect(existsSync(join(dir, captureDirName, 'audio.m4a'))).toBe(true)
+    expect(store.read('capture-id-1').title).toBe('Capture 1 Aug, 14:32')
+  })
+
+  it('deletes the recording folder by its stored association even with a nonstandard name', () => {
+    store = new NoteStore(db, dir)
+    const folder = 'Customer follow-up'
+    writeCapture(dir, folder, 'associated-capture')
+    ;(db as unknown as { recordings: Map<string, { capture_dir: string }> }).recordings.set(
+      'associated-capture',
+      { capture_dir: join(dir, folder) }
+    )
+    store.list()
+
+    const deleted = store.delete('associated-capture')
+
+    expect(deleted.isFolder).toBe(true)
+    expect(deleted.originalPath).toBe(folder)
+    expect(existsSync(join(dir, folder))).toBe(false)
+  })
+
+  it('moves an ordinary note into its first recording folder and deletes them together', () => {
+    store = new NoteStore(db, dir)
+    const note = store.create('Customer call')
+    const capture = join(dir, captureDirName)
+    mkdirSync(capture, { recursive: true })
+    writeFileSync(join(capture, 'audio.m4a'), 'audio')
+
+    const moved = store.moveIntoCapture(note.id, capture)
+    ;(db as unknown as { recordings: Map<string, { capture_dir: string }> }).recordings.set(
+      note.id,
+      { capture_dir: capture }
+    )
+
+    expect(moved.path).toBe(`${captureDirName}/note.md`)
+    expect(existsSync(join(dir, note.path))).toBe(false)
+    expect(existsSync(join(capture, 'note.md'))).toBe(true)
+
+    const deleted = store.delete(note.id)
+    expect(deleted.isFolder).toBe(true)
+    expect(existsSync(capture)).toBe(false)
+  })
+
+  it('bundles and trashes older split note and recording artifacts', () => {
+    store = new NoteStore(db, dir)
+    const note = store.create('Legacy recorded note')
+    const capture = join(dir, captureDirName)
+    mkdirSync(capture, { recursive: true })
+    writeFileSync(join(capture, 'audio.m4a'), 'audio')
+    ;(db as unknown as { recordings: Map<string, { capture_dir: string }> }).recordings.set(
+      note.id,
+      { capture_dir: capture }
+    )
+
+    const deleted = store.delete(note.id)
+
+    expect(deleted.isFolder).toBe(true)
+    expect(existsSync(capture)).toBe(false)
+    const restored = store.restore(deleted.trashName, deleted.originalPath, deleted.isFolder)
+    expect(restored?.id).toBe(note.id)
+    expect(existsSync(join(capture, 'audio.m4a'))).toBe(true)
+    expect(existsSync(join(capture, 'note.md'))).toBe(true)
   })
 })
