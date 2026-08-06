@@ -44,6 +44,8 @@ mac:
   gatekeeperAssess: false
   extendInfo:
     NSMicrophoneUsageDescription: Noteato records your microphone for meeting notes.
+    NSScreenCaptureUsageDescription:
+      Noteato captures system audio so everyone in a meeting can be transcribed.
     NSAudioCaptureUsageDescription:
       Noteato records your Mac's audio so the other side of a meeting is captured too.
 npmRebuild: false

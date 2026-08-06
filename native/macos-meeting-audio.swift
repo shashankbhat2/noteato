@@ -22,10 +22,10 @@
 //   stderr:  {"type":"error","code":"...","message":"..."}
 //   stdin:   closes -> stop, flush, emit done, exit 0
 //
-// Permissions: microphone (TCC prompt on first engine start) and Screen
-// Recording (required by ScreenCaptureKit even for audio-only). Both attach to
-// the *parent* — Noteato.app — because this is a bare executable rather than a
-// bundle, which is the intended behaviour: one app, one identity, one prompt.
+// Permissions: microphone and Screen Recording (required by ScreenCaptureKit
+// even for audio-only). Both are requested explicitly before their capture
+// path starts. If Screen Recording stays unavailable, microphone capture still
+// proceeds — losing the whole meeting is not an acceptable permission UX.
 
 import AVFoundation
 import CoreGraphics
@@ -400,10 +400,12 @@ final class SystemAudioCapture: NSObject, SCStreamOutput {
         self.writer = writer
     }
 
-    static var hasPermission: Bool {
-        // Silent — CGRequestScreenCaptureAccess would prompt, and a recording
-        // that has already started is the wrong moment to be asking.
-        CGPreflightScreenCaptureAccess()
+    static func requestPermission() -> Bool {
+        if CGPreflightScreenCaptureAccess() { return true }
+        // Preflight alone never presents the system consent sheet. Requesting
+        // here makes the first recording a complete permission flow instead of
+        // an endless trip to System Settings.
+        return CGRequestScreenCaptureAccess()
     }
 
     func start(sampleRate: Double) async throws {
@@ -511,10 +513,41 @@ guard #available(macOS 13.0, *) else {
     fail("unsupported_os", "meeting capture needs macOS 13 or later")
 }
 
-guard SystemAudioCapture.hasPermission else {
-    fail(
-        "screen_recording_denied",
-        "Screen Recording permission is required to capture system audio"
+// Ask for microphone access explicitly. Relying on AVAudioEngine.start() to do
+// this made a denial indistinguishable from a missing or broken input device.
+func requestMicrophonePermission() -> Bool {
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized:
+        return true
+    case .denied, .restricted:
+        return false
+    case .notDetermined:
+        let semaphore = DispatchSemaphore(value: 0)
+        var granted = false
+        AVCaptureDevice.requestAccess(for: .audio) { allowed in
+            granted = allowed
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return granted
+    @unknown default:
+        return false
+    }
+}
+
+guard requestMicrophonePermission() else {
+    fail("microphone_denied", "Microphone permission was not granted")
+}
+
+let captureSystemAudio = SystemAudioCapture.requestPermission()
+if !captureSystemAudio {
+    emit(
+        [
+            "type": "warning",
+            "code": "screen_recording_denied",
+            "message": "Recording microphone only. Grant Screen Recording access to include system audio."
+        ],
+        to: .standardError
     )
 }
 
@@ -546,24 +579,33 @@ do {
     fail("microphone_failed", "\(error)")
 }
 
-// System audio.
+// System audio. Permission or startup failure degrades to microphone-only
+// capture rather than cancelling an otherwise valid meeting recording.
 let systemCapture = SystemAudioCapture(writer: systemWriter)
-let startupGroup = DispatchGroup()
-startupGroup.enter()
-var systemStartError: Error?
-Task {
-    do {
-        try await systemCapture.start(sampleRate: options.sampleRate)
-    } catch {
-        systemStartError = error
+if captureSystemAudio {
+    let startupGroup = DispatchGroup()
+    startupGroup.enter()
+    var systemStartError: Error?
+    Task {
+        do {
+            try await systemCapture.start(sampleRate: options.sampleRate)
+        } catch {
+            systemStartError = error
+        }
+        startupGroup.leave()
     }
-    startupGroup.leave()
-}
-startupGroup.wait()
+    startupGroup.wait()
 
-if let systemStartError {
-    engine.stop()
-    fail("system_audio_failed", "\(systemStartError)")
+    if let systemStartError {
+        emit(
+            [
+                "type": "warning",
+                "code": "system_audio_failed",
+                "message": "Recording microphone only because system audio could not start: \(systemStartError)"
+            ],
+            to: .standardError
+        )
+    }
 }
 
 emit(["type": "ready"])

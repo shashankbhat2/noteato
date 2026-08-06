@@ -78,6 +78,9 @@ export class MeetingRecorder {
     const audio = new MeetingAudioProcess({
       onReady: () => {},
       onLevels: (levels) => this.options.onLevels(levels),
+      // Warnings describe a degraded but live recording (normally mic-only).
+      // Surface them without running the destructive error cleanup below.
+      onWarning: (warning) => this.options.onError(warning),
       onDone: (result) => {
         // Read before the phase change clears them.
         const { noteId, startedAt } = this.session.getState()

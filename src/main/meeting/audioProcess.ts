@@ -21,6 +21,7 @@ export interface AudioResult {
 export type AudioErrorCode =
   | 'helper_missing'
   | 'screen_recording_denied'
+  | 'microphone_denied'
   | 'no_microphone'
   | 'microphone_failed'
   | 'system_audio_failed'
@@ -38,6 +39,8 @@ export interface AudioError {
 interface Handlers {
   onReady: () => void
   onLevels: (levels: AudioLevels) => void
+  /** A degraded capture can continue; warnings must not settle the process. */
+  onWarning: (warning: AudioError) => void
   onError: (error: AudioError) => void
   onDone: (result: AudioResult) => void
 }
@@ -170,6 +173,12 @@ export class MeetingAudioProcess {
           this.handlers.onDone({
             seconds: Number(message['seconds']) || 0,
             systemCaptured: message['systemCaptured'] === true
+          })
+          break
+        case 'warning':
+          this.handlers.onWarning({
+            code: (message['code'] as AudioErrorCode) ?? 'crashed',
+            message: String(message['message'] ?? 'meeting recording is running with limitations')
           })
           break
         case 'error':

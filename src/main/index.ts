@@ -143,6 +143,7 @@ const meetingRecorder = new MeetingRecorder({
       window.webContents.send('meeting:error', error)
     }
     if (error.code === 'screen_recording_denied') explainScreenRecording()
+    if (error.code === 'microphone_denied') explainMicrophone()
   },
   onCommitted: async (recording) => {
     // Untargeted callers normally prepare note.md before capture begins. Keep
@@ -338,21 +339,28 @@ const globalShortcutManager = new GlobalShortcutManager(
 )
 
 /**
- * ScreenCaptureKit gives no prompt of its own for an already-denied app, so the
- * only way out is Settings. macOS also requires a full relaunch after the
- * toggle is flipped — saying so here is the difference between a user who
- * grants it and one who grants it, sees nothing change, and gives up.
+ * The helper presents the native request on first use. Once access has already
+ * been denied, the only way to change it is Settings, and macOS requires a full
+ * relaunch after the toggle is flipped.
  */
+let screenRecordingGuidanceShown = false
+let microphoneGuidanceShown = false
+
 function explainScreenRecording(): void {
+  // A denied permission now falls back to microphone-only recording. Explain
+  // how to enable system audio once, but never trap the user in a modal loop.
+  if (screenRecordingGuidanceShown) return
+  screenRecordingGuidanceShown = true
   void dialog
     .showMessageBox({
       type: 'info',
-      message: 'Noteato needs Screen Recording permission',
+      message: 'Recording microphone only',
       detail:
-        'Recording the other side of a meeting captures your Mac’s audio output, ' +
-        'which macOS puts behind Screen Recording.\n\n' +
-        'Enable Noteato under Privacy & Security → Screen Recording, then quit and ' +
-        'reopen Noteato — macOS only applies the change on relaunch.',
+        'Noteato will keep this recording, but it cannot include your Mac’s audio ' +
+        'until Screen Recording access is enabled.\n\n' +
+        'Enable Noteato under Privacy & Security → Screen & System Audio Recording, ' +
+        'then quit and reopen Noteato. This message will not be shown again during ' +
+        'the current app session.',
       buttons: ['Open Settings', 'Later'],
       defaultId: 0,
       cancelId: 1
@@ -361,6 +369,29 @@ function explainScreenRecording(): void {
       if (response === 0) {
         void shell.openExternal(
           'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+        )
+      }
+    })
+}
+
+function explainMicrophone(): void {
+  if (microphoneGuidanceShown) return
+  microphoneGuidanceShown = true
+  void dialog
+    .showMessageBox({
+      type: 'info',
+      message: 'Noteato needs microphone access',
+      detail:
+        'Enable Noteato under Privacy & Security → Microphone, then try the recording again. ' +
+        'This message will not be shown again during the current app session.',
+      buttons: ['Open Settings', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    .then(({ response }) => {
+      if (response === 0) {
+        void shell.openExternal(
+          'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
         )
       }
     })

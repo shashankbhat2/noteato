@@ -2,6 +2,20 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-06
+
+### Fixed
+
+- Meeting recording now explicitly requests microphone and Screen Recording
+  permission instead of silently preflighting and repeatedly sending the user
+  back to System Settings.
+- A denied or unavailable Screen Recording permission falls back to
+  microphone-only capture, preserving the meeting instead of cancelling it.
+- Permission recovery guidance appears at most once per app session, and the
+  packaged app now includes its Screen Recording usage description.
+- CI uses Python 3.11 when rebuilding native dependencies, matching the release
+  workflow and avoiding node-gyp failures on newer macOS runners.
+
 ## [1.4.0] - 2026-08-06
 
 ### Added
@@ -409,7 +423,8 @@ that earns its complexity: side-by-side panes.
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/shashankbhat2/noteato/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/shashankbhat2/noteato/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/shashankbhat2/noteato/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/shashankbhat2/noteato/compare/v1.1.0...v1.2.0
