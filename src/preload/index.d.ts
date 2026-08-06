@@ -5,6 +5,7 @@ import type {
   MeetingError,
   MeetingLevels,
   MeetingState,
+  ModelStatus,
   Note,
   NoteRecording,
   NoteChange,
@@ -16,11 +17,14 @@ import type {
   ScratchSaveOptions,
   SearchResult,
   Settings,
+  SettingsTab,
   SidebarModeState,
   TrashEntry
 } from '../shared/types'
 import type { MeetingTranscript } from '../shared/meetingTranscript'
 import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
+import type { NoteTemplate, NoteTemplateDraft } from '../shared/noteTemplates'
+import type { HomeChatThread, HomeChatThreadSummary } from '../shared/homeChat'
 
 export interface ContextMenuParams {
   x: number
@@ -79,6 +83,19 @@ interface NoteatoApi {
     subscribeChanged: (callback: (change: ScratchChange) => void) => () => void
     subscribeOpen: (callback: (id: string) => void) => () => void
   }
+  templates: {
+    list: () => Promise<NoteTemplate[]>
+    create: (draft: NoteTemplateDraft) => Promise<NoteTemplate>
+    delete: (id: string) => Promise<boolean>
+    createNote: (id: string) => Promise<Note>
+    createMeeting: (id: string) => Promise<Note | null>
+  }
+  homeChat: {
+    list: () => Promise<HomeChatThreadSummary[]>
+    read: (id: string) => Promise<HomeChatThread | null>
+    save: (thread: HomeChatThread) => Promise<HomeChatThread>
+    delete: (id: string) => Promise<boolean>
+  }
   settings: {
     get: () => Promise<Settings>
     set: (patch: Partial<Settings>) => Promise<Settings>
@@ -116,9 +133,11 @@ interface NoteatoApi {
     subscribeRecorded: (callback: (noteId: string) => void) => () => void
     subscribeTranscript: (callback: (noteId: string) => void) => () => void
     subscribeNotes: (callback: (state: MeetingNotesState) => void) => () => void
-    subscribeModelProgress: (
-      callback: (p: { received: number; total: number }) => void
-    ) => () => void
+  }
+  asr: {
+    getStatus: () => Promise<ModelStatus>
+    download: () => Promise<ModelStatus>
+    subscribeStatus: (callback: (status: ModelStatus) => void) => () => void
   }
   reminders: {
     takeFired: () => Promise<NoteSummary[]>
@@ -146,10 +165,10 @@ interface NoteatoApi {
     cut: () => Promise<void>
     copy: () => Promise<void>
     paste: () => Promise<void>
-    openSettings: () => Promise<void>
+    openSettings: (tab?: SettingsTab) => Promise<void>
   }
   shortcuts: {
-    subscribe: (callback: (action: string) => void) => () => void
+    subscribe: (callback: (action: string, payload?: string) => void) => () => void
   }
 }
 

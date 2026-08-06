@@ -11,19 +11,30 @@ import {
   IconSun as Sun,
   IconX as X
 } from '@tabler/icons-react'
-import type { AiProvider, ScreenEdge, Settings } from '../../../shared/types'
+import type { ModelStatus, ScreenEdge, Settings, SettingsTab } from '../../../shared/types'
+import {
+  AI_PROVIDER_LABELS,
+  AI_PROVIDER_ORDER,
+  AUTO_AI_MODEL_ID,
+  availableAiProviders,
+  hasAiProviderKey,
+  listedAiModels,
+  normalizeAiModelChoice,
+  resolveAiModelChoice
+} from '../../../shared/aiModels'
 import { useTheme } from '../theme'
 import { FONT_OPTIONS } from '../fonts'
 import { ACCENT_OPTIONS } from '../accents'
-import { AI_MODELS, CHEAP_AI_MODELS } from '../ai/models'
 import { SIDEBAR_MODE_ACCELERATOR, shortcutDisplay } from '../../../shared/globalShortcuts'
+import { ModelProgress, modelStatusLabel } from './ModelDownload'
+import { Group, Row, Switch } from './SettingsRow'
 
 interface Props {
   onClose: () => void
   onNotesDirChanged?: () => void
+  /** Pane to open on. Main sets this when it opens Settings on the user's behalf. */
+  initialTab?: SettingsTab
 }
-
-type SettingsTab = 'general' | 'appearance' | 'ai' | 'dictation'
 
 /** Offered as steps rather than a free number — this is a feel, not a measurement. */
 const HOVER_DELAYS = [
@@ -72,11 +83,11 @@ const NAV_GROUPS: { group: string; tabs: TabMeta[] }[] = [
         subtitle: 'Bring your own key — nothing leaves your machine until you do'
       },
       {
-        id: 'dictation',
-        label: 'Dictation',
+        id: 'speech',
+        label: 'Speech',
         icon: <MicIcon size={16} />,
-        title: 'Dictation settings',
-        subtitle: 'Speech-to-text while you write'
+        title: 'Speech settings',
+        subtitle: 'Meeting notes and dictation — both turn talking into text'
       }
     ]
   }
@@ -84,59 +95,7 @@ const NAV_GROUPS: { group: string; tabs: TabMeta[] }[] = [
 
 const ALL_TABS = NAV_GROUPS.flatMap((g) => g.tabs)
 
-/** A settings row: label and description on the left, its control on the right. */
-function Row({
-  label,
-  description,
-  children
-}: {
-  label: string
-  description?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <div className="settings-row">
-      <div className="settings-row-copy">
-        <strong>{label}</strong>
-        {description && <span>{description}</span>}
-      </div>
-      <div className="settings-row-control">{children}</div>
-    </div>
-  )
-}
-
-function Group({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section className="settings-group">
-      <div className="settings-group-label">{label}</div>
-      {children}
-    </section>
-  )
-}
-
-function Switch({
-  checked,
-  onToggle,
-  disabled
-}: {
-  checked: boolean
-  onToggle: () => void
-  disabled?: boolean
-}) {
-  return (
-    <button
-      className={checked ? 'settings-switch on' : 'settings-switch'}
-      onClick={onToggle}
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-    >
-      <span className="settings-switch-knob" />
-    </button>
-  )
-}
-
-export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
+export default function SettingsModal({ onClose, onNotesDirChanged, initialTab }: Props) {
   const {
     theme,
     setTheme,
@@ -147,12 +106,13 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     aiSelectionActions,
     setAiSelectionActions
   } = useTheme()
-  const [tab, setTab] = useState<SettingsTab>('general')
+  const [tab, setTab] = useState<SettingsTab>(initialTab ?? 'general')
   const [settings, setSettings] = useState<Settings | null>(null)
   const [notesDir, setNotesDir] = useState('')
   const [saved, setSaved] = useState(false)
   const [aiSaved, setAiSaved] = useState(false)
   const [spellLanguages, setSpellLanguages] = useState<string[]>([])
+  const [modelStatus, setModelStatus] = useState<ModelStatus>({ state: 'absent' })
   const isMac = window.electron.process.platform === 'darwin'
   const platform = window.electron.process.platform
   const active = ALL_TABS.find((t) => t.id === tab)!
@@ -163,6 +123,13 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     window.api.app.spellcheckerLanguages().then(setSpellLanguages)
   }, [])
 
+  // A download started during onboarding may still be running, so read the
+  // current status as well as subscribing to what happens next.
+  useEffect(() => {
+    void window.api.asr.getStatus().then(setModelStatus)
+    return window.api.asr.subscribeStatus(setModelStatus)
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
@@ -170,6 +137,19 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  const modelDescription = modelStatusLabel(modelStatus)
+
+  /**
+   * Turning meetings on pulls the model down with it — otherwise the switch
+   * reads as done while the feature is still unusable. Main ignores the request
+   * if the model is already there.
+   */
+  const handleToggleMeetingNotes = async (s: Settings): Promise<void> => {
+    const meetingNotesEnabled = !s.meetingNotesEnabled
+    setSettings({ ...s, meetingNotesEnabled })
+    await window.api.settings.set({ meetingNotesEnabled })
+  }
 
   const handleSaveKey = async (): Promise<void> => {
     if (!settings) return
@@ -180,14 +160,21 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
 
   const handleSaveAi = async (): Promise<void> => {
     if (!settings) return
-    await window.api.settings.set({
-      aiProvider: settings.aiProvider,
-      aiModel: settings.aiModel,
+    const selected = resolveAiModelChoice(settings.aiModel, settings.aiProvider, settings)
+    const savedSettings = await window.api.settings.set({
+      aiProvider: selected.provider,
+      aiModel: selected.choice,
       anthropicApiKey: settings.anthropicApiKey,
-      openaiApiKey: settings.openaiApiKey
+      openaiApiKey: settings.openaiApiKey,
+      xaiApiKey: settings.xaiApiKey
     })
+    setSettings(savedSettings)
     // Clearing the last key leaves the note actions with nothing to run.
-    if (!settings.anthropicApiKey.trim() && !settings.openaiApiKey.trim()) {
+    if (
+      !settings.anthropicApiKey.trim() &&
+      !settings.openaiApiKey.trim() &&
+      !settings.xaiApiKey.trim()
+    ) {
       setAiSelectionActions(false)
     }
     window.dispatchEvent(new Event('noteato:ai-settings-changed'))
@@ -208,7 +195,11 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     void window.api.settings.set(patch)
   }
 
-  const hasAnyAiKey = Boolean(settings?.anthropicApiKey.trim() || settings?.openaiApiKey.trim())
+  const hasAnyAiKey = Boolean(
+    settings?.anthropicApiKey.trim() ||
+      settings?.openaiApiKey.trim() ||
+      settings?.xaiApiKey.trim()
+  )
 
   const renderGeneral = (s: Settings): React.ReactNode => (
     <>
@@ -382,86 +373,84 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
   )
 
   const renderAi = (s: Settings): React.ReactNode => {
-    const provider = s.aiProvider
-    const cheapModels = provider === 'none' ? [] : CHEAP_AI_MODELS[provider]
-    // The cheap tier stays the default — these actions fire on a selection, so
-    // the frontier models are offered but not stumbled into.
-    const capableModels =
-      provider === 'none' ? [] : AI_MODELS[provider].filter((m) => !m.cheap)
-    const modelValue = s.aiModel || cheapModels[0]?.id || ''
-    const hasCustomModel =
-      Boolean(s.aiModel) &&
-      !cheapModels.some((m) => m.id === s.aiModel) &&
-      !capableModels.some((m) => m.id === s.aiModel)
+    const modelValue = normalizeAiModelChoice(s.aiModel)
+    const knownModel =
+      modelValue === AUTO_AI_MODEL_ID ||
+      AI_PROVIDER_ORDER.some((provider) =>
+        listedAiModels(provider).some((model) => model.id === modelValue)
+      )
     return (
       <>
-        <Group label="Provider">
-          <Row label="Service" description="Off by default — nothing is sent anywhere">
-            <div className="segmented">
-              {(['none', 'anthropic', 'openai'] as const).map((p) => (
-                <button
-                  key={p}
-                  className={provider === p ? 'active' : undefined}
-                  onClick={() => setSettings({ ...s, aiProvider: p, aiModel: '' })}
+        <Group label="Model">
+          <Row
+            label="Default model"
+            description="Used by text enhancements and note chat"
+          >
+            <select
+              className="settings-select ai-model-settings-select"
+              value={modelValue}
+              onChange={(event) => {
+                const next = resolveAiModelChoice(event.target.value, s.aiProvider, s)
+                setSettings({ ...s, aiProvider: next.provider, aiModel: next.choice })
+              }}
+            >
+              <option
+                value={AUTO_AI_MODEL_ID}
+                disabled={availableAiProviders(s).length === 0}
+              >
+                Auto
+              </option>
+              {AI_PROVIDER_ORDER.map((provider) => (
+                <optgroup
+                  key={provider}
+                  label={AI_PROVIDER_LABELS[provider]}
+                  disabled={!hasAiProviderKey(s, provider)}
                 >
-                  <span>{p === 'none' ? 'Off' : p === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span>
-                </button>
+                  {listedAiModels(provider).map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.label}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
-            </div>
+              {!knownModel && <option value={modelValue}>{modelValue} (custom)</option>}
+            </select>
           </Row>
+        </Group>
 
-          {provider !== 'none' && (
-            <>
-              <Row
-                label="Model"
-                description="Fast models suit note editing; the rest cost more per action"
-              >
-                <select
-                  className="settings-select"
-                  value={modelValue}
-                  onChange={(e) => setSettings({ ...s, aiModel: e.target.value })}
-                >
-                  <optgroup label="Fast and inexpensive">
-                    {cheapModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="More capable">
-                    {capableModels.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                  {hasCustomModel && <option value={s.aiModel}>{s.aiModel} (custom)</option>}
-                </select>
-              </Row>
-              <Row
-                label={provider === 'anthropic' ? 'Anthropic API key' : 'OpenAI API key'}
-                description="Stored locally on this machine"
-              >
-                <div className="settings-inline-field">
-                  <input
-                    type="password"
-                    value={provider === 'anthropic' ? s.anthropicApiKey : s.openaiApiKey}
-                    placeholder={provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}
-                    onChange={(e) =>
-                      setSettings(
-                        provider === 'anthropic'
-                          ? { ...s, anthropicApiKey: e.target.value }
-                          : { ...s, openaiApiKey: e.target.value }
-                      )
-                    }
-                  />
-                  <button className="settings-btn" onClick={handleSaveAi}>
-                    {aiSaved ? 'Saved' : 'Save'}
-                  </button>
-                </div>
-              </Row>
-            </>
-          )}
+        <Group label="Provider keys">
+          <Row label="OpenAI" description="Required for GPT models · stored locally">
+            <input
+              className="settings-api-key"
+              type="password"
+              value={s.openaiApiKey}
+              placeholder="sk-…"
+              onChange={(event) => setSettings({ ...s, openaiApiKey: event.target.value })}
+            />
+          </Row>
+          <Row label="Anthropic" description="Required for Claude models · stored locally">
+            <input
+              className="settings-api-key"
+              type="password"
+              value={s.anthropicApiKey}
+              placeholder="sk-ant-…"
+              onChange={(event) => setSettings({ ...s, anthropicApiKey: event.target.value })}
+            />
+          </Row>
+          <Row label="xAI" description="Required for Grok models · stored locally">
+            <input
+              className="settings-api-key"
+              type="password"
+              value={s.xaiApiKey}
+              placeholder="xai-…"
+              onChange={(event) => setSettings({ ...s, xaiApiKey: event.target.value })}
+            />
+          </Row>
+          <Row label="Save provider settings">
+            <button className="settings-btn" onClick={handleSaveAi}>
+              {aiSaved ? 'Saved' : 'Save'}
+            </button>
+          </Row>
         </Group>
 
         <Group label="Features">
@@ -484,22 +473,48 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
     )
   }
 
-  const renderDictation = (s: Settings): React.ReactNode => (
-    <Group label="Deepgram">
-      <Row label="API key" description="Required for voice dictation · stored locally">
-        <div className="settings-inline-field">
-          <input
-            type="password"
-            value={s.deepgramApiKey}
-            onChange={(e) => setSettings({ ...s, deepgramApiKey: e.target.value })}
-            placeholder="dg_…"
+  const renderSpeech = (s: Settings): React.ReactNode => (
+    <>
+      {/* First, because this is where the meeting gate sends people. */}
+      <Group label="Meeting notes">
+        <Row
+          label="Record meetings"
+          description="Transcribe and summarise meetings on this Mac"
+        >
+          <Switch
+            checked={s.meetingNotesEnabled}
+            onToggle={() => void handleToggleMeetingNotes(s)}
           />
-          <button className="settings-btn" onClick={handleSaveKey}>
-            {saved ? 'Saved' : 'Save'}
-          </button>
-        </div>
-      </Row>
-    </Group>
+        </Row>
+        <Row label="Speech model" description={modelDescription}>
+          {modelStatus.state === 'downloading' ? (
+            <ModelProgress status={modelStatus} />
+          ) : modelStatus.state === 'installed' ? (
+            <span className="settings-hint">Ready</span>
+          ) : (
+            <button className="settings-btn" onClick={() => void window.api.asr.download()}>
+              {modelStatus.state === 'failed' ? 'Retry' : 'Download'}
+            </button>
+          )}
+        </Row>
+      </Group>
+
+      <Group label="Deepgram">
+        <Row label="API key" description="Required for voice dictation · stored locally">
+          <div className="settings-inline-field">
+            <input
+              type="password"
+              value={s.deepgramApiKey}
+              onChange={(e) => setSettings({ ...s, deepgramApiKey: e.target.value })}
+              placeholder="dg_…"
+            />
+            <button className="settings-btn" onClick={handleSaveKey}>
+              {saved ? 'Saved' : 'Save'}
+            </button>
+          </div>
+        </Row>
+      </Group>
+    </>
   )
 
   return (
@@ -542,7 +557,7 @@ export default function SettingsModal({ onClose, onNotesDirChanged }: Props) {
             ) : tab === 'ai' ? (
               renderAi(settings)
             ) : (
-              renderDictation(settings)
+              renderSpeech(settings)
             )}
           </div>
         </div>

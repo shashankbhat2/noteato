@@ -2,9 +2,11 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ComponentProps,
   type ReactNode
 } from 'react'
@@ -25,6 +27,7 @@ import { FONT_STACKS } from '../fonts'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { createNoteatoEditor, type NoteatoBlock } from '../noteLink'
 import { BlockMenuButton } from './BlockDragMenu'
+import MarkdownText from './MarkdownText'
 
 function MeetingNotesSideMenu(props: ComponentProps<typeof SideMenu>) {
   return (
@@ -135,6 +138,50 @@ const MeetingNotesDocument = forwardRef<
   )
 })
 
+/**
+ * Keeps a glass generation edge attached to the measured end of the live
+ * document. ResizeObserver catches both streamed lines and wrapping changes,
+ * so the panel glides down instead of jumping between fixed loader states.
+ */
+function MeetingNotesStream({ markdown }: { markdown: string }) {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const edgeRef = useRef<HTMLDivElement>(null)
+  const [contentHeight, setContentHeight] = useState(0)
+
+  useLayoutEffect(() => {
+    const content = contentRef.current
+    if (!content) return
+    const measure = (): void => setContentHeight(Math.ceil(content.getBoundingClientRect().height))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const edge = edgeRef.current
+    const scroller = edge?.closest('.note-meeting-notes-surface') as HTMLElement | null
+    if (!edge || !scroller || contentHeight === 0) return
+    const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+    if (distanceFromBottom < 140) edge.scrollIntoView({ block: 'nearest' })
+  }, [contentHeight])
+
+  return (
+    <div
+      className="meeting-notes-stream-stage"
+      style={{ '--meeting-notes-stream-height': `${contentHeight}px` } as CSSProperties}
+    >
+      <div className="meeting-notes-stream-document" ref={contentRef}>
+        {markdown ? <MarkdownText text={markdown} /> : null}
+      </div>
+      <div className="meeting-notes-glass-loader" ref={edgeRef}>
+        <Sparkles size={14} aria-hidden="true" />
+        <strong>Enhancing</strong>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   state: MeetingNotesState
   onRetry: () => void
@@ -187,22 +234,7 @@ export default function MeetingNotesView({
   } else if (state.status === 'generating') {
     content = (
       <div className="meeting-notes-generating" aria-live="polite" aria-busy="true">
-        <div className="meeting-notes-generation-head">
-          <span className="meeting-notes-progress-dot" aria-hidden="true" />
-          <strong>Preparing meeting notes</strong>
-        </div>
-        {state.content ? (
-          <pre className="meeting-notes-stream">
-            {state.content}
-            <span className="meeting-notes-caret" />
-          </pre>
-        ) : (
-          <div className="meeting-notes-simple-loader" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-        )}
+        <MeetingNotesStream markdown={state.content} />
       </div>
     )
   } else {

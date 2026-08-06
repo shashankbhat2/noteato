@@ -19,8 +19,9 @@ const transcript: MeetingTranscript = {
 
 describe('derived meeting notes', () => {
   it('uses the cheapest explicit model for each configured provider', () => {
-    expect(CHEAPEST_MEETING_MODELS.openai).toBe('gpt-5-nano')
+    expect(CHEAPEST_MEETING_MODELS.openai).toBe('gpt-5.6-luna')
     expect(CHEAPEST_MEETING_MODELS.anthropic).toContain('haiku')
+    expect(CHEAPEST_MEETING_MODELS.xai).toBe('grok-build-0.1')
   })
 
   it('supplies both note.md and the time-linked transcript as context', () => {

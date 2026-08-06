@@ -90,7 +90,7 @@ export type ScratchChange =
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontChoice = 'system' | 'serif' | 'mono' | 'rounded'
 export type AccentChoice = 'neutral' | 'ember' | 'ocean' | 'forest' | 'violet' | 'rose' | 'amber'
-export type AiProvider = 'none' | 'anthropic' | 'openai'
+export type AiProvider = 'none' | 'anthropic' | 'openai' | 'xai'
 export type SyncPreference = 'none' | 'icloud' | 'noteatoPro'
 /** Which screen edge the compact notes panel docks to (and reveals from). */
 export type ScreenEdge = 'left' | 'right'
@@ -127,6 +127,23 @@ export interface MeetingError {
   message: string
 }
 
+/**
+ * The speech model's presence on disk. Transcription cannot run without it and
+ * it is far too large to ship in the app, so its download is something the
+ * onboarding card and Settings both have to be able to show and drive.
+ */
+/**
+ * The Settings panes. Shared rather than private to the modal because main
+ * opens a specific one — the meeting gate sends people straight to 'speech'.
+ */
+export type SettingsTab = 'general' | 'appearance' | 'ai' | 'speech'
+
+export type ModelStatus =
+  | { state: 'absent' }
+  | { state: 'downloading'; received: number; total: number }
+  | { state: 'installed' }
+  | { state: 'failed'; message: string }
+
 /** A note's recording, as the renderer needs it to play and (later) transcribe. */
 export interface NoteRecording {
   noteId: string
@@ -155,6 +172,7 @@ export interface Settings {
   aiModel: string
   anthropicApiKey: string
   openaiApiKey: string
+  xaiApiKey: string
   aiSelectionActions: boolean
   /**
    * Seconds of microphone audio the agent keeps buffered so a capture can
@@ -162,6 +180,13 @@ export interface Settings {
    * the setting's whole point, so it must not merely buffer and discard.
    */
   preRollSeconds: number
+  /**
+   * Gates meeting notes as a whole. Off means every way into a recording —
+   * tray, accelerator, sidebar, a note's Record button — routes to Settings so
+   * the speech model can be downloaded first, rather than silently starting a
+   * 680 MB fetch the moment a recording ends.
+   */
+  meetingNotesEnabled: boolean
   /** Keep running in the menu bar after closing/quitting, so reminders can still fire. */
   keepInMenuBar: boolean
   /** Make the compact notes/reminders edge window available from the menu bar. */

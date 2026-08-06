@@ -23,7 +23,8 @@ import type {
   ScratchChange,
   ScratchNote,
   ScratchSaveOptions,
-  Settings
+  Settings,
+  SettingsTab
 } from '../shared/types'
 import { getAppDb } from './db'
 import { NoteStore } from './storage'
@@ -47,6 +48,7 @@ import { MeetingNotesGenerator } from './meeting/meetingNotesGenerator'
 import { appendMeetingAudio } from './meeting/audioProcess'
 import {
   AUDIO_FILE,
+  capturePaths,
   createCaptureDir,
   removeCaptureDir,
   removeCaptureInputs
@@ -54,7 +56,10 @@ import {
 import { appendMeetingTranscript } from '../shared/meetingTranscript'
 import type { MeetingNotesTemplateId } from '../shared/meetingNotes'
 import { SherpaServer } from './asr/sherpaServer'
+import { ensureModel, getModelStatus, isModelInstalled, onModelStatus } from './asr/model'
 import { RecorderWindow } from './recorderWindow'
+import { TemplateStore } from './templateStore'
+import { HomeChatStore } from './homeChatStore'
 import { linkLocalImage, resolveLocalImage } from './localImages'
 import {
   parseRecordingMediaUrl,
@@ -74,6 +79,8 @@ const appDb = getAppDb()
 const settingsStore = createSettingsStore()
 const noteStore = new NoteStore(appDb, settingsStore.read().notesDir ?? undefined)
 const scratchStore = new ScratchStore(appDb)
+const templateStore = new TemplateStore(noteStore, () => noteStore.getNotesDir())
+const homeChatStore = new HomeChatStore(appDb)
 // Linked external files/folders reload live: any on-disk change lands as an
 // upsert (single file) or refresh (folder) in every window.
 const externalWatcher = new ExternalWatcher((rootPath, kind) => {
@@ -174,10 +181,7 @@ const meetingRecorder = new MeetingRecorder({
     recordingStore.setTranscriptStatus(noteId, 'pending')
     broadcastMeeting('meeting:transcript-changed', noteId)
     try {
-      const addition = await transcribeCapture(sherpaServer, recording.dir, (received, total) => {
-        // Only meaningful on the first meeting, when the model is downloading.
-        broadcastMeeting('meeting:model-progress', { received, total })
-      })
+      const addition = await transcribeCapture(sherpaServer, recording.dir)
 
       if (existing) {
         const baseTranscript = existingTranscript ?? {
@@ -252,18 +256,50 @@ function broadcastMeeting(channel: string, payload: unknown): void {
   }
 }
 
+// Every window gets the model's status: the onboarding card, Settings and any
+// later surface all show one download, so they must not each track their own.
+onModelStatus((status) => broadcastMeeting('asr:status', status))
+
+/**
+ * Start the download without making the caller wait for 680 MB. Rejection is
+ * swallowed on purpose — the failure is already reported through the status
+ * stream, which is what every caller here actually watches.
+ */
+function startModelDownload(): void {
+  void ensureModel().catch(() => {})
+}
+
+/**
+ * The one gate for meeting notes, checked here rather than at each button so
+ * the tray, the accelerator, the sidebar and both in-app buttons cannot drift
+ * apart. Returns true when the caller should stop and let Settings take over.
+ *
+ * Only start transitions consult it. Stopping and discarding must always work,
+ * or a recording begun before the switch was flipped could never be ended.
+ */
+function meetingGateClosed(): boolean {
+  if (settingsStore.read().meetingNotesEnabled) return false
+  openMainSettings('speech')
+  return true
+}
+
 /** Create/open the self-contained meeting note before capture starts. */
-function startNewMeeting(): Note | null {
+function startNewMeeting(templateId?: string): Note | null {
   if (meetingRecorder.getState().phase !== 'idle') return null
+  if (meetingGateClosed()) return null
 
   const startedAt = new Date()
   const capture = createCaptureDir(noteStore.getNotesDir(), startedAt)
   let note: Note
   try {
+    const template = templateId ? templateStore.materialize(templateId, startedAt) : null
     note = noteStore.createCaptureNote(
       basename(capture.dir),
-      meetingTitle(startedAt.getTime())
+      template?.title ?? meetingTitle(startedAt.getTime())
     )
+    if (template) {
+      note = noteStore.save(note.id, { title: template.title, body: template.body })
+    }
   } catch (error) {
     removeCaptureDir(capture.dir)
     throw error
@@ -275,6 +311,19 @@ function startNewMeeting(): Note | null {
   meetingRecorder.start(note.id, capture)
   broadcastNoteChange({ kind: 'upsert', note })
   return note
+}
+
+/**
+ * Start from an open note. A new folder-backed note can record in place; a
+ * note that already owns audio must use the recorder's fresh staging folder so
+ * the old audio remains untouched until append and transcription both finish.
+ */
+function startMeetingForNote(noteId: string): boolean {
+  const noteDirectory = recordingStore.get(noteId) ? null : noteStore.bundledDirectory(noteId)
+  return meetingRecorder.start(
+    noteId,
+    noteDirectory ? capturePaths(noteDirectory) : undefined
+  )
 }
 
 function toggleUntargetedMeeting(): void {
@@ -406,8 +455,18 @@ function isSafeExternalUrl(rawUrl: string): boolean {
    the OS shows before the renderer boots is the same colour it lands on. */
 const DARK_BG = '#1a1a1a'
 const LIGHT_BG = '#ededed'
-const MIN_WIDTH = 350
+// Below 400px the compact title-bar controls and the note toolbar begin to
+// compete for the same horizontal space. Keep the native window from entering
+// that unusable range instead of relying on individual views to clip it.
+const MIN_WIDTH = 400
 const MIN_HEIGHT = 250
+/**
+ * First run shows the setup card and nothing else — an empty app window behind
+ * it would be showing a workspace the user has not finished setting up. The
+ * window is grown to the real thing once onboarding is done.
+ */
+const ONBOARDING_WIDTH = 480
+const ONBOARDING_HEIGHT = 700
 
 let mainWindow: BrowserWindow | null = null
 
@@ -494,13 +553,18 @@ function createMainWindow(): void {
   // shouldUseDarkColors reflects the resolved appearance.
   const isDark = nativeTheme.shouldUseDarkColors
   const state = windowStateStore.read()
+  const onboarding = !settingsStore.read().onboardingCompleted
   const win = new BrowserWindow({
-    width: Math.max(state.width, MIN_WIDTH),
-    height: Math.max(state.height, MIN_HEIGHT),
-    x: state.x,
-    y: state.y,
-    minWidth: MIN_WIDTH,
-    minHeight: MIN_HEIGHT,
+    width: onboarding ? ONBOARDING_WIDTH : Math.max(state.width, MIN_WIDTH),
+    height: onboarding ? ONBOARDING_HEIGHT : Math.max(state.height, MIN_HEIGHT),
+    // Centred rather than restored: a card has no earlier position to return to.
+    x: onboarding ? undefined : state.x,
+    y: onboarding ? undefined : state.y,
+    minWidth: onboarding ? ONBOARDING_WIDTH : MIN_WIDTH,
+    minHeight: onboarding ? ONBOARDING_HEIGHT : MIN_HEIGHT,
+    resizable: !onboarding,
+    maximizable: !onboarding,
+    fullscreenable: !onboarding,
     show: false,
     titleBarStyle: 'hidden',
     trafficLightPosition: { x: 13, y: 13 },
@@ -531,10 +595,12 @@ function createMainWindow(): void {
     }
   })
 
-  trackWindowState(win, windowStateStore)
+  // Not while onboarding: the card's fixed bounds are not a workspace layout
+  // and must not overwrite the size the app will open at.
+  if (!onboarding) trackWindowState(win, windowStateStore)
 
   win.on('ready-to-show', () => {
-    if (state.isMaximized) win.maximize()
+    if (state.isMaximized && !onboarding) win.maximize()
     win.show()
   })
   win.webContents.setWindowOpenHandler((details) => {
@@ -574,11 +640,30 @@ function showMainWindow(): void {
   mainWindow.focus()
 }
 
-function openMainSettings(): void {
+/**
+ * Grow the setup card into the app proper. The renderer swaps its own contents;
+ * this gives that content somewhere to live and hands back the resizing,
+ * maximizing and bounds-tracking that the card had switched off.
+ */
+function leaveOnboardingChrome(): void {
+  const win = mainWindow
+  if (!win || win.isDestroyed()) return
+
+  const state = windowStateStore.read()
+  win.setResizable(true)
+  win.setMaximizable(true)
+  win.setFullScreenable(true)
+  win.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
+  win.setSize(Math.max(state.width, MIN_WIDTH), Math.max(state.height, MIN_HEIGHT), true)
+  win.center()
+  trackWindowState(win, windowStateStore)
+}
+
+function openMainSettings(tab?: SettingsTab): void {
   showMainWindow()
   const win = mainWindow
   if (!win || win.isDestroyed()) return
-  const send = (): void => win.webContents.send('shortcut', 'open-settings')
+  const send = (): void => win.webContents.send('shortcut', 'open-settings', tab)
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send)
   else send()
 }
@@ -750,6 +835,22 @@ function registerIpcHandlers(): void {
     return pendingExternalNotes.splice(0)
   })
 
+  ipcMain.handle('templates:list', () => templateStore.list())
+  ipcMain.handle('templates:create', (_e, draft) => templateStore.create(draft))
+  ipcMain.handle('templates:delete', (_e, id: string) => templateStore.delete(id))
+  ipcMain.handle('templates:createNote', (e, id: string) => {
+    const note = templateStore.instantiate(id)
+    reminderScheduler.reschedule(note)
+    broadcastNoteChange({ kind: 'upsert', note }, e.sender.id)
+    return note
+  })
+  ipcMain.handle('templates:createMeeting', (_e, id: string) => startNewMeeting(id))
+
+  ipcMain.handle('homeChat:list', () => homeChatStore.list())
+  ipcMain.handle('homeChat:read', (_e, id: string) => homeChatStore.read(id))
+  ipcMain.handle('homeChat:save', (_e, thread) => homeChatStore.save(thread))
+  ipcMain.handle('homeChat:delete', (_e, id: string) => homeChatStore.delete(id))
+
   ipcMain.handle('reminders:takeFired', () => reminderScheduler.markReady())
 
   // --- Scratch notes (SQLite-backed; quick note + sidebar mode) -------------
@@ -794,10 +895,16 @@ function registerIpcHandlers(): void {
     const runtime = runtimeSettings(next)
     if (patch.theme) nativeTheme.themeSource = patch.theme
     if ('spellcheckLanguage' in patch) applySpellcheckLanguage(next.spellcheckLanguage)
+    // Enabling meetings is a promise the feature will work, and it cannot
+    // until the model is here. Start it now rather than at the end of the
+    // user's first recording, where the wait has nowhere to be shown.
+    if (patch.meetingNotesEnabled && !isModelInstalled()) startModelDownload()
+    if (patch.onboardingCompleted) leaveOnboardingChrome()
     if (
       'aiProvider' in patch ||
       'anthropicApiKey' in patch ||
-      'openaiApiKey' in patch
+      'openaiApiKey' in patch ||
+      'xaiApiKey' in patch
     ) {
       meetingNotesGenerator.resumeConfigured()
     }
@@ -830,7 +937,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('sidebar:getState', () => sidebarModeManager.getState())
   ipcMain.handle('sidebar:show', () => sidebarModeManager.show())
-  ipcMain.handle('sidebar:close', () => sidebarModeManager.hide())
+  ipcMain.handle('sidebar:close', () => sidebarModeManager.requestClose())
   ipcMain.handle('sidebar:setPinned', (_e, pinned: boolean) => {
     const next = { ...settingsStore.read(), sidebarPinned: pinned }
     settingsStore.write(next)
@@ -865,8 +972,8 @@ function registerIpcHandlers(): void {
   )
   ipcMain.handle('meeting:startNew', () => startNewMeeting())
   ipcMain.handle('meeting:start', (_e, noteId: string | null = null) => {
-    if (noteId) meetingRecorder.start(noteId)
-    else startNewMeeting()
+    if (!noteId) startNewMeeting()
+    else if (!meetingGateClosed()) startMeetingForNote(noteId)
     return meetingRecorder.getState()
   })
   ipcMain.handle('meeting:stop', () => {
@@ -878,9 +985,21 @@ function registerIpcHandlers(): void {
     return meetingRecorder.getState()
   })
   ipcMain.handle('meeting:toggle', (_e, noteId: string | null = null) => {
-    if (noteId) meetingRecorder.toggle(noteId)
-    else toggleUntargetedMeeting()
+    if (!noteId) toggleUntargetedMeeting()
+    // Only the start half is gated; a recording already running must still be
+    // stoppable from the button that started it.
+    else if (meetingRecorder.getState().phase !== 'idle') {
+      meetingRecorder.toggle(noteId)
+    } else if (!meetingGateClosed()) {
+      startMeetingForNote(noteId)
+    }
     return meetingRecorder.getState()
+  })
+
+  ipcMain.handle('asr:getStatus', () => getModelStatus())
+  ipcMain.handle('asr:download', () => {
+    startModelDownload()
+    return getModelStatus()
   })
 
   ipcMain.handle('ai:complete', (_e, req: AiCompleteRequest) => completeAi(settingsStore.read(), req))
@@ -922,7 +1041,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('app:cut', (e) => e.sender.cut())
   ipcMain.handle('app:copy', (e) => e.sender.copy())
   ipcMain.handle('app:paste', (e) => e.sender.paste())
-  ipcMain.handle('app:openSettings', () => openMainSettings())
+  ipcMain.handle('app:openSettings', (_e, tab?: SettingsTab) => openMainSettings(tab))
 
   ipcMain.handle('app:closeWindow', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.handle('app:toggleMaximize', (e) => {
@@ -990,6 +1109,15 @@ app.whenReady().then(() => {
   // running: it would still hold the Fn tap and paint a second menu-bar icon
   // this process knows nothing about.
   void removeStaleAgent()
+
+  // Picks up a download that a previous run started and a quit interrupted.
+  // Only for installs that asked for meetings — nobody else should spend
+  // 680 MB — and never during onboarding, where the card owns the decision and
+  // would otherwise be showing an untouched switch over a running download.
+  const startup = settingsStore.read()
+  if (startup.onboardingCompleted && startup.meetingNotesEnabled && !isModelInstalled()) {
+    startModelDownload()
+  }
 
   // Windows/Linux deliver OS-opened files as launch arguments.
   for (const arg of process.argv.slice(1)) openExternalMarkdown(arg)

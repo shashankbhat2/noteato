@@ -1,61 +1,45 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  IconArrowLeft as ArrowLeft,
   IconArrowRight as ArrowRight,
   IconCheck as Check,
-  IconCloud as Cloud,
-  IconCloudLock as CloudLock,
-  IconFolder as Folder,
-  IconFolderOpen as FolderOpen,
   IconMoon as Moon,
   IconSun as Sun,
   IconDeviceDesktop as Monitor
 } from '@tabler/icons-react'
-import type { Settings, SyncPreference } from '../../../shared/types'
+import type { ModelStatus, Settings } from '../../../shared/types'
 import noteatoIcon from '../../../../build/icon.png'
 import { ACCENT_OPTIONS } from '../accents'
 import { useTheme } from '../theme'
+import { ModelProgress } from './ModelDownload'
+import { Row, Switch } from './SettingsRow'
 
 interface Props {
   initialSettings: Settings
   onComplete: () => void
 }
 
-const SYNC_OPTIONS: Array<{
-  id: Exclude<SyncPreference, 'none'>
-  name: string
-  description: string
-  icon: typeof Cloud
-}> = [
-  {
-    id: 'icloud',
-    name: 'iCloud Sync',
-    description: 'Keep your Noteato library in your private iCloud Drive.',
-    icon: Cloud
-  },
-  {
-    id: 'noteatoPro',
-    name: 'Noteato Pro Sync',
-    description: 'Sync through Noteato across supported devices.',
-    icon: CloudLock
-  }
-]
-
 function folderName(path: string): string {
   const normalized = path.replace(/\\/g, '/').replace(/\/$/, '')
   return normalized.slice(normalized.lastIndexOf('/') + 1) || 'Noteato'
 }
 
+/**
+ * One card, shown once, built from the same rows as Settings so first run looks
+ * like the app rather than a preamble to it. Everything here has a working
+ * default, so the only thing between a new install and a usable app is a name.
+ *
+ * Theme, accent and the notes folder persist the moment they are touched — they
+ * take effect immediately and there is nothing to undo them against. The rest
+ * is written by "Start writing".
+ */
 export default function OnboardingView({ initialSettings, onComplete }: Props) {
   const { theme, setTheme, accent, setAccent } = useTheme()
-  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [userName, setUserName] = useState(initialSettings.userName)
-  const [licenseKey, setLicenseKey] = useState(initialSettings.licenseKey)
-  const [syncPreference, setSyncPreference] = useState<SyncPreference>(
-    initialSettings.syncPreference
-  )
-  const [sidebarEnabled, setSidebarEnabled] = useState(initialSettings.sidebarModeEnabled)
-  const [menuBarEnabled, setMenuBarEnabled] = useState(initialSettings.keepInMenuBar)
+  // Both default off. Sync does nothing yet, and meeting notes costs 680 MB —
+  // neither is ours to opt someone into.
+  const [syncEnabled, setSyncEnabled] = useState(false)
+  const [meetingNotes, setMeetingNotes] = useState(false)
+  const [modelStatus, setModelStatus] = useState<ModelStatus>({ state: 'absent' })
   const [notesDir, setNotesDir] = useState('')
   const [choosingFolder, setChoosingFolder] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -67,10 +51,19 @@ export default function OnboardingView({ initialSettings, onComplete }: Props) {
     nameInputRef.current?.focus()
   }, [])
 
-  const selectedSync = useMemo(
-    () => SYNC_OPTIONS.find((option) => option.id === syncPreference),
-    [syncPreference]
-  )
+  useEffect(() => {
+    void window.api.asr.getStatus().then(setModelStatus)
+    return window.api.asr.subscribeStatus(setModelStatus)
+  }, [])
+
+  /**
+   * Start the moment the switch goes on, so the cost is visible here rather
+   * than surfacing as an unexplained wait after the user's first meeting. Only
+   * from 'absent': a failure waits for a deliberate retry in Settings.
+   */
+  useEffect(() => {
+    if (meetingNotes && modelStatus.state === 'absent') void window.api.asr.download()
+  }, [meetingNotes, modelStatus.state])
 
   const chooseFolder = async (): Promise<void> => {
     setChoosingFolder(true)
@@ -85,7 +78,7 @@ export default function OnboardingView({ initialSettings, onComplete }: Props) {
     }
   }
 
-  const continueToSync = async (): Promise<void> => {
+  const finish = async (): Promise<void> => {
     const name = userName.trim()
     if (!name) {
       setError('Add your name to continue.')
@@ -96,42 +89,14 @@ export default function OnboardingView({ initialSettings, onComplete }: Props) {
     setSaving(true)
     setError(null)
     try {
+      // Never waits on the download. It belongs to the main process and carries
+      // on into the app, which is the point of starting it early.
       await window.api.settings.set({
         userName: name,
-        licenseKey: licenseKey.trim()
+        syncPreference: syncEnabled ? 'noteatoPro' : 'none',
+        meetingNotesEnabled: meetingNotes,
+        onboardingCompleted: true
       })
-      setUserName(name)
-      setStep(2)
-    } catch {
-      setError('Your setup could not be saved. Please try again.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const continueToThanks = async (preference: SyncPreference): Promise<void> => {
-    setSaving(true)
-    setError(null)
-    try {
-      await window.api.settings.set({
-        syncPreference: preference,
-        sidebarModeEnabled: sidebarEnabled,
-        keepInMenuBar: menuBarEnabled
-      })
-      setSyncPreference(preference)
-      setStep(3)
-    } catch {
-      setError('Your sync preference could not be saved. Please try again.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const completeOnboarding = async (): Promise<void> => {
-    setSaving(true)
-    setError(null)
-    try {
-      await window.api.settings.set({ onboardingCompleted: true })
       onComplete()
     } catch {
       setError('Noteato could not finish setup. Please try again.')
@@ -139,270 +104,130 @@ export default function OnboardingView({ initialSettings, onComplete }: Props) {
     }
   }
 
+  const meetingDescription =
+    modelStatus.state === 'failed'
+      ? 'The speech model didn’t download. You can retry in Settings.'
+      : modelStatus.state === 'installed'
+        ? 'Transcribe and summarise meetings on this Mac.'
+        : 'Transcribe and summarise meetings on this Mac. Downloads a 680 MB model.'
+
   return (
     <div className="onboarding-window">
       <div className="onboarding-drag-strip" />
       <main className="onboarding-card" aria-label="Set up Noteato">
         <header className="onboarding-card-header">
-          <div className="onboarding-brand">
-            <img src={noteatoIcon} alt="" />
-            <div>
-              <strong>Noteato</strong>
-              <span>Step {step} of 3</span>
-            </div>
-          </div>
-          <div className="onboarding-progress" aria-label={`Step ${step} of 3`}>
-            {[1, 2, 3].map((number) => (
-              <span key={number} className={number <= step ? 'active' : undefined} />
-            ))}
-          </div>
+          <img src={noteatoIcon} alt="" />
+          <h1>Welcome to Noteato</h1>
+          <p>A quiet place for notes. Everything stays as plain Markdown on your Mac.</p>
         </header>
 
-        <section key={step} className="onboarding-card-body">
-          {step === 1 && (
-            <>
-              <div className="onboarding-heading">
-                <h1>Welcome to Noteato</h1>
-                <p>Choose how your writing space should feel.</p>
-              </div>
+        <section className="onboarding-card-body">
+          <label className="onboarding-name">
+            <span>Your name</span>
+            <input
+              ref={nameInputRef}
+              value={userName}
+              onChange={(event) => {
+                setUserName(event.target.value)
+                setError(null)
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void finish()
+              }}
+              placeholder="Your name"
+              autoComplete="name"
+            />
+          </label>
 
-              <div className="onboarding-fields-row">
-                <label className="settings-label onboarding-field">
-                  <span>Your name</span>
-                  <input
-                    ref={nameInputRef}
-                    value={userName}
-                    onChange={(event) => {
-                      setUserName(event.target.value)
-                      setError(null)
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') void continueToSync()
-                    }}
-                    placeholder="Your name"
-                    autoComplete="name"
-                  />
-                </label>
-                <label className="settings-label onboarding-field">
-                  <span>
-                    License key <small>Optional</small>
-                  </span>
-                  <input
-                    value={licenseKey}
-                    onChange={(event) => setLicenseKey(event.target.value)}
-                    placeholder="NTAO-••••-••••"
-                    spellCheck={false}
-                  />
-                </label>
-              </div>
+          <div className="onboarding-rows">
+            <Row label="Notes folder" description={notesDir || 'Preparing folder…'}>
+              <button
+                className="settings-btn"
+                onClick={() => void chooseFolder()}
+                disabled={choosingFolder}
+              >
+                {choosingFolder ? 'Choosing…' : folderName(notesDir)}
+              </button>
+            </Row>
 
-              <div className="onboarding-section-block">
-                <div className="onboarding-section-label">
-                  <span>Storage location</span>
-                </div>
-                <div className="onboarding-storage-row">
-                  <span className="onboarding-storage-icon">
-                    <Folder size={18} />
-                  </span>
-                  <span className="onboarding-storage-copy">
-                    <strong>{notesDir ? folderName(notesDir) : 'Local storage'}</strong>
-                    <small>{notesDir || 'Preparing folder…'}</small>
-                  </span>
+            <Row label="Theme" description="Follows your Mac unless you pick one.">
+              <div className="theme-switch" role="group" aria-label="Theme">
+                <button
+                  className={theme === 'system' ? 'theme-option active' : 'theme-option'}
+                  onClick={() => setTheme('system')}
+                  title="System"
+                >
+                  <Monitor size={14} />
+                </button>
+                <button
+                  className={theme === 'light' ? 'theme-option active' : 'theme-option'}
+                  onClick={() => setTheme('light')}
+                  title="Light"
+                >
+                  <Sun size={14} />
+                </button>
+                <button
+                  className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
+                  onClick={() => setTheme('dark')}
+                  title="Dark"
+                >
+                  <Moon size={14} />
+                </button>
+              </div>
+            </Row>
+
+            <Row
+              label="Accent"
+              description={ACCENT_OPTIONS.find((option) => option.id === accent)?.label}
+            >
+              <div className="accent-swatches" role="group" aria-label="Accent colour">
+                {ACCENT_OPTIONS.map((option) => (
                   <button
-                    className="onboarding-storage-action"
-                    onClick={() => void chooseFolder()}
-                    disabled={choosingFolder}
+                    key={option.id}
+                    className={accent === option.id ? 'accent-swatch active' : 'accent-swatch'}
+                    style={{ backgroundColor: option.swatch }}
+                    onClick={() => setAccent(option.id)}
+                    title={option.label}
+                    aria-label={option.label}
                   >
-                    <FolderOpen size={14} />
-                    {choosingFolder ? 'Choosing…' : 'Change'}
+                    {accent === option.id && <Check size={11} strokeWidth={3} />}
                   </button>
-                </div>
+                ))}
               </div>
+            </Row>
 
-              <div className="onboarding-section-block">
-                <div className="onboarding-section-label">
-                  <span>Theme</span>
-                </div>
-                <div className="theme-switch onboarding-theme-switch" role="group" aria-label="Theme">
-                  <button
-                    className={theme === 'system' ? 'theme-option active' : 'theme-option'}
-                    onClick={() => setTheme('system')}
-                  >
-                    <Monitor size={14} /> System
-                  </button>
-                  <button
-                    className={theme === 'light' ? 'theme-option active' : 'theme-option'}
-                    onClick={() => setTheme('light')}
-                  >
-                    <Sun size={14} /> Light
-                  </button>
-                  <button
-                    className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
-                    onClick={() => setTheme('dark')}
-                  >
-                    <Moon size={14} /> Dark
-                  </button>
-                </div>
-              </div>
+            <Row label="Sync" description="Coming soon — everything stays on this Mac for now.">
+              <Switch
+                checked={syncEnabled}
+                onToggle={() => setSyncEnabled((enabled) => !enabled)}
+                label="Sync"
+              />
+            </Row>
 
-              <div className="onboarding-section-block">
-                <div className="onboarding-section-label">
-                  <span>Accent color</span>
-                  <small>{ACCENT_OPTIONS.find((option) => option.id === accent)?.label}</small>
-                </div>
-                <div className="accent-swatches onboarding-accent-swatches" role="group" aria-label="Accent color">
-                  {ACCENT_OPTIONS.map((option) => (
-                    <button
-                      key={option.id}
-                      className={accent === option.id ? 'accent-swatch active' : 'accent-swatch'}
-                      style={{ backgroundColor: option.swatch }}
-                      onClick={() => setAccent(option.id)}
-                      title={option.label}
-                      aria-label={option.label}
-                    >
-                      {accent === option.id && <Check size={11} strokeWidth={3} />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
+            <Row label="Meeting notes" description={meetingDescription}>
+              <Switch
+                checked={meetingNotes}
+                onToggle={() => setMeetingNotes((enabled) => !enabled)}
+                label="Meeting notes"
+              />
+            </Row>
 
-          {step === 2 && (
-            <>
-              <div className="onboarding-heading">
-                <h1>Select sync mode</h1>
-                <p>Coming soon. Choose a preference or skip for now.</p>
-              </div>
-
-              <div className="onboarding-sync-options">
-                {SYNC_OPTIONS.map((option) => {
-                  const Icon = option.icon
-                  const selected = syncPreference === option.id
-                  return (
-                    <button
-                      key={option.id}
-                      className={selected ? 'onboarding-sync-card selected' : 'onboarding-sync-card'}
-                      onClick={() => setSyncPreference(option.id)}
-                      aria-pressed={selected}
-                    >
-                      <span className="onboarding-sync-icon">
-                        <Icon size={21} />
-                      </span>
-                      <span className="onboarding-sync-copy">
-                        <span className="onboarding-sync-title">
-                          <strong>{option.name}</strong>
-                          <small>Coming soon</small>
-                        </span>
-                        <span>{option.description}</span>
-                      </span>
-                      <span className="onboarding-sync-select">
-                        {selected && <Check size={12} strokeWidth={3} />}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              <p className="onboarding-local-note">
-                Notes stay local in <strong>{folderName(notesDir)}</strong> for now.
-                {selectedSync && <> We’ll remember {selectedSync.name}.</>}
-              </p>
-
-              <div className="onboarding-availability">
-                <h2>Availability</h2>
-                <div className="onboarding-toggle-stack">
-                  <div className="settings-toggle-row">
-                    <span>Enable sidebar mode</span>
-                    <button
-                      className={sidebarEnabled ? 'settings-switch on' : 'settings-switch'}
-                      onClick={() => setSidebarEnabled((enabled) => !enabled)}
-                      role="switch"
-                      aria-checked={sidebarEnabled}
-                    >
-                      <span className="settings-switch-knob" />
-                    </button>
-                  </div>
-                  <div className="settings-toggle-row">
-                    <span>Keep Noteato in the menu bar</span>
-                    <button
-                      className={menuBarEnabled ? 'settings-switch on' : 'settings-switch'}
-                      onClick={() => setMenuBarEnabled((enabled) => !enabled)}
-                      role="switch"
-                      aria-checked={menuBarEnabled}
-                    >
-                      <span className="settings-switch-knob" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {step === 3 && (
-            <div className="onboarding-thanks">
-              <img src={noteatoIcon} alt="" />
-              <span>Setup complete</span>
-              <h1>Thank you, {userName.split(/\s+/)[0]}.</h1>
-              <p>
-                Your quiet place for notes is ready. Everything you write remains plain Markdown
-                in the folder you chose.
-              </p>
-            </div>
-          )}
+            {meetingNotes && modelStatus.state === 'downloading' && (
+              <ModelProgress status={modelStatus} />
+            )}
+          </div>
         </section>
 
         <footer className="onboarding-actions">
-          <div>
-            {step === 2 && (
-              <button className="onboarding-text-button" onClick={() => setStep(1)}>
-                <ArrowLeft size={14} /> Back
-              </button>
-            )}
-            {error && <span className="onboarding-error">{error}</span>}
-          </div>
-
-          <div>
-            {step === 2 && (
-              <button
-                className="onboarding-skip-button"
-                onClick={() => void continueToThanks('none')}
-                disabled={saving}
-              >
-                Skip for now
-              </button>
-            )}
-            {step === 1 && (
-              <button
-                className="onboarding-primary-button"
-                onClick={() => void continueToSync()}
-                disabled={saving}
-              >
-                {saving ? 'Saving…' : 'Continue'}
-                {!saving && <ArrowRight size={15} />}
-              </button>
-            )}
-            {step === 2 && (
-              <button
-                className="onboarding-primary-button"
-                onClick={() => void continueToThanks(syncPreference)}
-                disabled={saving || syncPreference === 'none'}
-              >
-                {saving ? 'Saving…' : 'Continue'}
-                {!saving && <ArrowRight size={15} />}
-              </button>
-            )}
-            {step === 3 && (
-              <button
-                className="onboarding-primary-button"
-                onClick={() => void completeOnboarding()}
-                disabled={saving}
-              >
-                {saving ? 'Opening…' : 'Start writing'}
-                {!saving && <ArrowRight size={15} />}
-              </button>
-            )}
-          </div>
+          {error && <span className="onboarding-error">{error}</span>}
+          <button
+            className="onboarding-primary-button"
+            onClick={() => void finish()}
+            disabled={saving}
+          >
+            {saving ? 'Opening…' : 'Start writing'}
+            {!saving && <ArrowRight size={15} />}
+          </button>
         </footer>
       </main>
     </div>

@@ -1,21 +1,31 @@
 import type { AiCompleteRequest, Settings } from '../../../shared/types'
+import {
+  AI_PROVIDER_LABELS,
+  aiProviderKey,
+  resolveAiModelChoice
+} from '../../../shared/aiModels'
 
 export class AiNotConfiguredError extends Error {}
 
 export function isAiConfigured(
   settings: Settings,
-  provider = settings.aiProvider
+  provider = resolveAiModelChoice(settings.aiModel, settings.aiProvider, settings).provider
 ): boolean {
-  if (provider === 'anthropic') return Boolean(settings.anthropicApiKey)
-  if (provider === 'openai') return Boolean(settings.openaiApiKey)
-  return false
+  return Boolean(aiProviderKey(settings, provider).trim())
 }
 
 export async function aiComplete(settings: Settings, req: AiCompleteRequest): Promise<string> {
-  if (!isAiConfigured(settings, req.provider)) {
-    throw new AiNotConfiguredError('Set up an AI provider in Settings to use this feature.')
+  const selected = resolveAiModelChoice(
+    req.model ?? settings.aiModel,
+    req.provider ?? settings.aiProvider,
+    settings
+  )
+  if (!isAiConfigured(settings, selected.provider)) {
+    throw new AiNotConfiguredError(
+      `Add an ${AI_PROVIDER_LABELS[selected.provider]} API key in Settings to use this model.`
+    )
   }
-  return window.api.ai.complete(req)
+  return window.api.ai.complete({ ...req, provider: selected.provider, model: selected.model })
 }
 
 export async function aiStream(
@@ -24,12 +34,19 @@ export async function aiStream(
   onDelta: (delta: string) => void,
   registerCancel?: (cancel: () => void) => void
 ): Promise<string> {
-  if (!isAiConfigured(settings, req.provider)) {
-    throw new AiNotConfiguredError('Set up an AI provider in Settings to use this feature.')
+  const selected = resolveAiModelChoice(
+    req.model ?? settings.aiModel,
+    req.provider ?? settings.aiProvider,
+    settings
+  )
+  if (!isAiConfigured(settings, selected.provider)) {
+    throw new AiNotConfiguredError(
+      `Add an ${AI_PROVIDER_LABELS[selected.provider]} API key in Settings to use this model.`
+    )
   }
-  const model =
-    req.model ||
-    settings.aiModel ||
-    ((req.provider ?? settings.aiProvider) === 'openai' ? 'gpt-5.4-nano' : 'claude-haiku-4-5')
-  return window.api.ai.stream({ ...req, model }, onDelta, registerCancel)
+  return window.api.ai.stream(
+    { ...req, provider: selected.provider, model: selected.model },
+    onDelta,
+    registerCancel
+  )
 }

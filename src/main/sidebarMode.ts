@@ -127,6 +127,17 @@ export class SidebarModeManager {
     else this.show()
   }
 
+  /**
+   * The title-bar close action is different from the global reveal toggle: a
+   * pinned panel has explicitly been asked to stay put, so it can only be
+   * dismissed after it is unpinned. Keep this guard in the main process so a
+   * stale renderer cannot accidentally hide it.
+   */
+  requestClose(): void {
+    if (this.getSettings().sidebarPinned) return
+    this.hide()
+  }
+
   hide(): void {
     const win = this.window
     if (!win || win.isDestroyed() || !win.isVisible()) return
@@ -237,6 +248,7 @@ export class SidebarModeManager {
     win.on('close', (event) => {
       if (this.destroying) return
       event.preventDefault()
+      if (this.getSettings().sidebarPinned) return
       win.hide()
     })
     win.on('closed', () => {

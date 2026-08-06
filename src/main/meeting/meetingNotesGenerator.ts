@@ -30,10 +30,11 @@ interface Job {
 const UPDATE_DEBOUNCE_MS = 2200
 
 function providerReady(settings: Settings): settings is Settings & {
-  aiProvider: 'anthropic' | 'openai'
+  aiProvider: 'anthropic' | 'openai' | 'xai'
 } {
   if (settings.aiProvider === 'anthropic') return Boolean(settings.anthropicApiKey)
   if (settings.aiProvider === 'openai') return Boolean(settings.openaiApiKey)
+  if (settings.aiProvider === 'xai') return Boolean(settings.xaiApiKey)
   return false
 }
 

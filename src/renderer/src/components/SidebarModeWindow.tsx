@@ -271,13 +271,15 @@ export default function SidebarModeWindow() {
           <button
             className={windowState.pinned ? 'active' : undefined}
             onClick={() => void togglePinned()}
-            title={
-              windowState.pinned ? 'Stop following across Spaces' : 'Show on every Space'
-            }
+            title={windowState.pinned ? 'Unpin sidebar' : 'Pin sidebar'}
           >
             {windowState.pinned ? <Pinned size={14} /> : <Pin size={14} />}
           </button>
-          <button onClick={() => void window.api.sidebar.close()} title="Close sidebar">
+          <button
+            onClick={() => void window.api.sidebar.close()}
+            disabled={windowState.pinned}
+            title={windowState.pinned ? 'Unpin to close sidebar' : 'Close sidebar'}
+          >
             <X size={15} />
           </button>
         </div>

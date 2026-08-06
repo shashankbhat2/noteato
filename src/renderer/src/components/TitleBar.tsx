@@ -5,6 +5,7 @@ const DOUBLE_CLICK_MS = 400
 
 interface Props {
   sidebarCollapsed: boolean
+  compact?: boolean
   onToggleSidebar: () => void
   onOpenSettings: () => void
 }
@@ -15,6 +16,7 @@ interface Props {
  */
 export default function TitleBar({
   sidebarCollapsed,
+  compact = false,
   onToggleSidebar,
   onOpenSettings
 }: Props) {
@@ -39,7 +41,7 @@ export default function TitleBar({
 
   return (
     <div
-      className={sidebarCollapsed ? 'title-bar collapsed' : 'title-bar'}
+      className={`title-bar${sidebarCollapsed ? ' collapsed' : ''}${compact ? ' compact' : ''}`}
       onMouseDown={handleMouseDown}
     >
       <div className="title-bar-actions">

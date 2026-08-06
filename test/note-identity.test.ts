@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { NoteStore } from '../src/main/storage'
@@ -33,6 +33,17 @@ describe('note identity', () => {
     expect(store.read(created.id).title).toBe('Launch notes')
   })
 
+  it('creates an untitled note in its own timestamped folder', () => {
+    const created = store.create()
+
+    expect(created.path).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[a-z0-9]{4,}\/untitled\.md$/
+    )
+    expect(created.folder).toBe(dirname(created.path))
+    expect(existsSync(join(dir, created.path))).toBe(true)
+    expect(store.bundledDirectory(created.id)).toBe(join(dir, created.folder))
+  })
+
   // The bug this refactor is about: a title change renames the file, so
   // anything holding the old path was pointing at nothing.
   it('follows a note across a rename', () => {
@@ -56,12 +67,12 @@ describe('note identity', () => {
   it('finds a note that was renamed on disk outside the app', () => {
     const created = store.create('Outside')
     store.read(created.id) // warm the index with the old location
-    const before = readdirSync(dir).find((f) => f.endsWith('.md'))!
-    renameSync(join(dir, before), join(dir, 'moved-by-hand.md'))
+    const folder = dirname(created.path)
+    renameSync(join(dir, created.path), join(dir, folder, 'moved-by-hand.md'))
 
     // The cached path no longer exists, so the index has to rebuild rather
     // than report the note as gone.
-    expect(store.resolvePath(created.id)).toBe('moved-by-hand.md')
+    expect(store.resolvePath(created.id)).toBe(`${folder}/moved-by-hand.md`)
     expect(store.read(created.id).title).toBe('Outside')
   })
 
@@ -90,6 +101,21 @@ describe('note identity', () => {
     const created = store.create('Doomed')
     store.delete(created.id)
     expect(() => store.resolvePath(created.id)).toThrow(/No note with id/)
+  })
+
+  it('deletes and restores an ordinary note together with its folder', () => {
+    const created = store.create()
+    const folder = created.folder
+
+    const deleted = store.delete(created.id)
+    expect(deleted.isFolder).toBe(true)
+    expect(deleted.originalPath).toBe(folder)
+    expect(existsSync(join(dir, folder))).toBe(false)
+
+    const restored = store.restore(deleted.trashName, deleted.originalPath, deleted.isFolder)
+    expect(restored?.id).toBe(created.id)
+    expect(restored?.path).toBe(created.path)
+    expect(existsSync(join(dir, created.path))).toBe(true)
   })
 
   it('keeps pin and reminder on the note they were set on, across a rename', () => {

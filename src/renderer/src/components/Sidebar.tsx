@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   IconBell as Bell,
+  IconChevronDown as ChevronDown,
   IconDots as Dots,
+  IconFileDescription as TemplateIcon,
   IconLink as Link,
   IconPlus as Plus,
   IconSearch as Search,
@@ -10,6 +12,7 @@ import {
   IconTrash as Trash
 } from '@tabler/icons-react'
 import type { NoteSummary } from '../../../shared/types'
+import type { NoteTemplate } from '../../../shared/noteTemplates'
 import appPackage from '../../../../package.json'
 import { REMINDER_PRESETS } from '../reminderPresets'
 import ContextMenu, { type MenuItem } from './ContextMenu'
@@ -56,6 +59,9 @@ interface Props {
   onOpenImport: () => void
   onSearch: () => void
   onCreateNote: () => void
+  onCreateMeeting: () => void
+  onCreateFromTemplate: (template: NoteTemplate, kind: 'note' | 'meeting') => Promise<void>
+  onDeleteTemplate: (template: NoteTemplate) => void
   onOpenSettings: () => void
   onOpenStorageLocation: () => void
   onOpenHelp: () => void
@@ -81,6 +87,9 @@ export default function Sidebar({
   onOpenImport,
   onSearch,
   onCreateNote,
+  onCreateMeeting,
+  onCreateFromTemplate,
+  onDeleteTemplate,
   onOpenSettings,
   onOpenStorageLocation,
   onOpenHelp
@@ -95,6 +104,8 @@ export default function Sidebar({
   const [editValue, setEditValue] = useState('')
   const [utilityMenu, setUtilityMenu] = useState<{ x: number; y: number } | null>(null)
   const [version, setVersion] = useState(appPackage.version)
+  const [templates, setTemplates] = useState<NoteTemplate[]>([])
+  const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -103,6 +114,21 @@ export default function Sidebar({
     })
     return () => {
       cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = (): void => {
+      void window.api.templates.list().then((next) => {
+        if (!cancelled) setTemplates(next)
+      })
+    }
+    load()
+    window.addEventListener('noteato:templates-changed', load)
+    return () => {
+      cancelled = true
+      window.removeEventListener('noteato:templates-changed', load)
     }
   }, [])
 
@@ -171,6 +197,31 @@ export default function Sidebar({
               }
             : { label: 'Remove from Noteato', onClick: () => onRemoveNote(note) }
           : { label: 'Delete', danger: true, onClick: () => onDeleteNote(note) }
+      ]
+    })
+  }
+
+  const createFromTemplate = (template: NoteTemplate, kind: 'note' | 'meeting'): void => {
+    if (creatingTemplateId) return
+    setCreatingTemplateId(template.id)
+    void onCreateFromTemplate(template, kind).finally(() => setCreatingTemplateId(null))
+  }
+
+  const openTemplateMenu = (event: React.MouseEvent, template: NoteTemplate): void => {
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    setMenu({
+      x: rect.right - 190,
+      y: rect.bottom + 5,
+      items: [
+        { label: 'Create note', onClick: () => createFromTemplate(template, 'note') },
+        { label: 'Create meeting', onClick: () => createFromTemplate(template, 'meeting') },
+        { separator: true, label: '' },
+        {
+          label: 'Delete',
+          danger: true,
+          onClick: () => onDeleteTemplate(template)
+        }
       ]
     })
   }
@@ -263,16 +314,52 @@ export default function Sidebar({
           </button>
           <button
             className="sidebar-new"
-            onClick={onCreateNote}
-            title={`New note · ${MODIFIER_HINT}N`}
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect()
+              setMenu({
+                x: rect.right - 174,
+                y: rect.bottom + 5,
+                items: [
+                  { label: 'New note', onClick: onCreateNote },
+                  { label: 'New meeting', onClick: onCreateMeeting }
+                ]
+              })
+            }}
+            title="Create new"
           >
             <Plus size={15} />
             <span>New</span>
+            <ChevronDown size={11} className="sidebar-new-chevron" />
           </button>
         </div>
       </div>
 
       <div className="sidebar-scroll">
+        {templates.length > 0 && (
+          <>
+            <h2 className="sidebar-group-title">Templates</h2>
+            <ul className="note-list sidebar-template-list">
+              {templates.map((template) => (
+                <li key={template.id} className="sidebar-template-item">
+                  <div className="sidebar-template-copy">
+                    <TemplateIcon size={13} />
+                    <span>{template.name}</span>
+                    {creatingTemplateId === template.id && <small>Creating…</small>}
+                  </div>
+                  <button
+                    type="button"
+                    className="row-icon-btn sidebar-template-menu"
+                    title={`${template.name} actions`}
+                    aria-label={`${template.name} actions`}
+                    onClick={(event) => openTemplateMenu(event, template)}
+                  >
+                    <Dots size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         {notes.length === 0 && <p className="sidebar-empty">No notes yet.</p>}
         {/* Two groups, and only when there is something to tell apart — an
             unpinned library shouldn't carry a "Notes" heading over its only
@@ -285,7 +372,9 @@ export default function Sidebar({
         )}
         {rest.length > 0 && (
           <>
-            {pinned.length > 0 && <h2 className="sidebar-group-title">Notes</h2>}
+            {(pinned.length > 0 || templates.length > 0) && (
+              <h2 className="sidebar-group-title">Notes</h2>
+            )}
             <ul className="note-list">{rest.map(renderNote)}</ul>
           </>
         )}

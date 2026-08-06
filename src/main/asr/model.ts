@@ -5,6 +5,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { app } from 'electron'
+import type { ModelStatus } from '../../shared/types'
 
 const run = promisify(execFile)
 
@@ -20,8 +21,6 @@ const MODEL_NAME = 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8'
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
 
 export const MODEL_ENGINE = 'sherpa-onnx/parakeet-tdt-0.6b-v3-int8'
-/** Roughly, for the download prompt. The archive is bzip2 so the disk cost is higher. */
-export const MODEL_DOWNLOAD_MB = 680
 
 const REQUIRED_FILES = [
   'encoder.int8.onnx',
@@ -62,19 +61,64 @@ export function isModelInstalled(): boolean {
 let inFlight: Promise<void> | null = null
 
 /**
+ * Last known status. Held here rather than derived on demand because a
+ * download's progress and a failure's message exist nowhere on disk — an
+ * interrupted download leaves the staging directory behind and nothing else.
+ */
+let status: ModelStatus | null = null
+const listeners = new Set<(status: ModelStatus) => void>()
+
+export function getModelStatus(): ModelStatus {
+  // Resolved lazily so the first caller reflects a model installed by an
+  // earlier run, and re-checked while absent in case one appeared since.
+  if (!status || status.state === 'absent') {
+    status = isModelInstalled() ? { state: 'installed' } : { state: 'absent' }
+  }
+  return status
+}
+
+export function onModelStatus(listener: (status: ModelStatus) => void): () => void {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+function setStatus(next: ModelStatus): void {
+  status = next
+  for (const listener of listeners) listener(next)
+}
+
+/**
  * Fetch and unpack the model into userData.
  *
  * Concurrent callers share one download: the tray, a note's button and a queued
  * transcription can all arrive at once, and three parallel 680 MB downloads
  * into the same directory would corrupt each other.
  */
-export function ensureModel(onProgress?: (received: number, total: number) => void): Promise<void> {
-  if (isModelInstalled()) return Promise.resolve()
+export function ensureModel(): Promise<void> {
+  if (isModelInstalled()) {
+    setStatus({ state: 'installed' })
+    return Promise.resolve()
+  }
   if (inFlight) return inFlight
 
-  inFlight = download(onProgress).finally(() => {
-    inFlight = null
-  })
+  // Announced before the first byte arrives: the request can take a moment to
+  // open, and a toggle that appears to do nothing reads as broken.
+  setStatus({ state: 'downloading', received: 0, total: 0 })
+
+  inFlight = download((received, total) => setStatus({ state: 'downloading', received, total }))
+    .then(() => {
+      setStatus({ state: 'installed' })
+    })
+    .catch((error: unknown) => {
+      setStatus({
+        state: 'failed',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      throw error
+    })
+    .finally(() => {
+      inFlight = null
+    })
   return inFlight
 }
 

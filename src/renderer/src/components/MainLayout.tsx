@@ -1,6 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
-import { IconMicrophone as Microphone, IconPlus as Plus } from '@tabler/icons-react'
-import type { DeletedEntry, Note, NoteSummary, TrashEntry } from '../../../shared/types'
+import type {
+  DeletedEntry,
+  Note,
+  NoteSummary,
+  SettingsTab,
+  TrashEntry
+} from '../../../shared/types'
+import type { NoteTemplate } from '../../../shared/noteTemplates'
+import { aiErrorMessage } from '../../../shared/aiError'
 import {
   MAX_PANES,
   PANE_MIN_PX,
@@ -22,10 +29,12 @@ import ConfirmDialog from './ConfirmDialog'
 import SearchModal from './SearchModal'
 import ImportNotionModal from './ImportNotionModal'
 import ImportModal from './ImportModal'
+import HomeView from './HomeView'
 
 const UNDO_TOAST_MS = 7000
 const SIDEBAR_COLLAPSED_KEY = 'noteato:sidebarCollapsed'
 const OPEN_PANES_KEY = 'noteato:panes'
+const SIDEBAR_OVERLAY_QUERY = '(max-width: 760px)'
 
 // Last session's panes, stored by note id — paths can go stale between
 // sessions, so they're re-resolved against the current note list on restore.
@@ -60,6 +69,7 @@ function readStoredPanes(): StoredPanes | null {
 
 type ConfirmState =
   | { kind: 'note'; note: NoteSummary }
+  | { kind: 'template'; template: NoteTemplate }
   | { kind: 'purge'; entry: TrashEntry }
   | { kind: 'empty-trash' }
   | null
@@ -86,6 +96,10 @@ export default function MainLayout() {
   const [paneRatios, setPaneRatios] = useState<number[]>([1])
   const [dropSide, setDropSide] = useState<'left' | 'right' | null>(null)
   const [draggingNote, setDraggingNote] = useState<NoteSummary | null>(null)
+  // Which pane Settings should land on. Main sends one when it opens Settings
+  // on the user's behalf — the meeting gate points at 'speech'. Undefined
+  // leaves the modal on its own default.
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>(undefined)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -97,6 +111,10 @@ export default function MainLayout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
   )
+  const [sidebarOverlay, setSidebarOverlay] = useState(
+    () => window.matchMedia(SIDEBAR_OVERLAY_QUERY).matches
+  )
+  const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false)
   const editorAreaRef = useRef<HTMLDivElement>(null)
 
   const focusedIndex = Math.max(
@@ -120,13 +138,38 @@ export default function MainLayout() {
 
 
 
+  const sidebarHidden = sidebarOverlay ? !sidebarOverlayOpen : sidebarCollapsed
+
   const toggleSidebar = (): void => {
+    if (sidebarOverlay) {
+      setSidebarOverlayOpen((open) => !open)
+      return
+    }
     setSidebarCollapsed((prev) => {
       const next = !prev
       localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
       return next
     })
   }
+
+  useEffect(() => {
+    const query = window.matchMedia(SIDEBAR_OVERLAY_QUERY)
+    const update = (event: MediaQueryListEvent): void => {
+      setSidebarOverlay(event.matches)
+      setSidebarOverlayOpen(false)
+    }
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
+    if (!sidebarOverlayOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setSidebarOverlayOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [sidebarOverlayOpen])
 
   // --- Panes ---------------------------------------------------------------
 
@@ -271,9 +314,9 @@ export default function MainLayout() {
   useEffect(() => {
     document.documentElement.style.setProperty(
       '--sidebar-w',
-      sidebarCollapsed ? '0px' : 'var(--sidebar-expanded-w)'
+      sidebarOverlay || sidebarCollapsed ? '0px' : 'var(--sidebar-expanded-w)'
     )
-  }, [sidebarCollapsed])
+  }, [sidebarCollapsed, sidebarOverlay])
 
   // Reload notes + trash. Reconciles open panes' titles and paths by id.
   const refresh = async (): Promise<NoteSummary[]> => {
@@ -437,8 +480,8 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panes, focusedKey])
 
-  // Create a note the agent asked for. The library is flat, so all it picks is
-  // a title.
+  // Create a note the agent asked for. Storage gives it an immutable folder;
+  // this surface only needs to supply the title and open the returned id.
 
   // A pane's stored path is its bootstrap value and can lag behind a rename, so
   // OS-level actions resolve the note's current path by id — refreshing once if
@@ -519,6 +562,11 @@ export default function MainLayout() {
     if (c.kind === 'empty-trash') {
       await window.api.notes.emptyTrash()
       await refresh()
+      return
+    }
+    if (c.kind === 'template') {
+      await window.api.templates.delete(c.template.id)
+      window.dispatchEvent(new Event('noteato:templates-changed'))
       return
     }
     const token = await window.api.notes.delete(c.note.id)
@@ -636,6 +684,7 @@ export default function MainLayout() {
     closePane,
     toggleSidebar,
     setSettingsOpen,
+    setSettingsTab,
     setSearchOpen,
     focusedKey,
     focusedPane
@@ -648,13 +697,14 @@ export default function MainLayout() {
     closePane,
     toggleSidebar,
     setSettingsOpen,
+    setSettingsTab,
     setSearchOpen,
     focusedKey,
     focusedPane
   }
 
   useEffect(() => {
-    const unsubscribe = window.api.shortcuts.subscribe((action) => {
+    const unsubscribe = window.api.shortcuts.subscribe((action, payload) => {
       const h = latest.current
       switch (action) {
         case 'new-note':
@@ -670,6 +720,7 @@ export default function MainLayout() {
           h.setNotionGuideOpen(true)
           break
         case 'open-settings':
+          h.setSettingsTab(payload as SettingsTab | undefined)
           h.setSettingsOpen(true)
           break
         case 'search':
@@ -756,21 +807,14 @@ export default function MainLayout() {
         )
       case 'empty':
         return (
-          <div className="empty-pane">
-            <div className="empty-pane-actions">
-              <button className="empty-pane-new" onClick={() => void handleCreate()}>
-                <Plus size={16} />
-                <span>New note</span>
-              </button>
-              <button
-                className="empty-pane-new empty-pane-meeting"
-                onClick={() => void handleCreateMeeting()}
-              >
-                <Microphone size={16} />
-                <span>New meeting</span>
-              </button>
-            </div>
-          </div>
+          <HomeView
+            onCreateNote={handleCreate}
+            onCreateMeeting={handleCreateMeeting}
+            onOpenNote={async (created) => {
+              await refresh()
+              openInFocused(noteView(created))
+            }}
+          />
         )
     }
   }
@@ -778,23 +822,42 @@ export default function MainLayout() {
   return (
     <div className="app-shell">
       <div
-        className={sidebarCollapsed ? 'window-drag-edge sidebar-collapsed' : 'window-drag-edge'}
+        className={sidebarOverlay || sidebarCollapsed ? 'window-drag-edge sidebar-collapsed' : 'window-drag-edge'}
         aria-hidden="true"
       />
       <TitleBar
-        sidebarCollapsed={sidebarCollapsed}
+        sidebarCollapsed={sidebarHidden}
+        compact={sidebarOverlay}
         onToggleSidebar={toggleSidebar}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => {
+          if (sidebarOverlay) setSidebarOverlayOpen(false)
+          setSettingsTab(undefined)
+          setSettingsOpen(true)
+        }}
       />
-      <div className={sidebarCollapsed ? 'app-body sidebar-collapsed' : 'app-body'}>
+      <div
+        className={
+          `app-body${sidebarHidden ? ' sidebar-collapsed' : ''}${sidebarOverlay ? ' sidebar-overlay' : ''}`
+        }
+      >
+        {sidebarOverlay && sidebarOverlayOpen && (
+          <button
+            type="button"
+            className="sidebar-overlay-backdrop"
+            aria-label="Close sidebar"
+            onClick={() => setSidebarOverlayOpen(false)}
+          />
+        )}
         <Sidebar
           notes={notes}
           trashCount={trash.length}
           activeNoteId={focusedPane?.view.kind === 'note' ? focusedPane.view.id : null}
-          collapsed={sidebarCollapsed}
-          onSelect={(note, inNewPane) =>
-            inNewPane ? openInNewPane(noteView(note)) : openInFocused(noteView(note))
-          }
+          collapsed={sidebarHidden}
+          onSelect={(note, inNewPane) => {
+            if (inNewPane) openInNewPane(noteView(note))
+            else openInFocused(noteView(note))
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+          }}
           onDeleteNote={requestDeleteNote}
           onRemoveNote={(note) => void handleRemoveExternal(note)}
           onRenameNote={(note, title) => void handleRenameNote(note, title)}
@@ -808,17 +871,58 @@ export default function MainLayout() {
             setDraggingNote(null)
             setDropSide(null)
           }}
-          onOpenTrash={() => openInFocused({ kind: 'trash' })}
-          onOpenImport={() => setImportOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenTrash={() => {
+            openInFocused({ kind: 'trash' })
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+          }}
+          onOpenImport={() => {
+            setImportOpen(true)
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+          }}
+          onOpenSettings={() => {
+            setSettingsTab(undefined)
+            setSettingsOpen(true)
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+          }}
           onOpenStorageLocation={() => {
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
             void window.api.notes.chooseFolder().then((dir) => {
               if (dir) void refresh()
             })
           }}
-          onOpenHelp={() => setHelpOpen(true)}
-          onSearch={() => setSearchOpen(true)}
-          onCreateNote={() => void handleCreate()}
+          onOpenHelp={() => {
+            setHelpOpen(true)
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+          }}
+          onSearch={() => {
+            setSearchOpen(true)
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+          }}
+          onCreateNote={() => {
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+            void handleCreate()
+          }}
+          onCreateMeeting={() => {
+            if (sidebarOverlay) setSidebarOverlayOpen(false)
+            void handleCreateMeeting()
+          }}
+          onCreateFromTemplate={async (template: NoteTemplate, kind: 'note' | 'meeting') => {
+            try {
+              const created =
+                kind === 'meeting'
+                  ? await window.api.templates.createMeeting(template.id)
+                  : await window.api.templates.createNote(template.id)
+              if (!created) return
+              await refresh()
+              openInFocused(noteView(created))
+              if (sidebarOverlay) setSidebarOverlayOpen(false)
+            } catch (error) {
+              showNotionStatus(aiErrorMessage(error))
+            }
+          }}
+          onDeleteTemplate={(template: NoteTemplate) =>
+            setConfirm({ kind: 'template', template })
+          }
         />
         <div className="editor-area" ref={editorAreaRef}>
           {/* Panes left to right, with a draggable seam between each pair. The
@@ -886,7 +990,11 @@ export default function MainLayout() {
       </div>
       {helpOpen && <ShortcutsHelp onClose={() => setHelpOpen(false)} />}
       {settingsOpen && (
-        <SettingsModal onClose={() => setSettingsOpen(false)} onNotesDirChanged={refresh} />
+        <SettingsModal
+          initialTab={settingsTab}
+          onClose={() => setSettingsOpen(false)}
+          onNotesDirChanged={refresh}
+        />
       )}
       {importOpen && (
         <ImportModal
@@ -915,6 +1023,8 @@ export default function MainLayout() {
           title={
             confirm.kind === 'note'
               ? 'Delete note?'
+              : confirm.kind === 'template'
+                ? 'Delete template?'
               : confirm.kind === 'purge'
                 ? 'Delete forever?'
                 : 'Empty trash?'
@@ -922,11 +1032,19 @@ export default function MainLayout() {
           message={
             confirm.kind === 'note'
               ? `“${confirm.note.title || 'Untitled'}” will be moved to the trash.`
+              : confirm.kind === 'template'
+                ? `“${confirm.template.name}” will be permanently deleted. Notes already created from it will not be affected.`
               : confirm.kind === 'purge'
                 ? `“${confirm.entry.title || 'Untitled'}” will be permanently deleted. This cannot be undone.`
                 : 'Everything in the trash will be permanently deleted. This cannot be undone.'
           }
-          confirmLabel={confirm.kind === 'note' ? 'Delete' : 'Delete forever'}
+          confirmLabel={
+            confirm.kind === 'note'
+              ? 'Delete'
+              : confirm.kind === 'template'
+                ? 'Delete template'
+                : 'Delete forever'
+          }
           danger
           onConfirm={performDelete}
           onCancel={() => setConfirm(null)}

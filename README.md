@@ -7,8 +7,8 @@
 <p align="center">A minimal, block-based note taking app for Mac. Markdown, search, dictation, side-by-side panes, reminders, and optional AI — all local, nothing behind an account.</p>
 
 <p align="center">
-  <a href="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml"><img src="https://github.com/shashankbhat2/noat/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://github.com/shashankbhat2/noat/releases/latest"><img src="https://img.shields.io/github/v/release/shashankbhat2/noat" alt="Latest release"></a>
+  <a href="https://github.com/shashankbhat2/noteato/actions/workflows/ci.yml"><img src="https://github.com/shashankbhat2/noteato/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/shashankbhat2/noteato/releases/latest"><img src="https://img.shields.io/github/v/release/shashankbhat2/noteato" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
 
@@ -75,7 +75,7 @@ No telemetry, no accounts, no auto-updater phoning home. It's an Electron app, s
 
 ## Install
 
-Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noat/releases/latest), open it, and drag **Noteato.app** into **Applications**:
+Grab the latest `.dmg` from [Releases](https://github.com/shashankbhat2/noteato/releases/latest), open it, and drag **Noteato.app** into **Applications**:
 
 - `arm64` is for Apple Silicon Macs (M1 and newer).
 - `x64` is for Intel Macs.
@@ -93,7 +93,34 @@ This app isn't signed with an Apple Developer ID (that costs $99/year, and this 
 
   The app isn't actually damaged — this message is just what unsigned + quarantined apps get on newer macOS. Run the command above, then open it normally.
 
-This is the standard tradeoff for unsigned open-source Mac apps — you're trusting the build, not Apple's notarization service. Check the [Releases](https://github.com/shashankbhat2/noat/releases) page for the commit each build was made from if you want to verify it yourself, or build from source below.
+This is the standard tradeoff for unsigned open-source Mac apps — you're trusting the build, not Apple's notarization service. Check the [Releases](https://github.com/shashankbhat2/noteato/releases) page for the commit each build was made from if you want to verify it yourself, or build from source below.
+
+### Microphone or Screen Recording permission keeps appearing
+
+Always install an update by quitting Noteato, dragging the new **Noteato.app**
+into **Applications**, and choosing **Replace**. Launch only
+`/Applications/Noteato.app`; running a copy from the DMG, Downloads, or another
+folder makes macOS treat it as a separate installation and ask again.
+
+Noteato's release builds are not signed with a persistent Apple Developer ID,
+so macOS may also ask for Microphone and **Screen & System Audio Recording**
+permission again after an update. The permission belongs to macOS, not to
+Noteato. Grant both under **System Settings → Privacy & Security**, then quit
+and reopen Noteato when macOS requests it.
+
+If either prompt keeps looping after permission was granted, quit every copy of
+Noteato, remove any duplicate copies outside Applications, and reset the stale
+permission records:
+
+```bash
+tccutil reset Microphone com.noteato.app
+tccutil reset ScreenCapture com.noteato.app
+```
+
+Then open `/Applications/Noteato.app`, grant both permissions once, and restart
+the app. A persistent permission identity across upgrades requires a release
+signed with an Apple Developer ID; until that is configured, a new unsigned
+build can legitimately require permission again.
 
 ### Dictation setup
 
@@ -108,8 +135,8 @@ The Enhance, Ask-note, and Agent features are off until you add a key. Open **Se
 Requires Node 20+.
 
 ```bash
-git clone https://github.com/shashankbhat2/noat.git
-cd noat
+git clone https://github.com/shashankbhat2/noteato.git
+cd noteato
 npm install
 npm run dev              # run in development
 npm run build:mac        # build unsigned arm64 and x64 DMG/ZIP artifacts

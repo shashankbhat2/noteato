@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   AUDIO_FILE,
+  capturePaths,
   createCaptureDir,
   MIC_TEMP_FILE,
   removeCaptureAudio,
@@ -33,6 +34,18 @@ describe('meeting capture directory', () => {
     expect(basename(capture.systemPath)).toBe(SYSTEM_TEMP_FILE)
     expect(basename(capture.micPath).startsWith('.')).toBe(true)
     expect(basename(capture.systemPath).startsWith('.')).toBe(true)
+  })
+
+  it('can target an existing note folder for its first recording', () => {
+    const root = mkdtempSync(join(tmpdir(), 'noteato-existing-note-'))
+    roots.push(root)
+
+    const capture = capturePaths(root)
+
+    expect(capture.dir).toBe(root)
+    expect(capture.audioPath).toBe(join(root, AUDIO_FILE))
+    expect(capture.micPath).toBe(join(root, MIC_TEMP_FILE))
+    expect(capture.systemPath).toBe(join(root, SYSTEM_TEMP_FILE))
   })
 
   it('removes working tracks after transcription but keeps the final recording', () => {

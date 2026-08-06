@@ -57,10 +57,12 @@ const EMPTY: Transcript = {
  */
 export async function transcribeCapture(
   server: SherpaServer,
-  captureDir: string,
-  onProgress?: (received: number, total: number) => void
+  captureDir: string
 ): Promise<MeetingTranscript> {
-  await ensureModel(onProgress)
+  // Normally a no-op by now — onboarding or Settings downloaded the model long
+  // before a recording existed. It remains the backstop for an install that
+  // enabled meetings and quit before the download finished.
+  await ensureModel()
 
   const micTemp = join(captureDir, MIC_TEMP_FILE)
   const systemTemp = join(captureDir, SYSTEM_TEMP_FILE)

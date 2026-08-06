@@ -2,6 +2,51 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-06
+
+### Added
+
+- AI-generated note templates. Any note can become a reusable template through
+  **Make a template**, using the provider-aware Auto model without adding a
+  message to note chat. Templates appear on Home and above the note groups in
+  the sidebar.
+- Explicit template actions for creating a regular note, starting a recorded
+  meeting from the template, or permanently deleting the template. Clicking a
+  template itself no longer creates content accidentally.
+- A Home chat that starts in place from a central composer, keeps persistent
+  conversation history, and leaves New note and New meeting close at hand.
+- Provider-aware AI model settings shared by text enhancements and chat. Auto
+  chooses an available provider without exposing its underlying model, while
+  unavailable providers and models remain disabled until their API key is set.
+- AI provider credit or billing status in Settings where the provider exposes
+  that information.
+- An on-device speech-model setup and download status flow for meeting
+  transcription.
+
+### Changed
+
+- The sidebar is fixed at normal window sizes and becomes an overlay drawer in
+  compact windows. The app now keeps a usable minimum width, and the sidebar's
+  New control offers both New note and New meeting.
+- Note chat is a compact single composer that expands into its panel without
+  duplicating or moving the input. Agent activity is shown in order from
+  preparation through actions and completion, with provider errors surfaced
+  directly and no delayed **Apply to note** step.
+- Meeting-note enrichment now streams into the note beneath a full-width glass
+  progress edge. Transcript editing uses a quiet left-border focus indicator,
+  full text blocks, and automatically growing editors.
+- Regular notes now use the same folder-backed structure as meetings, beginning
+  with `untitled.md`.
+
+### Fixed
+
+- Starting a recording from an existing note now appends its audio and
+  transcript instead of losing the new capture.
+- A pinned compact sidebar no longer closes when its close control is pressed.
+- The responsive sidebar toggle remains clickable above the overlay.
+- Meeting and note AI failures now preserve and display the provider's useful
+  error detail.
+
 ## [1.2.0] - 2026-07-30
 
 A deliberate strip-back. Noteato had accumulated a folder tree, a tag shelf, a
@@ -364,7 +409,9 @@ that earns its complexity: side-by-side panes.
 - Light/dark theme, matched to the native window chrome.
 - Quick-note shortcuts: `⌘T` new note, `⌘⇧N` new sticky note, `⌘W` close tab, `⌘,` settings.
 
-[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/shashankbhat2/noteato/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/shashankbhat2/noteato/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/shashankbhat2/noteato/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/shashankbhat2/noteato/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/shashankbhat2/noteato/compare/v1.0.5...v1.1.0
 [0.8.0]: https://github.com/shashankbhat2/noteato/compare/v0.7.3...v0.8.0

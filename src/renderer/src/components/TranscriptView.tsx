@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { MeetingTranscript } from '../../../shared/meetingTranscript'
 import { displayName, timestamp } from '../../../shared/meetingTranscript'
 
 interface Props {
   transcript: MeetingTranscript
-  /** Highlights the segment being played and lets a click seek to it. */
+  /** Marks the segment being played at its left edge and lets a click seek to it. */
   playheadSeconds?: number
   onSeek?: (seconds: number) => void
   onChange?: (sourceIndex: number, text: string) => void
@@ -23,12 +23,29 @@ function TranscriptText({
   onCommit?: () => void
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
-  useLayoutEffect(() => {
+  const resize = (): void => {
     const element = ref.current
     if (!element) return
     element.style.height = '0px'
     element.style.height = `${element.scrollHeight}px`
+  }
+
+  useLayoutEffect(() => {
+    resize()
   }, [value])
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    let width = element.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return
+      width = element.clientWidth
+      resize()
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   return (
     <textarea

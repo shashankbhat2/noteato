@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  IconAlertCircle as AlertCircle,
   IconArrowUp as ArrowUp,
   IconCheck as Check,
-  IconChevronDown as ChevronDown,
   IconLoader2 as Loader2,
   IconMicrophone as Microphone,
-  IconPencil as Pencil,
-  IconSquare as Square
+  IconSquare as Square,
+  IconX as X
 } from '@tabler/icons-react'
 import type { Settings } from '../../../shared/types'
 import { meetingMarkdown } from '../../../shared/meetingTranscript'
@@ -16,9 +16,23 @@ import {
 } from '../../../shared/noteAssistantContext'
 import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
 import { parseChatOutput } from '../../../shared/chatEdits'
+import { aiErrorMessage } from '../../../shared/aiError'
+import {
+  parseTemplateOutput,
+  visibleAgentMessage
+} from '../../../shared/noteTemplates'
+import {
+  AI_PROVIDER_LABELS,
+  AI_PROVIDER_ORDER,
+  AUTO_AI_MODEL_ID,
+  availableAiProviders,
+  hasAiProviderKey,
+  listedAiModels,
+  normalizeAiModelChoice,
+  resolveAiModelChoice
+} from '../../../shared/aiModels'
 import type { NoteatoEditor } from '../noteLink'
-import { AiNotConfiguredError, aiStream, isAiConfigured } from '../ai/client'
-import { AI_MODELS, DEFAULT_CHAT_MODELS } from '../ai/models'
+import { aiStream, isAiConfigured } from '../ai/client'
 import { noteActionSpec } from '../ai/noteActions'
 import { linkifyBlocks } from '../linkify'
 import { ensureTitleBlock } from '../titleBlock'
@@ -34,9 +48,17 @@ export interface AiPanelSubject {
 interface ChatTurn {
   role: 'user' | 'assistant'
   content: string
-  proposedMarkdown?: string
-  sourceMarkdown?: string
-  editApplied?: boolean
+  events?: AgentEvent[]
+}
+
+type AgentEventKind = 'activity' | 'message' | 'action' | 'result' | 'error'
+type AgentEventStatus = 'active' | 'done' | 'error'
+
+interface AgentEvent {
+  id: string
+  kind: AgentEventKind
+  text: string
+  status?: AgentEventStatus
 }
 
 /**
@@ -49,6 +71,10 @@ export default function NoteAiPanel({
   editor,
   active,
   activeTab,
+  draft,
+  onDraftChange,
+  onOpen,
+  onClose,
   onError,
   onEditApplied
 }: {
@@ -56,21 +82,21 @@ export default function NoteAiPanel({
   editor: NoteatoEditor
   active: boolean
   activeTab: NoteAssistantTab
+  draft: string
+  onDraftChange: (value: string) => void
+  onOpen: () => void
+  onClose: () => void
   onError: (message: string) => void
   onEditApplied: () => void
 }) {
-  const [input, setInput] = useState('')
   const [threads, setThreads] = useState<Record<string, ChatTurn[]>>({})
   const [pending, setPending] = useState(false)
   const [aiSettings, setAiSettings] = useState<Settings | null>(null)
-  const [selectedModel, setSelectedModel] = useState('')
-  const [modelMenuOpen, setModelMenuOpen] = useState(false)
-  const [applyingEditIndex, setApplyingEditIndex] = useState<number | null>(null)
+  const [selectedModel, setSelectedModel] = useState(AUTO_AI_MODEL_ID)
   const cancelRef = useRef<(() => void) | null>(null)
   const sendLockRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const modelSelectRef = useRef<HTMLDivElement>(null)
   const dictatedChunksRef = useRef<Array<{ start: number; text: string }>>([])
 
   const {
@@ -87,7 +113,8 @@ export default function NoteAiPanel({
       const suffix = end < current.length && /\s/.test(current[end]) ? '' : ' '
       const addition = `${prefix}${transcript.trim()}${suffix}`
       dictatedChunksRef.current.push({ start, text: addition })
-      setInput(`${current.slice(0, start)}${addition}${current.slice(end)}`)
+      onDraftChange(`${current.slice(0, start)}${addition}${current.slice(end)}`)
+      if (!active) onOpen()
       requestAnimationFrame(() => {
         const nextCaret = start + addition.length
         inputRef.current?.focus({ preventScroll: true })
@@ -97,12 +124,14 @@ export default function NoteAiPanel({
     onUndo: () => {
       const chunk = dictatedChunksRef.current.pop()
       if (!chunk) return
-      setInput((current) => {
-        if (current.slice(chunk.start, chunk.start + chunk.text.length) === chunk.text) {
-          return `${current.slice(0, chunk.start)}${current.slice(chunk.start + chunk.text.length)}`
-        }
-        return current.endsWith(chunk.text) ? current.slice(0, -chunk.text.length) : current
-      })
+      const current = inputRef.current?.value ?? draft
+      if (current.slice(chunk.start, chunk.start + chunk.text.length) === chunk.text) {
+        onDraftChange(
+          `${current.slice(0, chunk.start)}${current.slice(chunk.start + chunk.text.length)}`
+        )
+      } else if (current.endsWith(chunk.text)) {
+        onDraftChange(current.slice(0, -chunk.text.length))
+      }
     }
   })
 
@@ -120,24 +149,7 @@ export default function NoteAiPanel({
 
   useEffect(() => {
     dictatedChunksRef.current = []
-    setApplyingEditIndex(null)
   }, [subject.id])
-
-  useEffect(() => {
-    if (!modelMenuOpen) return
-    const closeOnPointer = (event: PointerEvent): void => {
-      if (!modelSelectRef.current?.contains(event.target as Node)) setModelMenuOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setModelMenuOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOnPointer)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOnPointer)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [modelMenuOpen])
 
   useEffect(() => {
     if (!active && isRecording) toggleDictation()
@@ -146,23 +158,22 @@ export default function NoteAiPanel({
   useEffect(() => {
     const el = scrollRef.current
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 90) el.scrollTop = el.scrollHeight
-  }, [thread.length, pending])
+  }, [thread, pending])
 
   useEffect(() => {
-    if (!active) return
     let cancelled = false
-    void window.api.settings.get().then((settings) => {
-      if (cancelled) return
-      setAiSettings(settings)
-      const options = settings.aiProvider === 'none' ? [] : AI_MODELS[settings.aiProvider]
-      setSelectedModel((current) => {
-        if (options.some((option) => option.id === current)) return current
-        if (options.some((option) => option.id === settings.aiModel)) return settings.aiModel
-        return settings.aiProvider === 'none' ? '' : DEFAULT_CHAT_MODELS[settings.aiProvider]
+    const load = (): void => {
+      void window.api.settings.get().then((settings) => {
+        if (cancelled) return
+        setAiSettings(settings)
+        setSelectedModel(normalizeAiModelChoice(settings.aiModel))
       })
-    })
+    }
+    load()
+    window.addEventListener('noteato:ai-settings-changed', load)
     return () => {
       cancelled = true
+      window.removeEventListener('noteato:ai-settings-changed', load)
     }
   }, [active])
 
@@ -175,17 +186,20 @@ export default function NoteAiPanel({
     system: string,
     prompt: string,
     onText: (text: string) => void
-  ): Promise<string | null> => {
+  ): Promise<string> => {
     const settings: Settings = await window.api.settings.get()
-    const availableModels =
-      settings.aiProvider === 'none' ? [] : AI_MODELS[settings.aiProvider].map((option) => option.id)
-    const model = availableModels.includes(selectedModel) ? selectedModel : undefined
-    setPending(true)
+    const selected = resolveAiModelChoice(selectedModel, settings.aiProvider, settings)
     let streamed = ''
     try {
       const final = await aiStream(
         settings,
-        { system, prompt, maxTokens: 4096, model },
+        {
+          system,
+          prompt,
+          maxTokens: 4096,
+          provider: selected.provider,
+          model: selected.model
+        },
         (delta) => {
           streamed += delta
           onText(streamed)
@@ -195,31 +209,65 @@ export default function NoteAiPanel({
         }
       )
       return (final || streamed).trim()
-    } catch (error) {
-      onError(
-        error instanceof AiNotConfiguredError
-          ? error.message
-          : 'That request failed. Check your provider settings and try again.'
-      )
-      return null
     } finally {
       cancelRef.current = null
-      setPending(false)
     }
   }
 
   const send = async (): Promise<void> => {
-    const question = input.trim()
+    const question = draft.trim()
     if (!question || pending || sendLockRef.current || !chatEnabled) return
     sendLockRef.current = true
+    setPending(true)
+    const history = [...thread, { role: 'user' as const, content: question }]
+    let events: AgentEvent[] = [
+      {
+        id: 'context',
+        kind: 'activity',
+        text: 'Reading the note and conversation context',
+        status: 'active'
+      }
+    ]
+    const showAssistant = (): void => {
+      const conversationalContent =
+        events.find((event) => event.kind === 'message')?.text ??
+        events.find((event) => event.kind === 'error')?.text ??
+        ''
+      setThreads((previous) => ({
+        ...previous,
+        [subject.id]: [
+          ...history,
+          {
+            role: 'assistant',
+            content: conversationalContent,
+            events: events.map((event) => ({ ...event }))
+          }
+        ]
+      }))
+    }
+    const updateEvent = (id: string, update: Partial<AgentEvent>): void => {
+      events = events.map((event) => (event.id === id ? { ...event, ...update } : event))
+    }
+    const appendEvent = (event: AgentEvent): void => {
+      if (!events.some((current) => current.id === event.id)) events = [...events, event]
+    }
+    const updateMessage = (text: string): void => {
+      const message = text.trim()
+      if (!message) return
+      if (events.some((event) => event.id === 'message')) {
+        updateEvent('message', { text: message })
+      } else {
+        appendEvent({ id: 'message', kind: 'message', text: message })
+      }
+    }
+    showAssistant()
 
     try {
       let sourceMarkdown: string
       try {
         sourceMarkdown = noteMarkdown()
       } catch {
-        onError('Could not read the current note for Chat.')
-        return
+        throw new Error('Could not read the current note for the assistant.')
       }
 
       const [meetingTranscript, meetingNotesMarkdown] = await Promise.all([
@@ -234,10 +282,16 @@ export default function NoteAiPanel({
 
       if (isRecording) toggleDictation()
       dictatedChunksRef.current = []
-      setInput('')
+      onDraftChange('')
 
-      const history = [...thread, { role: 'user' as const, content: question }]
-      setThreads((previous) => ({ ...previous, [subject.id]: history }))
+      updateEvent('context', { status: 'done' })
+      appendEvent({
+        id: 'thinking',
+        kind: 'activity',
+        text: `Thinking with ${activeModelLabel}`,
+        status: 'active'
+      })
+      showAssistant()
       const transcript = history
         .map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`)
         .join('\n\n')
@@ -249,85 +303,177 @@ export default function NoteAiPanel({
         conversation: transcript
       })
 
-      let live = ''
       const final = await stream(noteActionSpec('ask').system, prompt, (text) => {
-        live = text
         const parsed = parseChatOutput(text)
-        setThreads((previous) => ({
-          ...previous,
-          [subject.id]: [
-            ...history,
-            {
-              role: 'assistant',
-              content: parsed.message || 'Preparing an edit…',
-              ...(parsed.proposedMarkdown
-                ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
-                : {})
-            }
-          ]
-        }))
-      })
-      const parsed = parseChatOutput(final ?? live)
-      if (parsed.hasEditMarker && !parsed.proposedMarkdown) {
-        onError('The proposed edit was incomplete. Try asking for a smaller change.')
-      }
-      setThreads((previous) => ({
-        ...previous,
-        [subject.id]: [
-          ...history,
-          {
-            role: 'assistant',
-            content: parsed.message || 'I could not complete that response.',
-            ...(parsed.proposedMarkdown
-              ? { proposedMarkdown: parsed.proposedMarkdown, sourceMarkdown }
-              : {})
+        const parsedTemplate = parseTemplateOutput(text)
+        updateEvent('thinking', { status: 'done' })
+        updateMessage(visibleAgentMessage(text))
+        if (parsedTemplate.hasTemplateMarker) {
+          if (!visibleAgentMessage(text)) {
+            updateMessage('I’ll turn this note into a reusable template.')
           }
-        ]
-      }))
+          appendEvent({
+            id: 'prepare-template',
+            kind: 'action',
+            text: 'Identifying the reusable structure',
+            status: 'active'
+          })
+        } else if (parsed.hasEditMarker) {
+          if (!parsed.message) updateMessage('I’ll make those changes to the note now.')
+          appendEvent({
+            id: 'prepare-edit',
+            kind: 'action',
+            text: 'Preparing the revised note',
+            status: 'active'
+          })
+        }
+        showAssistant()
+      })
+      const parsed = parseChatOutput(final)
+      const parsedTemplate = parseTemplateOutput(final)
+      if (parsedTemplate.hasTemplateMarker && !parsedTemplate.draft) {
+        throw new Error('The model stopped before it finished the template. Try again.')
+      }
+      if (parsed.hasEditMarker && !parsed.proposedMarkdown) {
+        throw new Error('The model stopped before it finished the note changes. Try a smaller change.')
+      }
+      if (parsedTemplate.draft) {
+        updateEvent('thinking', { status: 'done' })
+        updateMessage(
+          parsedTemplate.message || `I’ll create “${parsedTemplate.draft.name}” from this note.`
+        )
+        if (events.some((event) => event.id === 'prepare-template')) {
+          updateEvent('prepare-template', { status: 'done' })
+        } else {
+          appendEvent({
+            id: 'prepare-template',
+            kind: 'action',
+            text: 'Identifying the reusable structure',
+            status: 'done'
+          })
+        }
+        appendEvent({
+          id: 'save-template',
+          kind: 'action',
+          text: `Saving “${parsedTemplate.draft.name}”`,
+          status: 'active'
+        })
+        showAssistant()
+        const template = await window.api.templates.create({
+          ...parsedTemplate.draft,
+          sourceNoteId: subject.id
+        })
+        updateEvent('save-template', { status: 'done' })
+        appendEvent({
+          id: 'done',
+          kind: 'result',
+          text: `Template created: ${template.name}`,
+          status: 'done'
+        })
+        window.dispatchEvent(new Event('noteato:templates-changed'))
+        showAssistant()
+      } else if (parsed.proposedMarkdown) {
+        updateEvent('thinking', { status: 'done' })
+        updateMessage(parsed.message || 'I’ll make those changes to the note now.')
+        if (!events.some((event) => event.id === 'prepare-edit')) {
+          appendEvent({
+            id: 'prepare-edit',
+            kind: 'action',
+            text: 'Preparing the revised note',
+            status: 'done'
+          })
+        } else {
+          updateEvent('prepare-edit', { status: 'done' })
+        }
+        appendEvent({
+          id: 'apply-edit',
+          kind: 'action',
+          text: 'Updating the note',
+          status: 'active'
+        })
+        showAssistant()
+        await applyProposedEdit(parsed.proposedMarkdown, sourceMarkdown)
+        updateEvent('apply-edit', { status: 'done' })
+        appendEvent({
+          id: 'done',
+          kind: 'result',
+          text: 'Note updated',
+          status: 'done'
+        })
+        showAssistant()
+      } else {
+        if (!parsed.message) throw new Error('The model returned an empty response.')
+        updateEvent('thinking', { status: 'done' })
+        updateMessage(parsed.message)
+        appendEvent({
+          id: 'done',
+          kind: 'result',
+          text: 'Done',
+          status: 'done'
+        })
+        showAssistant()
+      }
+    } catch (error) {
+      const message = aiErrorMessage(error)
+      events = events.map((event) =>
+        event.status === 'active' ? { ...event, status: 'error' as const } : event
+      )
+      appendEvent({
+        id: 'error',
+        kind: 'error',
+        text: message,
+        status: 'error'
+      })
+      showAssistant()
+      onError(message)
     } finally {
       sendLockRef.current = false
+      setPending(false)
     }
   }
 
-  const applyProposedEdit = async (index: number, turn: ChatTurn): Promise<void> => {
-    if (!turn.proposedMarkdown || applyingEditIndex !== null) return
-    setApplyingEditIndex(index)
-    try {
-      const currentMarkdown = noteMarkdown()
-      if (currentMarkdown.trim() !== turn.sourceMarkdown?.trim()) {
-        throw new Error('The note changed after this edit was prepared. Ask Chat to update it again.')
-      }
-
-      const parsed = restoreImageWidths(
-        linkifyBlocks(await editor.tryParseMarkdownToBlocks(turn.proposedMarkdown))
-      )
-      if (parsed.length === 0) throw new Error('The proposed edit did not contain editable content.')
-      const nextBlocks = subject.external ? parsed : ensureTitleBlock(parsed, subject.title)
-      editor.replaceBlocks(
-        editor.document.map((block) => block.id),
-        nextBlocks
-      )
-      setThreads((previous) => ({
-        ...previous,
-        [subject.id]: (previous[subject.id] ?? []).map((entry, entryIndex) =>
-          entryIndex === index ? { ...entry, editApplied: true } : entry
-        )
-      }))
-      onEditApplied()
-    } catch (error) {
-      onError(error instanceof Error ? error.message : 'Could not apply that edit to the note.')
-    } finally {
-      setApplyingEditIndex(null)
+  const applyProposedEdit = async (
+    proposedMarkdown: string,
+    sourceMarkdown: string
+  ): Promise<void> => {
+    const currentMarkdown = noteMarkdown()
+    if (currentMarkdown.trim() !== sourceMarkdown.trim()) {
+      throw new Error('The note changed while the edit was being prepared. Ask the assistant to try again.')
     }
+
+    const parsed = restoreImageWidths(
+      linkifyBlocks(await editor.tryParseMarkdownToBlocks(proposedMarkdown))
+    )
+    if (parsed.length === 0) {
+      throw new Error('The model returned note changes with no editable content.')
+    }
+    const nextBlocks = subject.external ? parsed : ensureTitleBlock(parsed, subject.title)
+    editor.replaceBlocks(
+      editor.document.map((block) => block.id),
+      nextBlocks
+    )
+    onEditApplied()
   }
 
-  const modelOptions =
-    aiSettings?.aiProvider && aiSettings.aiProvider !== 'none'
-      ? AI_MODELS[aiSettings.aiProvider]
-      : []
-  const chatEnabled = aiSettings ? isAiConfigured(aiSettings) : false
-  const selectedModelLabel =
-    modelOptions.find((option) => option.id === selectedModel)?.label ?? 'Choose model'
+  const resolvedModel = resolveAiModelChoice(
+    selectedModel,
+    aiSettings?.aiProvider,
+    aiSettings ?? undefined
+  )
+  const chatEnabled = aiSettings ? isAiConfigured(aiSettings, resolvedModel.provider) : false
+  const activeModelLabel = selectedModel === AUTO_AI_MODEL_ID ? 'Auto' : resolvedModel.label
+
+  const chooseModel = async (choice: string): Promise<void> => {
+    if (!aiSettings) return
+    const selected = resolveAiModelChoice(choice, aiSettings.aiProvider, aiSettings)
+    setSelectedModel(selected.choice)
+    const next = await window.api.settings.set({
+      aiProvider: selected.provider,
+      aiModel: selected.choice
+    })
+    setAiSettings(next)
+    window.dispatchEvent(new Event('noteato:ai-settings-changed'))
+  }
 
   return (
     <section className="note-chat-surface" aria-label={`Chat about ${subject.title}`}>
@@ -336,6 +482,15 @@ export default function NoteAiPanel({
           <span className="note-chat-kicker">Chat with note</span>
           <strong>{subject.title || 'Untitled'}</strong>
         </div>
+        <button
+          type="button"
+          className="note-chat-close"
+          aria-label="Close chat"
+          title="Close chat"
+          onClick={onClose}
+        >
+          <X size={15} />
+        </button>
       </header>
 
       <div className="note-chat-scroll" ref={scrollRef}>
@@ -345,8 +500,8 @@ export default function NoteAiPanel({
           </div>
         ) : !chatEnabled ? (
           <div className="note-chat-empty">
-            <strong>Connect an AI provider to chat with this note.</strong>
-            <span>You can configure Anthropic or OpenAI in Settings.</span>
+            <strong>Add the selected provider’s API key to start chatting.</strong>
+            <span>Configure OpenAI, Anthropic or xAI in Settings.</span>
           </div>
         ) : (
           <>
@@ -359,42 +514,38 @@ export default function NoteAiPanel({
             {thread.map((turn, index) => (
               <div key={index} className={`note-chat-turn ${turn.role}`}>
                 {turn.role === 'assistant' ? (
-                  <>
-                    <MarkdownText text={turn.content} />
-                    {turn.proposedMarkdown && (
-                      <div className="note-chat-edit-actions">
-                        <button
-                          type="button"
-                          className={turn.editApplied ? 'applied' : undefined}
-                          disabled={turn.editApplied || applyingEditIndex !== null}
-                          onClick={() => void applyProposedEdit(index, turn)}
+                  <div className="note-chat-agent-events" aria-live="polite">
+                    {turn.events?.map((event) =>
+                      event.kind === 'message' ? (
+                        <div key={event.id} className="note-chat-agent-message">
+                          <MarkdownText text={event.text} />
+                        </div>
+                      ) : (
+                        <div
+                          key={event.id}
+                          className={`note-chat-agent-event ${event.kind} ${event.status ?? ''}`}
+                          role={event.kind === 'error' ? 'alert' : undefined}
                         >
-                          {turn.editApplied ? (
-                            <Check size={13} />
-                          ) : applyingEditIndex === index ? (
-                            <Loader2 size={13} className="spin" />
-                          ) : (
-                            <Pencil size={13} />
-                          )}
-                          <span>
-                            {turn.editApplied
-                              ? 'Applied to note'
-                              : applyingEditIndex === index
-                                ? 'Applying…'
-                                : 'Apply to note'}
+                          <span className="note-chat-agent-event-icon" aria-hidden="true">
+                            {event.status === 'active' ? (
+                              <Loader2 size={12} className="spin" />
+                            ) : event.status === 'error' ? (
+                              <AlertCircle size={12} />
+                            ) : (
+                              <Check size={12} />
+                            )}
                           </span>
-                        </button>
-                      </div>
+                          <span>{event.text}</span>
+                        </div>
+                      )
                     )}
-                  </>
+                    {!turn.events && turn.content && <MarkdownText text={turn.content} />}
+                  </div>
                 ) : (
                   turn.content
                 )}
               </div>
             ))}
-            {pending && thread[thread.length - 1]?.role === 'user' && (
-              <Loader2 size={16} className="spin note-chat-loader" />
-            )}
           </>
         )}
       </div>
@@ -404,10 +555,14 @@ export default function NoteAiPanel({
           <textarea
             ref={inputRef}
             rows={1}
-            value={input}
+            value={draft}
             disabled={!chatEnabled}
-            placeholder="What would you like to know about this note?"
-            onChange={(event) => setInput(event.target.value)}
+            aria-expanded={active}
+            placeholder="Ask about this note…"
+            onChange={(event) => {
+              onDraftChange(event.target.value)
+              if (!active) onOpen()
+            }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
@@ -417,38 +572,36 @@ export default function NoteAiPanel({
           />
           <div className="note-chat-composer-controls">
             <div className="note-chat-composer-trailing">
-              <div className="note-chat-model-select" ref={modelSelectRef}>
-                <button
-                  className="note-chat-model-trigger"
-                  type="button"
-                  aria-haspopup="listbox"
-                  aria-expanded={modelMenuOpen}
-                  disabled={modelOptions.length === 0 || pending}
-                  onClick={() => setModelMenuOpen((open) => !open)}
+              <select
+                className="note-chat-model-select"
+                aria-label="AI model"
+                value={selectedModel}
+                disabled={pending || !aiSettings}
+                onChange={(event) => {
+                  if (!active) onOpen()
+                  void chooseModel(event.target.value)
+                }}
+              >
+                <option
+                  value={AUTO_AI_MODEL_ID}
+                  disabled={!aiSettings || availableAiProviders(aiSettings).length === 0}
                 >
-                  <span>{modelOptions.length === 0 ? 'Set up AI' : selectedModelLabel}</span>
-                  <ChevronDown size={12} />
-                </button>
-                {modelMenuOpen && modelOptions.length > 0 && (
-                  <div className="note-chat-model-menu" role="listbox" aria-label="AI model">
-                    {modelOptions.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        role="option"
-                        aria-selected={option.id === selectedModel}
-                        onClick={() => {
-                          setSelectedModel(option.id)
-                          setModelMenuOpen(false)
-                        }}
-                      >
-                        <span>{option.label}</span>
-                        {option.id === selectedModel && <Check size={13} />}
-                      </button>
+                  Auto
+                </option>
+                {AI_PROVIDER_ORDER.map((provider) => (
+                  <optgroup
+                    key={provider}
+                    label={AI_PROVIDER_LABELS[provider]}
+                    disabled={!aiSettings || !hasAiProviderKey(aiSettings, provider)}
+                  >
+                    {listedAiModels(provider).map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
                     ))}
-                  </div>
-                )}
-              </div>
+                  </optgroup>
+                ))}
+              </select>
               <button
                 className={
                   isRecording ? 'note-chat-tool-btn recording' : 'note-chat-tool-btn'
@@ -466,8 +619,11 @@ export default function NoteAiPanel({
               ) : (
                 <button
                   className="note-chat-send-btn"
-                  onClick={() => void send()}
-                  disabled={!input.trim() || !chatEnabled}
+                  onClick={() => {
+                    if (!active) onOpen()
+                    void send()
+                  }}
+                  disabled={!draft.trim() || !chatEnabled}
                   title="Send"
                 >
                   <ArrowUp size={14} />

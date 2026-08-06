@@ -16,12 +16,14 @@ import '@blocknote/core/fonts/inter.css'
 import '@blocknote/mantine/style.css'
 import {
   IconCalendar as Calendar,
+  IconCheck as Check,
   IconDots as Dots,
   IconFileDescription as MeetingNotesIcon,
   IconFilePlus as FilePlus,
   IconFileText as FileText,
   IconMicrophone as Microphone,
   IconPhoto as Photo,
+  IconLoader2 as Loader2,
   IconStar as Star,
   IconStarFilled as StarFilled
 } from '@tabler/icons-react'
@@ -61,6 +63,13 @@ import ReminderPopover from './ReminderPopover'
 import NoteOutline from './NoteOutline'
 import NoteAiPanel from './NoteAiPanel'
 import TagBar from './TagBar'
+import { aiStream } from '../ai/client'
+import { AUTO_AI_MODEL_ID, resolveAiModelChoice } from '../../../shared/aiModels'
+import {
+  NOTE_TEMPLATE_INSTRUCTIONS,
+  parseTemplateOutput
+} from '../../../shared/noteTemplates'
+import { aiErrorMessage } from '../../../shared/aiError'
 
 interface Props {
   /** Identity, not location — a rename must not look like a different note. */
@@ -293,6 +302,8 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [findFocusTick, setFindFocusTick] = useState(0)
   const [activeSurface, setActiveSurface] = useState<NoteSurface>('note')
   const [chatOpen, setChatOpen] = useState(false)
+  const [chatDraft, setChatDraft] = useState('')
+  const [templateCreation, setTemplateCreation] = useState<'creating' | 'created' | null>(null)
   const [outlineVisible, setOutlineVisible] = useState(false)
   const [isSwitchingNote, setIsSwitchingNote] = useState(false)
   const [meeting, setMeeting] = useState<MeetingState>({
@@ -303,9 +314,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [recordElapsed, setRecordElapsed] = useState('')
   const [recording, setRecording] = useState<NoteRecording | null>(null)
   const [transcript, setTranscript] = useState<MeetingTranscript | null>(null)
-  const [transcriptSaveStatus, setTranscriptSaveStatus] = useState<
-    'idle' | 'edited' | 'saving' | 'saved' | 'failed'
-  >('idle')
   const [meetingNotesState, setMeetingNotesState] = useState<MeetingNotesState>({
     noteId,
     template: DEFAULT_MEETING_NOTES_TEMPLATE,
@@ -314,6 +322,9 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   })
   const [playhead, setPlayhead] = useState(0)
   const seekRef = useRef<((seconds: number) => void) | null>(null)
+  const templateCancelRef = useRef<(() => void) | null>(null)
+  const templateRunRef = useRef(0)
+  const templateStatusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     void window.api.meeting.getState().then(setMeeting)
@@ -371,13 +382,18 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   }, [meeting.phase, meeting.noteId, meeting.startedAt, noteId])
 
   useEffect(() => {
+    templateRunRef.current += 1
+    templateCancelRef.current?.()
+    templateCancelRef.current = null
+    if (templateStatusTimerRef.current) clearTimeout(templateStatusTimerRef.current)
+    setTemplateCreation(null)
     setActiveSurface('note')
     setChatOpen(false)
+    setChatDraft('')
     setOutlineVisible(false)
     transcriptDraftRef.current = null
     transcriptDirtyRef.current = false
     transcriptEditVersionRef.current = 0
-    setTranscriptSaveStatus('idle')
     setMeetingNotesState({
       noteId,
       template: DEFAULT_MEETING_NOTES_TEMPLATE,
@@ -387,13 +403,25 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   }, [noteId])
 
   useEffect(() => {
+    return () => {
+      templateRunRef.current += 1
+      templateCancelRef.current?.()
+      if (templateStatusTimerRef.current) clearTimeout(templateStatusTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
     if (!chatOpen) return
     const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setChatOpen(false)
+      if (event.key === 'Escape') closeChat()
     }
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [chatOpen])
+
+  const closeChat = (): void => {
+    setChatOpen(false)
+  }
   const overflowBtnRef = useRef<HTMLButtonElement>(null)
   // The overflow menu is built at click time from these, not from the render
   // closure that happened to create the handler.
@@ -690,7 +718,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       transcriptSaveTimer.current = undefined
     }
     const version = transcriptEditVersionRef.current
-    setTranscriptSaveStatus('saving')
     try {
       const saved = await window.api.meeting.saveTranscript(
         noteId,
@@ -701,7 +728,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         transcriptDirtyRef.current = false
         transcriptDraftRef.current = saved
         setTranscript(saved)
-        setTranscriptSaveStatus('saved')
       } else {
         transcriptSaveTimer.current = setTimeout(
           () => void persistTranscript(),
@@ -709,7 +735,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         )
       }
     } catch {
-      if (transcriptEditVersionRef.current === version) setTranscriptSaveStatus('failed')
+      // Leave the draft dirty so a later edit, blur, or unmount can retry it.
     }
   }
 
@@ -727,7 +753,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     })
     transcriptDirtyRef.current = true
     transcriptEditVersionRef.current += 1
-    setTranscriptSaveStatus('edited')
     if (transcriptSaveTimer.current) clearTimeout(transcriptSaveTimer.current)
     transcriptSaveTimer.current = setTimeout(
       () => void persistTranscript(),
@@ -790,6 +815,58 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     }
   }
 
+  const createTemplate = async (): Promise<void> => {
+    if (!editor || !note || templateCreation === 'creating') return
+    const run = templateRunRef.current + 1
+    templateRunRef.current = run
+    if (templateStatusTimerRef.current) clearTimeout(templateStatusTimerRef.current)
+    setActiveSurface('note')
+    setAiError(null)
+    setTemplateCreation('creating')
+
+    try {
+      const settings = await window.api.settings.get()
+      const selected = resolveAiModelChoice(AUTO_AI_MODEL_ID, settings.aiProvider, settings)
+      const sourceMarkdown = editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document))
+      const output = await aiStream(
+        settings,
+        {
+          system:
+            `You turn a specific existing note into a clean, reusable note template. ` +
+            `Do not rewrite or edit the source note.\n${NOTE_TEMPLATE_INSTRUCTIONS}`,
+          prompt: `Create and save a reusable template from this note named “${note.title}”.\n\n--- SOURCE NOTE ---\n${sourceMarkdown}`,
+          maxTokens: 4096,
+          provider: selected.provider,
+          model: selected.model
+        },
+        () => {},
+        (cancel) => {
+          templateCancelRef.current = cancel
+        }
+      )
+      if (templateRunRef.current !== run) return
+      const parsed = parseTemplateOutput(output)
+      if (!parsed.draft) {
+        throw new Error(
+          parsed.hasTemplateMarker
+            ? 'The model stopped before it finished the template. Try again.'
+            : 'The model did not return a reusable template. Try again.'
+        )
+      }
+      await window.api.templates.create({ ...parsed.draft, sourceNoteId: note.id })
+      if (templateRunRef.current !== run) return
+      window.dispatchEvent(new Event('noteato:templates-changed'))
+      setTemplateCreation('created')
+      templateStatusTimerRef.current = setTimeout(() => setTemplateCreation(null), 1600)
+    } catch (error) {
+      if (templateRunRef.current !== run) return
+      setTemplateCreation(null)
+      setAiError(aiErrorMessage(error))
+    } finally {
+      if (templateRunRef.current === run) templateCancelRef.current = null
+    }
+  }
+
   /**
    * Everything the header used to show as a permanent glyph. These are real
    * actions, but occasional ones — a row of icons for each is the header
@@ -825,6 +902,10 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             setFindOpen(true)
             setFindFocusTick((t) => t + 1)
           }
+        },
+        {
+          label: 'Make a template',
+          onClick: () => void createTemplate()
         },
         { separator: true, label: '' },
         { label: 'Copy path', onClick: () => void window.api.notes.copyPath(noteId) },
@@ -1239,17 +1320,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         : recording
           ? { title: 'No transcript', detail: 'This recording has not been transcribed.' }
           : { title: 'Transcript', detail: 'The recording transcript will appear here.' }
-  const transcriptSaveLabel =
-    transcriptSaveStatus === 'saving'
-      ? 'Saving…'
-      : transcriptSaveStatus === 'failed'
-        ? 'Couldn’t save'
-        : transcriptSaveStatus === 'edited'
-          ? 'Edited'
-          : transcriptSaveStatus === 'saved'
-            ? 'Saved'
-            : 'Editable transcript'
-
   const recordingThisNote = meeting.phase === 'recording' && meeting.noteId === note.id
   // One recording at a time: while another note owns it, this button reports
   // why it is unavailable rather than silently doing nothing.
@@ -1326,6 +1396,21 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
           {paneControls}
         </div>
       </div>
+
+      {templateCreation && (
+        <div
+          className={`note-template-status ${templateCreation}`}
+          role="status"
+          aria-live="polite"
+        >
+          {templateCreation === 'creating' ? (
+            <Loader2 size={14} className="spin" />
+          ) : (
+            <Check size={14} />
+          )}
+          <span>{templateCreation === 'creating' ? 'Creating template…' : 'Template saved'}</span>
+        </div>
+      )}
 
       <div
         className={
@@ -1525,21 +1610,13 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             />
           )}
           {transcript ? (
-            <>
-              <div className="transcript-edit-bar" aria-live="polite">
-                <span>Edit any line; changes save automatically.</span>
-                <span className={`transcript-save-state ${transcriptSaveStatus}`}>
-                  {transcriptSaveLabel}
-                </span>
-              </div>
-              <TranscriptView
-                transcript={transcript}
-                playheadSeconds={playhead}
-                onSeek={(seconds) => seekRef.current?.(seconds)}
-                onChange={handleTranscriptChange}
-                onCommit={flushTranscript}
-              />
-            </>
+            <TranscriptView
+              transcript={transcript}
+              playheadSeconds={playhead}
+              onSeek={(seconds) => seekRef.current?.(seconds)}
+              onChange={handleTranscriptChange}
+              onCommit={flushTranscript}
+            />
           ) : (
             <div className="note-transcription-empty">
               <Microphone size={18} />
@@ -1598,24 +1675,24 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
           className="note-chat-drawer-backdrop"
           aria-label="Close Chat"
           tabIndex={-1}
-          onClick={() => setChatOpen(false)}
+          onClick={closeChat}
         />
       )}
 
-      <div className={chatOpen ? 'note-chat-drawer open' : 'note-chat-drawer'}>
-        <button
-          type="button"
-          className="note-chat-drawer-handle"
-          aria-label={chatOpen ? 'Close Chat' : 'Open Chat'}
-          aria-expanded={chatOpen}
-          title={chatOpen ? 'Close Chat' : 'Chat with this note'}
-          onClick={() => setChatOpen((open) => !open)}
-        />
-        <div className="note-chat-drawer-body" aria-hidden={!chatOpen}>
+      <div
+        className={chatOpen ? 'note-chat-drawer open' : 'note-chat-drawer'}
+        role={chatOpen ? 'dialog' : undefined}
+        aria-label="Chat with this note"
+      >
+        <div className="note-chat-drawer-body">
           <NoteAiPanel
             subject={{ id: note.id, title: note.title, external: note.external }}
             editor={editor}
             active={chatOpen}
+            draft={chatDraft}
+            onDraftChange={setChatDraft}
+            onOpen={() => setChatOpen(true)}
+            onClose={closeChat}
             activeTab={
               activeSurface === 'transcription'
                 ? 'Transcript'
@@ -1626,7 +1703,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             onError={setAiError}
             onEditApplied={() => {
               setActiveSurface('note')
-              setChatOpen(false)
             }}
           />
         </div>

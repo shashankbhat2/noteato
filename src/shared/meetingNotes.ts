@@ -7,7 +7,8 @@ export const MEETING_NOTES_TEMPLATE_FILE = '.meeting-notes-template'
 /** This background synthesis always uses the lowest-cost model per provider. */
 export const CHEAPEST_MEETING_MODELS: Record<Exclude<AiProvider, 'none'>, string> = {
   anthropic: 'claude-haiku-4-5',
-  openai: 'gpt-5-nano'
+  openai: 'gpt-5.6-luna',
+  xai: 'grok-build-0.1'
 }
 
 export type MeetingNotesTemplateId = 'standard' | 'actions' | 'oneOnOne' | 'standup'

@@ -30,15 +30,20 @@ export interface CapturePaths {
   systemPath: string
 }
 
-export function createCaptureDir(vault: string, now = new Date()): CapturePaths {
-  const dir = join(vault, captureDirName(now))
-  mkdirSync(dir, { recursive: true })
+/** Paths for recording into an already-created note directory. */
+export function capturePaths(dir: string): CapturePaths {
   return {
     dir,
     audioPath: join(dir, AUDIO_FILE),
     micPath: join(dir, MIC_TEMP_FILE),
     systemPath: join(dir, SYSTEM_TEMP_FILE)
   }
+}
+
+export function createCaptureDir(vault: string, now = new Date()): CapturePaths {
+  const dir = join(vault, captureDirName(now))
+  mkdirSync(dir, { recursive: true })
+  return capturePaths(dir)
 }
 
 /** Speaker-separated inputs are implementation details, not meeting artifacts. */

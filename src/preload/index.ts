@@ -8,6 +8,7 @@ import type {
   MeetingError,
   MeetingLevels,
   MeetingState,
+  ModelStatus,
   Note,
   NoteRecording,
   NoteChange,
@@ -19,11 +20,14 @@ import type {
   ScratchSaveOptions,
   SearchResult,
   Settings,
+  SettingsTab,
   SidebarModeState,
   TrashEntry
 } from '../shared/types'
 import type { MeetingTranscript } from '../shared/meetingTranscript'
 import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
+import type { NoteTemplate, NoteTemplateDraft } from '../shared/noteTemplates'
+import type { HomeChatThread, HomeChatThreadSummary } from '../shared/homeChat'
 
 let nextAiStreamRequestId = 0
 
@@ -119,6 +123,22 @@ const api = {
       return () => ipcRenderer.removeListener('scratch:open', listener)
     }
   },
+  templates: {
+    list: (): Promise<NoteTemplate[]> => ipcRenderer.invoke('templates:list'),
+    create: (draft: NoteTemplateDraft): Promise<NoteTemplate> =>
+      ipcRenderer.invoke('templates:create', draft),
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('templates:delete', id),
+    createNote: (id: string): Promise<Note> => ipcRenderer.invoke('templates:createNote', id),
+    createMeeting: (id: string): Promise<Note | null> =>
+      ipcRenderer.invoke('templates:createMeeting', id)
+  },
+  homeChat: {
+    list: (): Promise<HomeChatThreadSummary[]> => ipcRenderer.invoke('homeChat:list'),
+    read: (id: string): Promise<HomeChatThread | null> => ipcRenderer.invoke('homeChat:read', id),
+    save: (thread: HomeChatThread): Promise<HomeChatThread> =>
+      ipcRenderer.invoke('homeChat:save', thread),
+    delete: (id: string): Promise<boolean> => ipcRenderer.invoke('homeChat:delete', id)
+  },
   settings: {
     get: (): Promise<Settings> => ipcRenderer.invoke('settings:get'),
     set: (patch: Partial<Settings>): Promise<Settings> => ipcRenderer.invoke('settings:set', patch)
@@ -198,13 +218,15 @@ const api = {
       ipcRenderer.on('meeting:notes-state', listener)
       return () => ipcRenderer.removeListener('meeting:notes-state', listener)
     },
-    subscribeModelProgress: (callback: (p: { received: number; total: number }) => void) => {
-      const listener = (
-        _e: Electron.IpcRendererEvent,
-        p: { received: number; total: number }
-      ): void => callback(p)
-      ipcRenderer.on('meeting:model-progress', listener)
-      return () => ipcRenderer.removeListener('meeting:model-progress', listener)
+  },
+  asr: {
+    getStatus: (): Promise<ModelStatus> => ipcRenderer.invoke('asr:getStatus'),
+    download: (): Promise<ModelStatus> => ipcRenderer.invoke('asr:download'),
+    subscribeStatus: (callback: (status: ModelStatus) => void) => {
+      const listener = (_e: Electron.IpcRendererEvent, status: ModelStatus): void =>
+        callback(status)
+      ipcRenderer.on('asr:status', listener)
+      return () => ipcRenderer.removeListener('asr:status', listener)
     }
   },
   reminders: {
@@ -259,11 +281,16 @@ const api = {
     cut: (): Promise<void> => ipcRenderer.invoke('app:cut'),
     copy: (): Promise<void> => ipcRenderer.invoke('app:copy'),
     paste: (): Promise<void> => ipcRenderer.invoke('app:paste'),
-    openSettings: (): Promise<void> => ipcRenderer.invoke('app:openSettings')
+    openSettings: (tab?: SettingsTab): Promise<void> =>
+      ipcRenderer.invoke('app:openSettings', tab)
   },
   shortcuts: {
-    subscribe: (callback: (action: string) => void) => {
-      const listener = (_e: Electron.IpcRendererEvent, action: string): void => callback(action)
+    subscribe: (callback: (action: string, payload?: string) => void) => {
+      const listener = (
+        _e: Electron.IpcRendererEvent,
+        action: string,
+        payload?: string
+      ): void => callback(action, payload)
       ipcRenderer.on('shortcut', listener)
       return () => ipcRenderer.removeListener('shortcut', listener)
     }

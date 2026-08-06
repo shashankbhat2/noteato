@@ -286,12 +286,33 @@ func mixCapture(micPath: String, systemPath: String, outputPath: String) throws 
     }
 }
 
-/// Concatenate completed mixed captures into a fresh file. The caller writes
-/// to a temporary destination and atomically swaps it into place, so a failed
-/// append can never damage the recording the user already had.
+/// Concatenate completed mixed captures into a fresh file. The writer reuses
+/// the complete file format AVFoundation already decoded, and each input gets
+/// a buffer made from its own processing format. Reads are bounded by the known
+/// frame length because asking AVAudioFile for one buffer past AAC EOF can throw
+/// instead of returning an empty buffer.
+///
+/// The caller writes to a temporary destination and atomically swaps it into
+/// place, so a failed append can never damage the recording the user had.
 func appendCapture(existingPath: String, newPath: String, outputPath: String) throws {
-    let existing = try AVAudioFile(forReading: URL(fileURLWithPath: existingPath))
-    let addition = try AVAudioFile(forReading: URL(fileURLWithPath: newPath))
+    let existing: AVAudioFile
+    let addition: AVAudioFile
+    do {
+        existing = try AVAudioFile(forReading: URL(fileURLWithPath: existingPath))
+    } catch {
+        throw NSError(
+            domain: "noteato", code: 10,
+            userInfo: [NSLocalizedDescriptionKey: "could not open existing recording: \(error)"]
+        )
+    }
+    do {
+        addition = try AVAudioFile(forReading: URL(fileURLWithPath: newPath))
+    } catch {
+        throw NSError(
+            domain: "noteato", code: 11,
+            userInfo: [NSLocalizedDescriptionKey: "could not open new recording: \(error)"]
+        )
+    }
     let format = existing.processingFormat
     guard addition.processingFormat.channelCount == format.channelCount,
           addition.processingFormat.sampleRate == format.sampleRate else {
@@ -305,30 +326,60 @@ func appendCapture(existingPath: String, newPath: String, outputPath: String) th
     if fileManager.fileExists(atPath: outputPath) {
         try fileManager.removeItem(atPath: outputPath)
     }
-    let settings: [String: Any] = [
-        AVFormatIDKey: kAudioFormatMPEG4AAC,
-        AVSampleRateKey: format.sampleRate,
-        AVNumberOfChannelsKey: format.channelCount,
-        AVEncoderBitRateKey: 96_000
-    ]
-    let output = try AVAudioFile(
-        forWriting: URL(fileURLWithPath: outputPath),
-        settings: settings
-    )
-    let capacity: AVAudioFrameCount = 8192
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+    // Reuse the complete file format AVFoundation successfully decoded instead
+    // of reconstructing a partial set of AAC encoder settings by hand.
+    let settings = existing.fileFormat.settings
+    let output: AVAudioFile
+    do {
+        output = try AVAudioFile(
+            forWriting: URL(fileURLWithPath: outputPath),
+            settings: settings
+        )
+    } catch {
         throw NSError(
-            domain: "noteato", code: 7,
-            userInfo: [NSLocalizedDescriptionKey: "could not allocate audio append buffer"]
+            domain: "noteato", code: 12,
+            userInfo: [NSLocalizedDescriptionKey: "could not create appended recording: \(error)"]
         )
     }
+    let capacity: AVAudioFrameCount = 8192
 
-    for input in [existing, addition] {
-        while true {
+    for (index, input) in [existing, addition].enumerated() {
+        // AVAudioFile's decoder requires a buffer made from that file's exact
+        // processing format object. Two formats can report the same rate and
+        // channel count yet still differ in stream-description flags.
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: input.processingFormat,
+            frameCapacity: capacity
+        ) else {
+            throw NSError(
+                domain: "noteato", code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "could not allocate audio append buffer"]
+            )
+        }
+        while input.framePosition < input.length {
             buffer.frameLength = 0
-            try input.read(into: buffer, frameCount: capacity)
+            let remaining = AVAudioFrameCount(input.length - input.framePosition)
+            do {
+                try input.read(into: buffer, frameCount: min(capacity, remaining))
+            } catch {
+                throw NSError(
+                    domain: "noteato", code: 8,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "could not decode append input \(index + 1): \(error)"
+                    ]
+                )
+            }
             if buffer.frameLength == 0 { break }
-            try output.write(from: buffer)
+            do {
+                try output.write(from: buffer)
+            } catch {
+                throw NSError(
+                    domain: "noteato", code: 9,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "could not encode append input \(index + 1): \(error)"
+                    ]
+                )
+            }
         }
     }
 }
