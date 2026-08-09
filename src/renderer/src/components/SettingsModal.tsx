@@ -2,16 +2,37 @@ import { useEffect, useState } from 'react'
 import {
   IconAdjustmentsHorizontal as GeneralIcon,
   IconCheck as Check,
+  IconChevronRight as ChevronRight,
   IconDeviceDesktop as Monitor,
   IconFolderOpen as FolderOpen,
   IconMicrophone as MicIcon,
   IconMoon as Moon,
   IconPalette as PaletteIcon,
+  IconPlugConnected as Plug,
+  IconPlus as Plus,
+  IconRefresh as Refresh,
+  IconSearch as Search,
   IconSparkle as SparklesIcon,
   IconSun as Sun,
+  IconTool as Tool,
+  IconTrash as Trash,
   IconX as X
 } from '@tabler/icons-react'
 import type { ModelStatus, ScreenEdge, Settings, SettingsTab } from '../../../shared/types'
+import type {
+  McpConnectionInput,
+  McpConnectionSummary,
+  McpToolSummary
+} from '../../../shared/mcp'
+import {
+  localAgentManifest,
+  type LocalAgentSummary
+} from '../../../shared/localAgents'
+import {
+  INTEGRATION_CATALOG,
+  integrationManifest,
+  integrationRecipe
+} from '../../../shared/integrations'
 import {
   AI_PROVIDER_LABELS,
   AI_PROVIDER_ORDER,
@@ -28,6 +49,7 @@ import { ACCENT_OPTIONS } from '../accents'
 import { SIDEBAR_MODE_ACCELERATOR, shortcutDisplay } from '../../../shared/globalShortcuts'
 import { ModelProgress, modelStatusLabel } from './ModelDownload'
 import { Group, Row, Switch } from './SettingsRow'
+import IntegrationLogo from './IntegrationLogo'
 
 interface Props {
   onClose: () => void
@@ -43,6 +65,18 @@ const HOVER_DELAYS = [
   { ms: 800, label: 'Medium' },
   { ms: 1500, label: 'Long' }
 ]
+
+function mcpErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const cleaned = message
+    .replace(/^Error invoking remote method ['"]?mcp:[^:]+['"]?:\s*/i, '')
+    .replace(/^Error:\s*/i, '')
+    .trim()
+  if (/RegistrationRejectedError.*(?:404|not found)/i.test(cleaned)) {
+    return 'This provider requires a registered OAuth client. Use its setup option or connect with a token under Custom.'
+  }
+  return cleaned || fallback
+}
 
 interface TabMeta {
   id: SettingsTab
@@ -83,6 +117,13 @@ const NAV_GROUPS: { group: string; tabs: TabMeta[] }[] = [
         subtitle: 'Bring your own key — nothing leaves your machine until you do'
       },
       {
+        id: 'apps',
+        label: 'Apps',
+        icon: <Plug size={16} />,
+        title: 'Apps & agents',
+        subtitle: 'Hand work off through connected tools, with review before every action'
+      },
+      {
         id: 'speech',
         label: 'Speech',
         icon: <MicIcon size={16} />,
@@ -113,6 +154,23 @@ export default function SettingsModal({ onClose, onNotesDirChanged, initialTab }
   const [aiSaved, setAiSaved] = useState(false)
   const [spellLanguages, setSpellLanguages] = useState<string[]>([])
   const [modelStatus, setModelStatus] = useState<ModelStatus>({ state: 'absent' })
+  const [mcpConnections, setMcpConnections] = useState<McpConnectionSummary[]>([])
+  const [localAgents, setLocalAgents] = useState<LocalAgentSummary[]>([])
+  const [mcpView, setMcpView] = useState<'connected' | 'browse' | 'agents' | 'custom'>('connected')
+  const [mcpSearch, setMcpSearch] = useState('')
+  const [mcpExpanded, setMcpExpanded] = useState<Set<string>>(() => new Set())
+  const [mcpTools, setMcpTools] = useState<Record<string, McpToolSummary[]>>({})
+  const [mcpToolsLoading, setMcpToolsLoading] = useState<Record<string, boolean>>({})
+  const [mcpToolErrors, setMcpToolErrors] = useState<Record<string, string>>({})
+  const [mcpAdding, setMcpAdding] = useState<'local' | 'remote' | null>(null)
+  const [mcpName, setMcpName] = useState('')
+  const [mcpCommand, setMcpCommand] = useState('')
+  const [mcpArgs, setMcpArgs] = useState('')
+  const [mcpUrl, setMcpUrl] = useState('')
+  const [mcpToken, setMcpToken] = useState('')
+  const [mcpRemoteAuth, setMcpRemoteAuth] = useState<'oauth' | 'bearer' | 'none'>('oauth')
+  const [mcpBusy, setMcpBusy] = useState<string | null>(null)
+  const [mcpError, setMcpError] = useState<string | null>(null)
   const isMac = window.electron.process.platform === 'darwin'
   const platform = window.electron.process.platform
   const active = ALL_TABS.find((t) => t.id === tab)!
@@ -121,6 +179,20 @@ export default function SettingsModal({ onClose, onNotesDirChanged, initialTab }
     window.api.settings.get().then(setSettings)
     window.api.notes.getDir().then(setNotesDir)
     window.api.app.spellcheckerLanguages().then(setSpellLanguages)
+  }, [])
+
+  useEffect(() => {
+    const load = (): void => {
+      void Promise.all([
+        window.api.mcp.listConnections(),
+        window.api.mcp.listAgents()
+      ]).then(([connections, agents]) => {
+        setMcpConnections(connections)
+        setLocalAgents(agents)
+      })
+    }
+    load()
+    return window.api.mcp.subscribeChanged(load)
   }, [])
 
   // A download started during onboarding may still be running, so read the
@@ -517,10 +589,630 @@ export default function SettingsModal({ onClose, onNotesDirChanged, initialTab }
     </>
   )
 
+  const resetMcpForm = (): void => {
+    setMcpAdding(null)
+    setMcpName('')
+    setMcpCommand('')
+    setMcpArgs('')
+    setMcpUrl('')
+    setMcpToken('')
+    setMcpRemoteAuth('oauth')
+  }
+
+  const addMcpConnection = async (): Promise<void> => {
+    if (!mcpAdding) return
+    const input: McpConnectionInput =
+      mcpAdding === 'local'
+        ? {
+            name: mcpName,
+            transport: 'stdio',
+            command: mcpCommand,
+            args: mcpArgs
+              .split('\n')
+              .map((item) => item.trim())
+              .filter(Boolean),
+            source: 'Added in Noteato'
+          }
+        : {
+            name: mcpName,
+            transport: 'http',
+            url: mcpUrl,
+            headers: mcpRemoteAuth === 'bearer' && mcpToken.trim()
+              ? { Authorization: `Bearer ${mcpToken.trim()}` }
+              : undefined,
+            auth: mcpRemoteAuth,
+            source: 'Added in Noteato'
+          }
+    setMcpBusy('add')
+    setMcpError(null)
+    try {
+      await window.api.mcp.add(input)
+      setMcpConnections(await window.api.mcp.listConnections())
+      resetMcpForm()
+    } catch (error) {
+      setMcpError(mcpErrorMessage(error, 'Could not add the MCP app.'))
+    } finally {
+      setMcpBusy(null)
+    }
+  }
+
+  const toggleMcpTools = async (connection: McpConnectionSummary): Promise<void> => {
+    if (mcpExpanded.has(connection.id)) {
+      setMcpExpanded((current) => {
+        const next = new Set(current)
+        next.delete(connection.id)
+        return next
+      })
+      return
+    }
+
+    setMcpExpanded((current) => new Set(current).add(connection.id))
+    setMcpToolsLoading((current) => ({ ...current, [connection.id]: true }))
+    setMcpToolErrors((current) => {
+      const next = { ...current }
+      delete next[connection.id]
+      return next
+    })
+    try {
+      const tools = await window.api.mcp.listTools(connection.id)
+      setMcpTools((current) => ({ ...current, [connection.id]: tools }))
+    } catch (error) {
+      setMcpToolErrors((current) => ({
+        ...current,
+        [connection.id]: error instanceof Error ? error.message : 'Could not load tools.'
+      }))
+    } finally {
+      setMcpToolsLoading((current) => ({ ...current, [connection.id]: false }))
+    }
+  }
+
+  const connectCatalogApp = async (catalogId: string): Promise<void> => {
+    const manifest = integrationManifest(catalogId)
+    if (manifest?.connection === 'api') return
+    setMcpBusy(`catalog:${catalogId}`)
+    setMcpError(null)
+    try {
+      const connection = await window.api.mcp.addCatalog(catalogId)
+      await window.api.mcp.connect(connection.id)
+      setMcpConnections(await window.api.mcp.listConnections())
+    } catch (error) {
+      setMcpError(mcpErrorMessage(error, 'Could not connect the app.'))
+    } finally {
+      setMcpBusy(null)
+    }
+  }
+
+  const toggleLocalAgent = async (agent: LocalAgentSummary): Promise<void> => {
+    setMcpBusy(`agent:${agent.id}`)
+    setMcpError(null)
+    try {
+      if (agent.connected && agent.connectionId) {
+        await window.api.mcp.remove(agent.connectionId)
+      } else {
+        await window.api.mcp.connectAgent(agent.id)
+      }
+      const [connections, agents] = await Promise.all([
+        window.api.mcp.listConnections(),
+        window.api.mcp.listAgents()
+      ])
+      setMcpConnections(connections)
+      setLocalAgents(agents)
+    } catch (error) {
+      setMcpError(mcpErrorMessage(error, `Could not connect ${agent.name}.`))
+    } finally {
+      setMcpBusy(null)
+    }
+  }
+
+  const refreshLocalAgents = async (): Promise<void> => {
+    setMcpBusy('agents:refresh')
+    setMcpError(null)
+    try {
+      setLocalAgents(await window.api.mcp.listAgents())
+    } catch (error) {
+      setMcpError(mcpErrorMessage(error, 'Could not scan for local agents.'))
+    } finally {
+      setMcpBusy(null)
+    }
+  }
+
+  const filteredCatalog = INTEGRATION_CATALOG.filter((manifest) => {
+    const query = mcpSearch.trim().toLowerCase()
+    if (!query) return true
+    const recipeText = manifest.recipeIds
+      .map((id) => integrationRecipe(id).title)
+      .join(' ')
+    return `${manifest.name} ${manifest.description} ${manifest.category} ${recipeText}`
+      .toLowerCase()
+      .includes(query)
+  })
+  const dynamicMcpCatalog = filteredCatalog.filter(
+    (manifest) => manifest.connection === 'dynamic-mcp'
+  )
+  const apiCatalog = filteredCatalog.filter((manifest) => manifest.connection === 'api')
+  const renderCatalogCard = (
+    manifest: (typeof INTEGRATION_CATALOG)[number]
+  ): React.ReactNode => {
+    const connection = mcpConnections.find((item) => item.catalogId === manifest.id)
+    const busy = mcpBusy === `catalog:${manifest.id}`
+    const comingSoon = manifest.connection === 'api'
+    return (
+      <article
+        className={`settings-mcp-catalog-card${comingSoon ? ' coming-soon' : ''}`}
+        key={manifest.id}
+      >
+        <div className="settings-mcp-catalog-card-head">
+          <span
+            className="settings-mcp-brand large"
+            style={{ '--mcp-brand': manifest.color } as React.CSSProperties}
+            aria-hidden="true"
+          >
+            <IntegrationLogo id={manifest.id} size={19} />
+          </span>
+          <span className="settings-mcp-connection-kind">
+            {comingSoon ? 'API · Soon' : 'MCP'}
+          </span>
+        </div>
+        <div className="settings-mcp-catalog-copy">
+          <strong>{manifest.name}</strong>
+          <p>{manifest.description}</p>
+        </div>
+        <button
+          className="settings-btn"
+          disabled={comingSoon || busy || connection?.status === 'connected'}
+          onClick={() => void connectCatalogApp(manifest.id)}
+        >
+          {comingSoon
+            ? 'Coming soon'
+            : busy
+              ? 'Opening…'
+            : connection?.status === 'connected'
+              ? 'Connected'
+              : connection?.status === 'authorizing'
+                ? 'Open sign-in again'
+                : connection
+                  ? 'Reconnect'
+                  : 'Connect'}
+        </button>
+      </article>
+    )
+  }
+
+  const renderApps = (): React.ReactNode => (
+    <>
+      <div className="settings-mcp-view-tabs" aria-label="App connection views">
+        <button
+          type="button"
+          className={mcpView === 'connected' ? 'active' : undefined}
+          onClick={() => {
+            setMcpError(null)
+            setMcpView('connected')
+          }}
+        >
+          Connected
+        </button>
+        <button
+          type="button"
+          className={mcpView === 'browse' ? 'active' : undefined}
+          onClick={() => {
+            setMcpError(null)
+            setMcpView('browse')
+          }}
+        >
+          Browse
+        </button>
+        <button
+          type="button"
+          className={mcpView === 'agents' ? 'active' : undefined}
+          onClick={() => {
+            setMcpError(null)
+            setMcpView('agents')
+            void refreshLocalAgents()
+          }}
+        >
+          Agents
+        </button>
+        <button
+          type="button"
+          className={mcpView === 'custom' ? 'active' : undefined}
+          onClick={() => {
+            setMcpError(null)
+            setMcpView('custom')
+          }}
+        >
+          Custom
+        </button>
+      </div>
+
+      {mcpView === 'connected' && <Group label="Connected">
+        {mcpConnections.length === 0 ? (
+          <div className="settings-mcp-empty">
+            <Plug size={17} />
+            <div>
+              <strong>No apps connected</strong>
+              <span>Choose a supported app or connect a local agent.</span>
+            </div>
+            <button className="settings-btn" onClick={() => setMcpView('browse')}>Browse apps</button>
+          </div>
+        ) : (
+          <div className="settings-mcp-list">
+            {mcpConnections.map((connection) => {
+              const expanded = mcpExpanded.has(connection.id)
+              const tools = mcpTools[connection.id] ?? []
+              const localAgent = localAgentManifest(connection.agentId)
+              const apiComingSoon = connection.transport === 'api'
+              return (
+                <div className={expanded ? 'settings-mcp-item expanded' : 'settings-mcp-item'} key={connection.id}>
+                  <div className="settings-mcp-row">
+                    <button
+                      type="button"
+                      className="settings-mcp-disclosure"
+                      aria-expanded={expanded}
+                      aria-controls={`mcp-tools-${connection.id}`}
+                      title={`${expanded ? 'Hide' : 'Show'} ${connection.name} tools`}
+                      disabled={!connection.enabled || apiComingSoon}
+                      onClick={() => void toggleMcpTools(connection)}
+                    >
+                      <ChevronRight size={13} />
+                    </button>
+                    {localAgent ? (
+                      <span
+                        className="settings-mcp-brand"
+                        style={{ '--mcp-brand': localAgent.color } as React.CSSProperties}
+                        aria-hidden="true"
+                      >
+                        <IntegrationLogo id={`agent:${localAgent.id}`} size={14} />
+                      </span>
+                    ) : integrationManifest(connection.catalogId) ? (
+                      <span
+                        className="settings-mcp-brand"
+                        style={{
+                          '--mcp-brand': integrationManifest(connection.catalogId)?.color
+                        } as React.CSSProperties}
+                        aria-hidden="true"
+                      >
+                        <IntegrationLogo id={connection.catalogId} size={14} />
+                      </span>
+                    ) : (
+                      <span className={`settings-mcp-status ${connection.status}`} aria-hidden="true" />
+                    )}
+                    <button
+                      type="button"
+                      className="settings-mcp-copy"
+                      disabled={!connection.enabled || apiComingSoon}
+                      onClick={() => void toggleMcpTools(connection)}
+                    >
+                      <strong>{connection.name}</strong>
+                      <span>
+                        {apiComingSoon
+                          ? 'Coming soon'
+                          : connection.status === 'connected'
+                          ? `${connection.toolCount} ${connection.toolCount === 1 ? 'tool' : 'tools'}`
+                          : connection.status === 'authorizing'
+                            ? 'Finish connecting in your browser…'
+                          : connection.status === 'connecting'
+                            ? 'Connecting…'
+                            : connection.error ||
+                              (connection.transport === 'stdio'
+                                ? [connection.command, ...connection.args].filter(Boolean).join(' ')
+                                : connection.transport === 'api'
+                                  ? 'Direct API connection'
+                                  : connection.transport === 'agent'
+                                    ? 'Agent CLI unavailable'
+                                    : connection.url)}
+                      </span>
+                      <small>{connection.source}</small>
+                    </button>
+                    <div className="settings-mcp-actions">
+                      <Switch
+                        checked={!apiComingSoon && connection.enabled}
+                        disabled={apiComingSoon}
+                        label={`${connection.enabled ? 'Disable' : 'Enable'} ${connection.name}`}
+                        onToggle={() => {
+                          if (connection.enabled) {
+                            setMcpExpanded((current) => {
+                              const next = new Set(current)
+                              next.delete(connection.id)
+                              return next
+                            })
+                          }
+                          setMcpBusy(connection.id)
+                          setMcpError(null)
+                          void window.api.mcp
+                            .setEnabled(connection.id, !connection.enabled)
+                            .catch((error) =>
+                              setMcpError(mcpErrorMessage(error, 'Could not update app.'))
+                            )
+                            .finally(() => setMcpBusy(null))
+                        }}
+                      />
+                      <button
+                        className="settings-icon-btn"
+                        title={
+                          connection.transport === 'agent'
+                            ? 'Check agent'
+                            : connection.status === 'connected'
+                              ? 'Disconnect'
+                              : 'Connect'
+                        }
+                        disabled={apiComingSoon || !connection.enabled || mcpBusy === connection.id}
+                        onClick={() => {
+                          setMcpBusy(connection.id)
+                          setMcpError(null)
+                          const task =
+                            connection.status === 'connected' && connection.transport !== 'agent'
+                              ? window.api.mcp.disconnect(connection.id)
+                              : window.api.mcp.connect(connection.id)
+                          void task
+                            .then(() => {
+                              if (
+                                connection.status === 'connected' &&
+                                connection.transport !== 'agent'
+                              ) {
+                                setMcpTools((current) => {
+                                  const next = { ...current }
+                                  delete next[connection.id]
+                                  return next
+                                })
+                              }
+                            })
+                            .catch((error) =>
+                              setMcpError(mcpErrorMessage(error, 'Connection failed.'))
+                            )
+                            .finally(() => setMcpBusy(null))
+                        }}
+                      >
+                        <Refresh size={13} className={mcpBusy === connection.id ? 'spin' : undefined} />
+                      </button>
+                      <button
+                        className="settings-icon-btn danger"
+                        title={`Remove ${connection.name}`}
+                        onClick={() => void window.api.mcp.remove(connection.id)}
+                      >
+                        <Trash size={13} />
+                      </button>
+                    </div>
+                  </div>
+                  {expanded && (
+                    <div
+                      className="settings-mcp-tools"
+                      id={`mcp-tools-${connection.id}`}
+                      role="region"
+                      aria-label={`${connection.name} tools`}
+                    >
+                      {mcpToolsLoading[connection.id] ? (
+                        <div className="settings-mcp-tools-state">
+                          <Refresh size={12} className="spin" /> Discovering tools…
+                        </div>
+                      ) : mcpToolErrors[connection.id] ? (
+                        <div className="settings-mcp-tools-state error">
+                          {mcpToolErrors[connection.id]}
+                        </div>
+                      ) : tools.length ? (
+                        tools.map((tool) => (
+                          <div className="settings-mcp-tool" key={`${tool.connectionId}:${tool.name}`}>
+                            <Tool size={12} />
+                            <div>
+                              <strong>{tool.title}</strong>
+                              <span>
+                                {tool.name}
+                                {tool.description && tool.description !== tool.name
+                                  ? ` · ${tool.description}`
+                                  : ''}
+                              </span>
+                            </div>
+                            <small className={tool.annotations?.destructiveHint ? 'writes' : undefined}>
+                              {tool.annotations?.destructiveHint ? 'Writes' : tool.recipe.title}
+                            </small>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="settings-mcp-tools-state">This app exposes no tools.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        {mcpError && <div className="settings-mcp-error">{mcpError}</div>}
+      </Group>}
+
+      {mcpView === 'browse' && <Group label="Browse apps">
+        <div className="settings-mcp-catalog-head">
+          <label className="settings-mcp-search">
+            <Search size={13} />
+            <input
+              value={mcpSearch}
+              placeholder="Search apps or actions"
+              onChange={(event) => setMcpSearch(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="settings-mcp-catalog-section">
+          <header>
+            <strong>Connect with MCP</strong>
+            <span>Secure browser sign-in with automatic client registration.</span>
+          </header>
+          <div className="settings-mcp-catalog">
+            {dynamicMcpCatalog.map(renderCatalogCard)}
+          </div>
+        </div>
+        <div className="settings-mcp-catalog-section">
+          <header>
+            <strong>API integrations</strong>
+            <span>OAuth connections for these apps are coming soon.</span>
+          </header>
+          <div className="settings-mcp-catalog">
+            {apiCatalog.map(renderCatalogCard)}
+          </div>
+        </div>
+        <div className="settings-mcp-catalog-results">
+          {!filteredCatalog.length && (
+            <div className="settings-mcp-catalog-empty">
+              No matching apps. Add any MCP under Custom.
+            </div>
+          )}
+        </div>
+        {mcpError && <div className="settings-mcp-error">{mcpError}</div>}
+      </Group>}
+
+      {mcpView === 'agents' && <Group label="Agents on this Mac">
+        <div className="settings-agent-head">
+          <div>
+            <strong>Delegate to an installed agent</strong>
+            <span>Connected agents appear as reviewed Handoff options in notes and meeting notes.</span>
+          </div>
+          <button
+            className="settings-icon-btn"
+            title="Scan again"
+            disabled={mcpBusy === 'agents:refresh'}
+            onClick={() => void refreshLocalAgents()}
+          >
+            <Refresh size={13} className={mcpBusy === 'agents:refresh' ? 'spin' : undefined} />
+          </button>
+        </div>
+        <div className="settings-agent-grid">
+          {localAgents.map((agent) => {
+            const busy = mcpBusy === `agent:${agent.id}`
+            return (
+              <article className={`settings-agent-card${agent.connected ? ' connected' : ''}`} key={agent.id}>
+                <div className="settings-agent-card-head">
+                  <span
+                    className="settings-mcp-brand large"
+                    style={{ '--mcp-brand': agent.color } as React.CSSProperties}
+                    aria-hidden="true"
+                  >
+                    <IntegrationLogo id={`agent:${agent.id}`} size={19} />
+                  </span>
+                  <span className={`settings-agent-state${agent.installed ? ' installed' : ''}`}>
+                    {agent.connected ? 'Connected' : agent.installed ? 'Installed' : 'Not found'}
+                  </span>
+                </div>
+                <div className="settings-agent-copy">
+                  <strong>{agent.name}</strong>
+                  <p>{agent.description}</p>
+                  <small title={agent.executablePath}>
+                    {agent.installed ? agent.executablePath : `Install the ${agent.command} CLI, then scan again.`}
+                  </small>
+                </div>
+                <button
+                  className="settings-btn"
+                  disabled={!agent.installed || busy}
+                  onClick={() => void toggleLocalAgent(agent)}
+                >
+                  {busy ? 'Working…' : agent.connected ? 'Disconnect' : agent.installed ? 'Connect' : 'Unavailable'}
+                </button>
+              </article>
+            )
+          })}
+        </div>
+        {mcpError && <div className="settings-mcp-error">{mcpError}</div>}
+      </Group>}
+
+      {mcpView === 'custom' && <Group label="Add manually">
+        <div className="settings-mcp-add-actions">
+          <button className="settings-btn" onClick={() => setMcpAdding('local')}>
+            <Plus size={13} /> Local server
+          </button>
+          <button className="settings-btn" onClick={() => setMcpAdding('remote')}>
+            <Plus size={13} /> Remote server
+          </button>
+        </div>
+        {mcpAdding && (
+          <div className="settings-mcp-form">
+            <input
+              value={mcpName}
+              placeholder="App name"
+              autoFocus
+              onChange={(event) => setMcpName(event.target.value)}
+            />
+            {mcpAdding === 'local' ? (
+              <>
+                <input
+                  value={mcpCommand}
+                  placeholder="Executable command, for example npx"
+                  onChange={(event) => setMcpCommand(event.target.value)}
+                />
+                <textarea
+                  value={mcpArgs}
+                  rows={3}
+                  placeholder={'One argument per line\n-y\n@modelcontextprotocol/server-memory'}
+                  onChange={(event) => setMcpArgs(event.target.value)}
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  value={mcpUrl}
+                  placeholder="https://example.com/mcp"
+                  onChange={(event) => setMcpUrl(event.target.value)}
+                />
+                <div className="settings-mcp-auth-options" aria-label="Authentication method">
+                  {(['oauth', 'bearer', 'none'] as const).map((authMode) => (
+                    <button
+                      type="button"
+                      className={mcpRemoteAuth === authMode ? 'active' : undefined}
+                      key={authMode}
+                      onClick={() => setMcpRemoteAuth(authMode)}
+                    >
+                      {authMode === 'oauth'
+                        ? 'Browser sign-in'
+                        : authMode === 'bearer'
+                          ? 'Bearer token'
+                          : 'No auth'}
+                    </button>
+                  ))}
+                </div>
+                {mcpRemoteAuth === 'bearer' && (
+                  <input
+                    value={mcpToken}
+                    type="password"
+                    placeholder="Bearer token"
+                    onChange={(event) => setMcpToken(event.target.value)}
+                  />
+                )}
+              </>
+            )}
+            <p>
+              {mcpAdding === 'local'
+                ? 'Local servers execute this exact command with your user permissions.'
+                : 'OAuth opens a secure browser sign-in and stores tokens in Keychain-backed storage.'}
+              {' '}Noteato still asks before invoking every write action.
+            </p>
+            <div className="settings-mcp-form-actions">
+              <button className="settings-btn" onClick={resetMcpForm}>Cancel</button>
+              <button
+                className="settings-btn primary"
+                disabled={
+                  !mcpName.trim() ||
+                  mcpBusy === 'add'
+                }
+                onClick={() => void addMcpConnection()}
+              >
+                {mcpBusy === 'add' ? 'Adding…' : 'Add app'}
+              </button>
+            </div>
+          </div>
+        )}
+        {mcpError && <div className="settings-mcp-error">{mcpError}</div>}
+      </Group>}
+    </>
+  )
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal settings-modal" onClick={(e) => e.stopPropagation()}>
-        <nav className="settings-nav" aria-label="Settings sections">
+        <nav
+          className="settings-nav"
+          aria-label="Settings sections"
+          onWheel={(event) => {
+            if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+            event.currentTarget.scrollLeft += event.deltaY
+            event.preventDefault()
+          }}
+        >
           <div className="settings-nav-title">Settings</div>
           {NAV_GROUPS.map((group) => (
             <div key={group.group} className="settings-nav-block">
@@ -556,6 +1248,8 @@ export default function SettingsModal({ onClose, onNotesDirChanged, initialTab }
               renderAppearance()
             ) : tab === 'ai' ? (
               renderAi(settings)
+            ) : tab === 'apps' ? (
+              renderApps()
             ) : (
               renderSpeech(settings)
             )}

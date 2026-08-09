@@ -3,6 +3,7 @@ import {
   appendMeetingTranscript,
   applyTranscriptEdits,
   chronological,
+  deleteTranscriptSegment,
   displayName,
   meetingMarkdown,
   mergeTranscripts,
@@ -187,6 +188,26 @@ describe('meeting transcript', () => {
   it('rejects stale transcript edits with the wrong segment count', () => {
     const meeting = mergeTranscripts(channel('hello', [['hello', 0, 0.4]]), channel('', []), 'test')
     expect(() => applyTranscriptEdits(meeting, [])).toThrow(/changed while/)
+  })
+
+  it('deletes one transcript block while flushing edits to the survivors', () => {
+    const meeting = mergeTranscripts(
+      channel('hello again', [
+        ['hello', 0, 0.4],
+        ['again', 2, 2.4]
+      ]),
+      channel('yes', [['yes', 1, 1.4]]),
+      'test'
+    )
+
+    const next = deleteTranscriptSegment(meeting, 1, [
+      'edited hello',
+      'remove me',
+      'edited again'
+    ])
+
+    expect(next.segments.map((segment) => segment.text)).toEqual(['edited hello', 'edited again'])
+    expect(next.segments.map((segment) => segment.start)).toEqual([0, 2])
   })
 
   it('appends a later recording after the existing audio timeline', () => {

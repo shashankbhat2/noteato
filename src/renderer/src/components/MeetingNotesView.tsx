@@ -17,17 +17,15 @@ import {
   IconRefresh as Refresh,
   IconSparkles as Sparkles
 } from '@tabler/icons-react'
-import {
-  MEETING_NOTES_TEMPLATES,
-  type MeetingNotesState,
-  type MeetingNotesTemplateId
-} from '../../../shared/meetingNotes'
+import { type MeetingNotesState } from '../../../shared/meetingNotes'
 import { useTheme } from '../theme'
 import { FONT_STACKS } from '../fonts'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { createNoteatoEditor, type NoteatoBlock } from '../noteLink'
 import { BlockMenuButton } from './BlockDragMenu'
 import MarkdownText from './MarkdownText'
+import SelectionAiToolbar, { type SelectionOpenPayload } from './SelectionAiToolbar'
+import DelegatePopup from './DelegatePopup'
 
 function MeetingNotesSideMenu(props: ComponentProps<typeof SideMenu>) {
   return (
@@ -43,20 +41,28 @@ interface MeetingNotesDocumentHandle {
 
 const MeetingNotesDocument = forwardRef<
   MeetingNotesDocumentHandle,
-  { markdown: string; onSave: (markdown: string) => Promise<boolean> }
->(function MeetingNotesDocument({ markdown, onSave }, ref) {
+  {
+    noteId: string
+    noteTitle: string
+    markdown: string
+    onSave: (markdown: string) => Promise<boolean>
+    onError: (message: string) => void
+  }
+>(function MeetingNotesDocument({ noteId, noteTitle, markdown, onSave, onError }, ref) {
   const { resolvedTheme, fontFamily } = useTheme()
   const [blocks, setBlocks] = useState<NoteatoBlock[] | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const dirty = useRef(false)
   const editVersion = useRef(0)
   const saving = useRef(false)
+  const [delegatePopup, setDelegatePopup] = useState<SelectionOpenPayload | null>(null)
 
   useEffect(() => {
     const scratch = createNoteatoEditor()
     setBlocks(scratch.tryParseMarkdownToBlocks(markdown))
     dirty.current = false
     editVersion.current = 0
+    setDelegatePopup(null)
   }, [markdown])
 
   const editor = useMemo(() => (blocks ? createNoteatoEditor(blocks) : null), [blocks])
@@ -121,6 +127,7 @@ const MeetingNotesDocument = forwardRef<
         editor={editor}
         editable
         theme={getNoteatoTheme(resolvedTheme, FONT_STACKS[fontFamily])}
+        formattingToolbar={false}
         sideMenu={false}
         onChange={() => {
           dirty.current = true
@@ -129,11 +136,29 @@ const MeetingNotesDocument = forwardRef<
           saveTimer.current = setTimeout(() => void persist(), 600)
         }}
       >
+        <SelectionAiToolbar
+          editor={editor}
+          aiActions={false}
+          onDelegate={setDelegatePopup}
+        />
         <SideMenuController
           sideMenu={MeetingNotesSideMenu}
           floatingUIOptions={{ useFloatingOptions: { placement: 'right-start' } }}
         />
       </BlockNoteView>
+      {delegatePopup && (
+        <DelegatePopup
+          editor={editor}
+          blocks={delegatePopup.blocks}
+          selectedText={delegatePopup.selectedText}
+          position={delegatePopup.position}
+          noteId={noteId}
+          noteTitle={noteTitle}
+          tab="Meeting notes"
+          onError={onError}
+          onClose={() => setDelegatePopup(null)}
+        />
+      )}
     </div>
   )
 })
@@ -160,7 +185,9 @@ function MeetingNotesStream({ markdown }: { markdown: string }) {
 
   useEffect(() => {
     const edge = edgeRef.current
-    const scroller = edge?.closest('.note-meeting-notes-surface') as HTMLElement | null
+    const scroller = edge?.closest(
+      '.note-writing-surface, .note-meeting-notes-surface'
+    ) as HTMLElement | null
     if (!edge || !scroller || contentHeight === 0) return
     const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
     if (distanceFromBottom < 140) edge.scrollIntoView({ block: 'nearest' })
@@ -183,33 +210,30 @@ function MeetingNotesStream({ markdown }: { markdown: string }) {
 }
 
 interface Props {
+  noteId: string
+  noteTitle: string
   state: MeetingNotesState
   onRetry: () => void
   onOpenSettings: () => void
   onSave: (markdown: string) => Promise<boolean>
-  onSelectTemplate: (template: MeetingNotesTemplateId) => Promise<void>
+  onError: (message: string) => void
 }
 
-export default function MeetingNotesView({
-  state,
-  onRetry,
-  onOpenSettings,
-  onSave,
-  onSelectTemplate
-}: Props) {
-  const documentRef = useRef<MeetingNotesDocumentHandle>(null)
-  const [selecting, setSelecting] = useState<MeetingNotesTemplateId | null>(null)
+export interface MeetingNotesViewHandle {
+  flush: () => Promise<void>
+}
 
-  const selectTemplate = async (template: MeetingNotesTemplateId): Promise<void> => {
-    if (template === state.template || selecting) return
-    setSelecting(template)
-    try {
+const MeetingNotesView = forwardRef<MeetingNotesViewHandle, Props>(function MeetingNotesView(
+  { noteId, noteTitle, state, onRetry, onOpenSettings, onSave, onError },
+  ref
+) {
+  const documentRef = useRef<MeetingNotesDocumentHandle>(null)
+
+  useImperativeHandle(ref, () => ({
+    flush: async () => {
       await documentRef.current?.flush()
-      await onSelectTemplate(template)
-    } finally {
-      setSelecting(null)
     }
-  }
+  }))
 
   let content: ReactNode
   if (state.status === 'waiting') {
@@ -252,7 +276,14 @@ export default function MeetingNotesView({
           </p>
         )}
         {state.content ? (
-          <MeetingNotesDocument ref={documentRef} markdown={state.content} onSave={onSave} />
+          <MeetingNotesDocument
+            ref={documentRef}
+            noteId={noteId}
+            noteTitle={noteTitle}
+            markdown={state.content}
+            onSave={onSave}
+            onError={onError}
+          />
         ) : (
           <div className="note-transcription-empty meeting-notes-empty">
             <strong>Meeting notes could not be prepared</strong>
@@ -265,26 +296,7 @@ export default function MeetingNotesView({
     )
   }
 
-  return (
-    <div className="meeting-notes-workspace">
-      <div className="meeting-notes-templates" aria-label="Meeting notes template">
-        <span>Template</span>
-        <div>
-          {MEETING_NOTES_TEMPLATES.map((template) => (
-            <button
-              key={template.id}
-              type="button"
-              className={state.template === template.id ? 'active' : ''}
-              disabled={state.status === 'generating' || selecting !== null}
-              title={template.description}
-              onClick={() => void selectTemplate(template.id)}
-            >
-              {selecting === template.id ? 'Applying…' : template.label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {content}
-    </div>
-  )
-}
+  return <div className="meeting-notes-workspace">{content}</div>
+})
+
+export default MeetingNotesView

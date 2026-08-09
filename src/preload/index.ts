@@ -28,8 +28,21 @@ import type { MeetingTranscript } from '../shared/meetingTranscript'
 import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
 import type { NoteTemplate, NoteTemplateDraft } from '../shared/noteTemplates'
 import type { HomeChatThread, HomeChatThreadSummary } from '../shared/homeChat'
+import type {
+  DelegateContext,
+  DelegateSuggestionsResult,
+  McpConnectionInput,
+  McpConnectionSummary,
+  McpExecuteRequest,
+  McpExecutionProgress,
+  McpExecutionResult,
+  McpImportCandidate,
+  McpToolSummary
+} from '../shared/mcp'
+import type { LocalAgentId, LocalAgentSummary } from '../shared/localAgents'
 
 let nextAiStreamRequestId = 0
+let nextMcpExecutionRequestId = 0
 
 /** Right-click details forwarded from the main process's context-menu event. */
 export interface ContextMenuParams {
@@ -164,6 +177,12 @@ const api = {
       ipcRenderer.invoke('meeting:getTranscript', noteId),
     saveTranscript: (noteId: string, texts: string[]): Promise<MeetingTranscript | null> =>
       ipcRenderer.invoke('meeting:saveTranscript', noteId, texts),
+    deleteTranscriptSegment: (
+      noteId: string,
+      sourceIndex: number,
+      texts: string[]
+    ): Promise<MeetingTranscript | null> =>
+      ipcRenderer.invoke('meeting:deleteTranscriptSegment', noteId, sourceIndex, texts),
     getNotesState: (noteId: string): Promise<MeetingNotesState> =>
       ipcRenderer.invoke('meeting:getNotesState', noteId),
     getNotesMarkdown: (noteId: string): Promise<string | null> =>
@@ -258,6 +277,58 @@ const api = {
       return ipcRenderer
         .invoke('ai:stream', requestId, req)
         .finally(() => ipcRenderer.removeListener(channel, listener))
+    }
+  },
+  mcp: {
+    listConnections: (): Promise<McpConnectionSummary[]> =>
+      ipcRenderer.invoke('mcp:listConnections'),
+    listAgents: (): Promise<LocalAgentSummary[]> => ipcRenderer.invoke('mcp:listAgents'),
+    connectAgent: (agentId: LocalAgentId): Promise<McpConnectionSummary> =>
+      ipcRenderer.invoke('mcp:connectAgent', agentId),
+    add: (input: McpConnectionInput): Promise<McpConnectionSummary> =>
+      ipcRenderer.invoke('mcp:add', input),
+    addCatalog: (catalogId: string): Promise<McpConnectionSummary> =>
+      ipcRenderer.invoke('mcp:addCatalog', catalogId),
+    addApi: (
+      catalogId: string,
+      credentials: Record<string, string>
+    ): Promise<McpConnectionSummary> =>
+      ipcRenderer.invoke('mcp:addApi', catalogId, credentials),
+    remove: (id: string): Promise<boolean> => ipcRenderer.invoke('mcp:remove', id),
+    setEnabled: (id: string, enabled: boolean): Promise<McpConnectionSummary | null> =>
+      ipcRenderer.invoke('mcp:setEnabled', id, enabled),
+    connect: (id: string): Promise<McpConnectionSummary> =>
+      ipcRenderer.invoke('mcp:connect', id),
+    disconnect: (id: string): Promise<void> => ipcRenderer.invoke('mcp:disconnect', id),
+    discoverInstalled: (): Promise<McpImportCandidate[]> =>
+      ipcRenderer.invoke('mcp:discoverInstalled'),
+    discoverFile: (): Promise<McpImportCandidate[]> =>
+      ipcRenderer.invoke('mcp:discoverFile'),
+    import: (candidateId: string): Promise<McpConnectionSummary> =>
+      ipcRenderer.invoke('mcp:import', candidateId),
+    listTools: (connectionId?: string): Promise<McpToolSummary[]> =>
+      ipcRenderer.invoke('mcp:listTools', connectionId),
+    suggest: (context: DelegateContext): Promise<DelegateSuggestionsResult> =>
+      ipcRenderer.invoke('mcp:suggest', context),
+    execute: (
+      request: McpExecuteRequest,
+      onProgress: (progress: McpExecutionProgress) => void,
+      registerCancel?: (cancel: () => void) => void
+    ): Promise<McpExecutionResult> => {
+      const requestId = ++nextMcpExecutionRequestId
+      const channel = `mcp:execute:${requestId}`
+      const listener = (_e: Electron.IpcRendererEvent, progress: McpExecutionProgress): void =>
+        onProgress(progress)
+      ipcRenderer.on(channel, listener)
+      registerCancel?.(() => void ipcRenderer.invoke('mcp:abort', requestId))
+      return ipcRenderer
+        .invoke('mcp:execute', requestId, request)
+        .finally(() => ipcRenderer.removeListener(channel, listener))
+    },
+    subscribeChanged: (callback: () => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('mcp:changed', listener)
+      return () => ipcRenderer.removeListener('mcp:changed', listener)
     }
   },
   app: {

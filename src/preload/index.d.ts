@@ -25,6 +25,18 @@ import type { MeetingTranscript } from '../shared/meetingTranscript'
 import type { MeetingNotesState, MeetingNotesTemplateId } from '../shared/meetingNotes'
 import type { NoteTemplate, NoteTemplateDraft } from '../shared/noteTemplates'
 import type { HomeChatThread, HomeChatThreadSummary } from '../shared/homeChat'
+import type {
+  DelegateContext,
+  DelegateSuggestionsResult,
+  McpConnectionInput,
+  McpConnectionSummary,
+  McpExecuteRequest,
+  McpExecutionProgress,
+  McpExecutionResult,
+  McpImportCandidate,
+  McpToolSummary
+} from '../shared/mcp'
+import type { LocalAgentId, LocalAgentSummary } from '../shared/localAgents'
 
 export interface ContextMenuParams {
   x: number
@@ -112,6 +124,11 @@ interface NoteatoApi {
     getRecording: (noteId: string) => Promise<NoteRecording | null>
     getTranscript: (noteId: string) => Promise<MeetingTranscript | null>
     saveTranscript: (noteId: string, texts: string[]) => Promise<MeetingTranscript | null>
+    deleteTranscriptSegment: (
+      noteId: string,
+      sourceIndex: number,
+      texts: string[]
+    ) => Promise<MeetingTranscript | null>
     getNotesState: (noteId: string) => Promise<MeetingNotesState>
     getNotesMarkdown: (noteId: string) => Promise<string | null>
     retryNotes: (noteId: string) => Promise<MeetingNotesState>
@@ -151,6 +168,32 @@ interface NoteatoApi {
       onDelta: (delta: string) => void,
       registerCancel?: (cancel: () => void) => void
     ) => Promise<string>
+  }
+  mcp: {
+    listConnections: () => Promise<McpConnectionSummary[]>
+    listAgents: () => Promise<LocalAgentSummary[]>
+    connectAgent: (agentId: LocalAgentId) => Promise<McpConnectionSummary>
+    add: (input: McpConnectionInput) => Promise<McpConnectionSummary>
+    addCatalog: (catalogId: string) => Promise<McpConnectionSummary>
+    addApi: (
+      catalogId: string,
+      credentials: Record<string, string>
+    ) => Promise<McpConnectionSummary>
+    remove: (id: string) => Promise<boolean>
+    setEnabled: (id: string, enabled: boolean) => Promise<McpConnectionSummary | null>
+    connect: (id: string) => Promise<McpConnectionSummary>
+    disconnect: (id: string) => Promise<void>
+    discoverInstalled: () => Promise<McpImportCandidate[]>
+    discoverFile: () => Promise<McpImportCandidate[]>
+    import: (candidateId: string) => Promise<McpConnectionSummary>
+    listTools: (connectionId?: string) => Promise<McpToolSummary[]>
+    suggest: (context: DelegateContext) => Promise<DelegateSuggestionsResult>
+    execute: (
+      request: McpExecuteRequest,
+      onProgress: (progress: McpExecutionProgress) => void,
+      registerCancel?: (cancel: () => void) => void
+    ) => Promise<McpExecutionResult>
+    subscribeChanged: (callback: () => void) => () => void
   }
   app: {
     getVersion: () => Promise<string>

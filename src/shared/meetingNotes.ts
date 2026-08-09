@@ -27,25 +27,25 @@ export const MEETING_NOTES_TEMPLATES: readonly MeetingNotesTemplate[] = [
     id: 'standard',
     label: 'General',
     description: 'Balanced summary, decisions and next steps',
-    sections: '# {title}\n## Summary\n## Decisions\n## Action items\n## Discussion\n## Open questions'
+    sections: '## Summary\n## Decisions\n## Action items\n## Discussion\n## Open questions'
   },
   {
     id: 'actions',
     label: 'Action plan',
     description: 'Commitments, owners, dates and blockers first',
-    sections: '# {title}\n## Outcomes\n## Action items\n## Owners and dates\n## Blockers\n## Follow-ups'
+    sections: '## Outcomes\n## Action items\n## Owners and dates\n## Blockers\n## Follow-ups'
   },
   {
     id: 'oneOnOne',
     label: '1:1',
     description: 'Updates, feedback and support',
-    sections: '# {title}\n## Check-in\n## Updates\n## Feedback\n## Support needed\n## Commitments'
+    sections: '## Check-in\n## Updates\n## Feedback\n## Support needed\n## Commitments'
   },
   {
     id: 'standup',
     label: 'Stand-up',
     description: 'Progress, plans and blockers',
-    sections: '# {title}\n## Progress\n## Next\n## Blockers\n## Follow-ups'
+    sections: '## Progress\n## Next\n## Blockers\n## Follow-ups'
   }
 ] as const
 
@@ -79,7 +79,7 @@ export function meetingNotesRequest(
   const template =
     MEETING_NOTES_TEMPLATES.find((candidate) => candidate.id === templateId) ??
     MEETING_NOTES_TEMPLATES[0]
-  const sections = template.sections.replace('{title}', title)
+  const sections = template.sections
   return {
     system:
       'You are an exacting meeting-notes editor. Produce useful, concise Markdown from ' +
@@ -87,11 +87,15 @@ export function meetingNotesRequest(
       'the current meeting-notes draft and treat user-authored text as higher priority ' +
       'than transcription wording. Never invent ' +
       'facts, owners, dates, decisions, or action items. Return Markdown only, with no ' +
-      'code fence or commentary.',
+      'code fence or commentary. Use only level-2 and level-3 Markdown headings (`##` and ' +
+      '`###`). Never emit a level-1 (`#`) heading.',
     prompt: `Create the canonical meeting notes for “${title}”.
 
 Use the “${template.label}” template below. Omit sections that have no real content:
 ${sections}
+
+Use only H2 and H3 headings. Do not add a title heading, and normalize any H1 from the
+current draft to H2.
 
 Keep concrete names, numbers, dates and commitments. Make action items checkboxes and
 include an owner or due date only when the sources explicitly provide one. Reconcile

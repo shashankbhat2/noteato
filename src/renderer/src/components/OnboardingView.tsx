@@ -10,7 +10,7 @@ import type { ModelStatus, Settings } from '../../../shared/types'
 import noteatoIcon from '../../../../build/icon.png'
 import { ACCENT_OPTIONS } from '../accents'
 import { useTheme } from '../theme'
-import { ModelProgress } from './ModelDownload'
+import { ModelProgress, modelStatusLabel } from './ModelDownload'
 import { Row, Switch } from './SettingsRow'
 
 interface Props {
@@ -106,7 +106,7 @@ export default function OnboardingView({ initialSettings, onComplete }: Props) {
 
   const meetingDescription =
     modelStatus.state === 'failed'
-      ? 'The speech model didn’t download. You can retry in Settings.'
+      ? modelStatusLabel(modelStatus)
       : modelStatus.state === 'installed'
         ? 'Transcribe and summarise meetings on this Mac.'
         : 'Transcribe and summarise meetings on this Mac. Downloads a 680 MB model.'

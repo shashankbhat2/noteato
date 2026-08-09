@@ -1,6 +1,5 @@
 import { basename, join } from 'path'
 import { existsSync, linkSync, renameSync, rmSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import {
   app,
@@ -10,7 +9,6 @@ import {
   dialog,
   ipcMain,
   nativeTheme,
-  net,
   protocol,
   session,
   shell
@@ -65,6 +63,10 @@ import {
   parseRecordingMediaUrl,
   RECORDING_MEDIA_SCHEME
 } from '../shared/recordingMedia'
+import { recordingMediaResponse } from './recordingMediaResponse'
+import { McpManager } from './mcpManager'
+import type { DelegateContext, McpConnectionInput, McpExecuteRequest } from '../shared/mcp'
+import type { LocalAgentId } from '../shared/localAgents'
 
 // Audio/video elements need the stream privilege to issue range requests.
 // This must run before Electron becomes ready.
@@ -81,6 +83,17 @@ const noteStore = new NoteStore(appDb, settingsStore.read().notesDir ?? undefine
 const scratchStore = new ScratchStore(appDb)
 const templateStore = new TemplateStore(noteStore, () => noteStore.getNotesDir())
 const homeChatStore = new HomeChatStore(appDb)
+const mcpManager = new McpManager(
+  appDb,
+  () => settingsStore.read(),
+  () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('mcp:changed')
+    }
+  },
+  app.getVersion(),
+  (agentId) => join(app.getPath('userData'), 'agent-workspaces', agentId)
+)
 // Linked external files/folders reload live: any on-disk change lands as an
 // upsert (single file) or refresh (folder) in every window.
 const externalWatcher = new ExternalWatcher((rootPath, kind) => {
@@ -486,11 +499,11 @@ function isSafeExternalUrl(rawUrl: string): boolean {
    the OS shows before the renderer boots is the same colour it lands on. */
 const DARK_BG = '#1a1a1a'
 const LIGHT_BG = '#ededed'
-// Below 400px the compact title-bar controls and the note toolbar begin to
+// Below 450px the compact title-bar controls and the note toolbar begin to
 // compete for the same horizontal space. Keep the native window from entering
 // that unusable range instead of relying on individual views to clip it.
-const MIN_WIDTH = 400
-const MIN_HEIGHT = 250
+const MIN_WIDTH = 450
+const MIN_HEIGHT = 800
 /**
  * First run shows the setup card and nothing else — an empty app window behind
  * it would be showing a workspace the user has not finished setting up. The
@@ -983,6 +996,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle('meeting:saveTranscript', (_e, noteId: string, texts: string[]) => {
     return recordingStore.saveTranscript(noteId, texts)
   })
+  ipcMain.handle(
+    'meeting:deleteTranscriptSegment',
+    (_e, noteId: string, sourceIndex: number, texts: string[]) =>
+      recordingStore.deleteTranscriptSegment(noteId, sourceIndex, texts)
+  )
   ipcMain.handle('meeting:getNotesState', (_e, noteId: string) =>
     meetingNotesGenerator.ensure(noteId)
   )
@@ -1051,6 +1069,60 @@ function registerIpcHandlers(): void {
     aiStreamAborts.get(requestId)?.abort()
   })
 
+  // --- MCP apps -----------------------------------------------------------
+  // Local processes, remote credentials and tool calls stay in main. The
+  // renderer only receives redacted connection summaries and tool schemas.
+  ipcMain.handle('mcp:listConnections', () => mcpManager.listConnections())
+  ipcMain.handle('mcp:listAgents', () => mcpManager.listLocalAgents())
+  ipcMain.handle('mcp:connectAgent', (_e, agentId: LocalAgentId) =>
+    mcpManager.connectLocalAgent(agentId)
+  )
+  ipcMain.handle('mcp:add', (_e, input: McpConnectionInput) => mcpManager.add(input))
+  ipcMain.handle('mcp:addCatalog', (_e, catalogId: string) =>
+    mcpManager.addCatalog(catalogId)
+  )
+  ipcMain.handle(
+    'mcp:addApi',
+    (_e, catalogId: string, credentials: Record<string, string>) =>
+      mcpManager.addApi(catalogId, credentials)
+  )
+  ipcMain.handle('mcp:remove', (_e, id: string) => mcpManager.remove(id))
+  ipcMain.handle('mcp:setEnabled', (_e, id: string, enabled: boolean) =>
+    mcpManager.setEnabled(id, enabled)
+  )
+  ipcMain.handle('mcp:connect', (_e, id: string) => mcpManager.connect(id))
+  ipcMain.handle('mcp:disconnect', (_e, id: string) => mcpManager.disconnect(id))
+  ipcMain.handle('mcp:discoverInstalled', () => mcpManager.discoverInstalled())
+  ipcMain.handle('mcp:discoverFile', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile'],
+      filters: [{ name: 'MCP configuration', extensions: ['json', 'toml'] }]
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || !result.filePaths[0]) return []
+    return mcpManager.discoverFile(result.filePaths[0])
+  })
+  ipcMain.handle('mcp:import', (_e, candidateId: string) =>
+    mcpManager.import(candidateId)
+  )
+  ipcMain.handle('mcp:listTools', (_e, connectionId?: string) =>
+    mcpManager.listTools(connectionId)
+  )
+  ipcMain.handle('mcp:suggest', (_e, context: DelegateContext) =>
+    mcpManager.suggest(context)
+  )
+  ipcMain.handle(
+    'mcp:execute',
+    (e, requestId: number, request: McpExecuteRequest) =>
+      mcpManager.execute(requestId, request, (progress) => {
+        if (!e.sender.isDestroyed()) e.sender.send(`mcp:execute:${requestId}`, progress)
+      })
+  )
+  ipcMain.handle('mcp:abort', (_e, requestId: number) => mcpManager.abort(requestId))
+
   ipcMain.handle('app:spellcheckerLanguages', () =>
     process.platform === 'darwin' ? [] : session.defaultSession.availableSpellCheckerLanguages
   )
@@ -1095,13 +1167,7 @@ app.whenReady().then(() => {
     const path = target.track === 'mic' ? recording?.micPath : recording?.systemPath
     if (!path) return new Response(null, { status: 404 })
 
-    // Electron's file handler streams from disk and preserves Range requests,
-    // which makes long recordings seekable without loading them into memory.
-    return net.fetch(pathToFileURL(path).href, {
-      method: request.method,
-      headers: request.headers,
-      bypassCustomProtocolHandlers: true
-    })
+    return recordingMediaResponse(path, request)
   })
 
   app.on('browser-window-created', (_, window) => {
@@ -1172,4 +1238,5 @@ app.on('will-quit', () => {
   globalShortcutManager.destroy()
   edgeHoverWatcher.stop()
   externalWatcher.destroy()
+  void mcpManager.close()
 })

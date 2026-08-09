@@ -1,7 +1,15 @@
 import { execFile } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync
+} from 'node:fs'
 import { join } from 'node:path'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { app } from 'electron'
@@ -19,6 +27,12 @@ const run = promisify(execFile)
  */
 const MODEL_NAME = 'sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8'
 const MODEL_URL = `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL_NAME}.tar.bz2`
+// Immutable metadata published by the upstream GitHub release. Checking both
+// means a proxy, interrupted transfer, or poisoned cache is rejected before
+// tar reports an opaque decompression failure.
+const MODEL_ARCHIVE_BYTES = 487_170_055
+const MODEL_ARCHIVE_SHA256 = '5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf'
+const DOWNLOAD_ATTEMPTS = 2
 
 export const MODEL_ENGINE = 'sherpa-onnx/parakeet-tdt-0.6b-v3-int8'
 
@@ -28,6 +42,42 @@ const REQUIRED_FILES = [
   'joiner.int8.onnx',
   'tokens.txt'
 ]
+
+/**
+ * Locate the directory the release archive placed its model files in.
+ *
+ * This intentionally stays in Node instead of shelling out to `find`: the
+ * previous command used GNU's `-maxdepth`, which macOS's BSD find rejects only
+ * after the entire 680 MB archive has downloaded and unpacked.
+ */
+export function findRequiredModelDirectory(
+  root: string,
+  maxDepth = 4
+): string | null {
+  const visit = (directory: string, depth: number): string | null => {
+    if (REQUIRED_FILES.every((name) => existsSync(join(directory, name)))) return directory
+    if (depth >= maxDepth) return null
+
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const found = visit(join(directory, entry.name), depth + 1)
+      if (found) return found
+    }
+    return null
+  }
+
+  return visit(root, 0)
+}
+
+export function modelArchiveValidationError(received: number, digest: string): string | null {
+  if (received !== MODEL_ARCHIVE_BYTES) {
+    return `incomplete speech model download (${received} of ${MODEL_ARCHIVE_BYTES} bytes)`
+  }
+  if (digest.toLowerCase() !== MODEL_ARCHIVE_SHA256) {
+    return 'speech model download failed its integrity check'
+  }
+  return null
+}
 
 export interface ModelPaths {
   dir: string
@@ -105,7 +155,11 @@ export function ensureModel(): Promise<void> {
   // open, and a toggle that appears to do nothing reads as broken.
   setStatus({ state: 'downloading', received: 0, total: 0 })
 
-  inFlight = download((received, total) => setStatus({ state: 'downloading', received, total }))
+  inFlight = download(
+    (received, total) => setStatus({ state: 'downloading', received, total }),
+    (received, total) =>
+      setStatus({ state: 'downloading', received, total, installing: true })
+  )
     .then(() => {
       setStatus({ state: 'installed' })
     })
@@ -122,7 +176,10 @@ export function ensureModel(): Promise<void> {
   return inFlight
 }
 
-async function download(onProgress?: (received: number, total: number) => void): Promise<void> {
+async function download(
+  onProgress?: (received: number, total: number) => void,
+  onInstalling?: (received: number, total: number) => void
+): Promise<void> {
   const parent = join(app.getPath('userData'), 'models')
   mkdirSync(parent, { recursive: true })
 
@@ -134,41 +191,84 @@ async function download(onProgress?: (received: number, total: number) => void):
   const archivePath = join(workDir, 'model.tar.bz2')
 
   try {
-    const response = await fetch(MODEL_URL, { redirect: 'follow' })
-    if (!response.ok || !response.body) {
-      throw new Error(`model download failed: ${response.status} ${response.statusText}`)
-    }
-
-    const total = Number(response.headers.get('content-length')) || 0
     let received = 0
-    // fetch's ReadableStream and Node's stream/web types are structurally
-    // incompatible in TS despite interoperating fine at runtime.
-    const source = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
-    if (onProgress) {
-      source.on('data', (chunk: Buffer) => {
-        received += chunk.length
-        onProgress(received, total)
-      })
+    let lastError: unknown
+    for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+      rmSync(archivePath, { force: true })
+      onProgress?.(0, MODEL_ARCHIVE_BYTES)
+      try {
+        received = await downloadVerifiedArchive(archivePath, onProgress)
+        lastError = null
+        break
+      } catch (error) {
+        lastError = error
+        if (attempt === DOWNLOAD_ATTEMPTS) break
+      }
     }
-    await pipeline(source, createWriteStream(archivePath))
+    if (lastError) {
+      const message = lastError instanceof Error ? lastError.message : String(lastError)
+      throw new Error(`${message}. The download was retried from a clean file.`)
+    }
 
+    onInstalling?.(received, MODEL_ARCHIVE_BYTES)
     await run('tar', ['-xjf', archivePath, '-C', workDir])
 
-    // The archive unpacks into its own directory; find it rather than assuming.
-    const { stdout } = await run('/bin/sh', [
-      '-c',
-      `find ${JSON.stringify(workDir)} -name tokens.txt -maxdepth 3 | head -1`
-    ])
-    const tokens = stdout.trim()
-    if (!tokens) throw new Error('model archive did not contain tokens.txt')
+    // The archive unpacks into its own directory; find the complete model
+    // rather than assuming a particular top-level archive name.
+    const unpacked = findRequiredModelDirectory(workDir)
+    if (!unpacked) throw new Error('model archive was missing required files')
 
-    const unpacked = join(tokens, '..')
     const target = modelDir()
     rmSync(target, { recursive: true, force: true })
-    await run('/bin/mv', [unpacked, target])
+    renameSync(unpacked, target)
 
     if (!isModelInstalled()) throw new Error('model archive was missing required files')
   } finally {
     rmSync(workDir, { recursive: true, force: true })
   }
+}
+
+async function downloadVerifiedArchive(
+  archivePath: string,
+  onProgress?: (received: number, total: number) => void
+): Promise<number> {
+  const response = await fetch(MODEL_URL, {
+    redirect: 'follow',
+    cache: 'no-store',
+    headers: {
+      // The checksum describes the bytes in the release asset. Do not let an
+      // intermediary transparently content-encode that byte stream.
+      'Accept-Encoding': 'identity',
+      'Cache-Control': 'no-cache'
+    }
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`model download failed: ${response.status} ${response.statusText}`)
+  }
+
+  const advertised = Number(response.headers.get('content-length')) || 0
+  if (advertised && advertised !== MODEL_ARCHIVE_BYTES) {
+    throw new Error(
+      `speech model server returned an unexpected archive size (${advertised} bytes)`
+    )
+  }
+
+  let received = 0
+  const hash = createHash('sha256')
+  const verifier = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      received += chunk.length
+      hash.update(chunk)
+      onProgress?.(received, MODEL_ARCHIVE_BYTES)
+      callback(null, chunk)
+    }
+  })
+  // fetch's ReadableStream and Node's stream/web types are structurally
+  // incompatible in TS despite interoperating fine at runtime.
+  const source = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0])
+  await pipeline(source, verifier, createWriteStream(archivePath))
+
+  const validationError = modelArchiveValidationError(received, hash.digest('hex'))
+  if (validationError) throw new Error(validationError)
+  return received
 }

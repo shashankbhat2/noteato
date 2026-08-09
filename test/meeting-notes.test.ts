@@ -53,6 +53,18 @@ describe('derived meeting notes', () => {
     )
   })
 
+  it('restricts generated meeting-note headings to H2 and H3', () => {
+    for (const template of MEETING_NOTES_TEMPLATES) {
+      expect(template.sections).not.toMatch(/^# /m)
+      expect(template.sections).toMatch(/^## /m)
+    }
+
+    const request = meetingNotesRequest('Weekly', '', transcript)
+    expect(request.system).toContain('Never emit a level-1 (`#`) heading')
+    expect(request.prompt).toContain('Use only H2 and H3 headings')
+    expect(request.prompt).toContain('normalize any H1 from the')
+  })
+
   it('carries editable meeting-note content into the next recording update', () => {
     const request = meetingNotesRequest(
       'Weekly',

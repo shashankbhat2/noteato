@@ -190,6 +190,30 @@ export function applyTranscriptEdits(
 }
 
 /**
+ * Remove one utterance while preserving edits made to every surviving block.
+ * The renderer supplies the full pre-delete text list so deleting a block also
+ * flushes any edits that were still waiting for the autosave debounce.
+ */
+export function deleteTranscriptSegment(
+  transcript: MeetingTranscript,
+  sourceIndex: number,
+  texts: readonly string[]
+): MeetingTranscript {
+  if (
+    !Number.isSafeInteger(sourceIndex) ||
+    sourceIndex < 0 ||
+    sourceIndex >= transcript.segments.length
+  ) {
+    throw new Error('Transcript block is no longer available. Reload and try again.')
+  }
+  const edited = applyTranscriptEdits(transcript, texts)
+  return {
+    ...edited,
+    segments: edited.segments.filter((_, index) => index !== sourceIndex)
+  }
+}
+
+/**
  * Add a later recording to an existing transcript without disturbing edits to
  * the earlier material. The second capture starts at zero, so every timestamp
  * is shifted by the duration already present in the playable audio.

@@ -136,11 +136,11 @@ export interface MeetingError {
  * The Settings panes. Shared rather than private to the modal because main
  * opens a specific one — the meeting gate sends people straight to 'speech'.
  */
-export type SettingsTab = 'general' | 'appearance' | 'ai' | 'speech'
+export type SettingsTab = 'general' | 'appearance' | 'ai' | 'apps' | 'speech'
 
 export type ModelStatus =
   | { state: 'absent' }
-  | { state: 'downloading'; received: number; total: number }
+  | { state: 'downloading'; received: number; total: number; installing?: boolean }
   | { state: 'installed' }
   | { state: 'failed'; message: string }
 

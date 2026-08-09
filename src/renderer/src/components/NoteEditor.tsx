@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BlockNoteView } from '@blocknote/mantine'
 import {
   SideMenu,
@@ -17,15 +17,18 @@ import '@blocknote/mantine/style.css'
 import {
   IconCalendar as Calendar,
   IconCheck as Check,
+  IconChevronDown as ChevronDown,
   IconDots as Dots,
-  IconFileDescription as MeetingNotesIcon,
   IconFilePlus as FilePlus,
   IconFileText as FileText,
   IconMicrophone as Microphone,
+  IconNote as NoteIcon,
   IconPhoto as Photo,
   IconLoader2 as Loader2,
+  IconSparkles as Sparkles,
   IconStar as Star,
-  IconStarFilled as StarFilled
+  IconStarFilled as StarFilled,
+  IconX as X
 } from '@tabler/icons-react'
 import type { MeetingState, Note, NoteRecording } from '../../../shared/types'
 import { elapsedLabel } from '../../../shared/elapsed'
@@ -34,9 +37,11 @@ import TranscriptView from './TranscriptView'
 import type { MeetingTranscript } from '../../../shared/meetingTranscript'
 import {
   DEFAULT_MEETING_NOTES_TEMPLATE,
-  type MeetingNotesState
+  MEETING_NOTES_TEMPLATES,
+  type MeetingNotesState,
+  type MeetingNotesTemplateId
 } from '../../../shared/meetingNotes'
-import MeetingNotesView from './MeetingNotesView'
+import MeetingNotesView, { type MeetingNotesViewHandle } from './MeetingNotesView'
 import { useTheme } from '../theme'
 import { getNoteatoTheme } from '../blocknoteTheme'
 import { FONT_STACKS } from '../fonts'
@@ -57,6 +62,7 @@ import {
 import FindReplaceBar from './FindReplaceBar'
 import SelectionAiToolbar from './SelectionAiToolbar'
 import SelectionAiPopup from './SelectionAiPopup'
+import DelegatePopup from './DelegatePopup'
 import { BlockMenuButton, stripIds } from './BlockDragMenu'
 import ContextMenu, { type MenuItem } from './ContextMenu'
 import ReminderPopover from './ReminderPopover'
@@ -89,9 +95,12 @@ interface AiPopupState {
   position: { x: number; y: number } | null
 }
 
-type NoteSurface = 'note' | 'transcription' | 'meetingNotes'
+interface DelegatePopupState extends AiPopupState {
+  selectedText: string
+}
 
 const SAVE_DEBOUNCE_MS = 600
+const TRANSCRIPT_MODAL_ANIMATION_MS = 180
 
 const REVEAL_LABEL =
   window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
@@ -296,11 +305,14 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiPopup, setAiPopup] = useState<AiPopupState | null>(null)
+  const [delegatePopup, setDelegatePopup] = useState<DelegatePopupState | null>(null)
   const [reminderPopover, setReminderPopover] = useState<{ x: number; y: number } | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusTick, setFindFocusTick] = useState(0)
-  const [activeSurface, setActiveSurface] = useState<NoteSurface>('note')
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [transcriptClosing, setTranscriptClosing] = useState(false)
+  const [meetingNotesActive, setMeetingNotesActive] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
   const [templateCreation, setTemplateCreation] = useState<'creating' | 'created' | null>(null)
@@ -320,19 +332,41 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     status: 'waiting',
     content: ''
   })
+  const [meetingTemplateSelecting, setMeetingTemplateSelecting] =
+    useState<MeetingNotesTemplateId | null>(null)
   const [playhead, setPlayhead] = useState(0)
   const seekRef = useRef<((seconds: number) => void) | null>(null)
+  const meetingNotesViewRef = useRef<MeetingNotesViewHandle>(null)
+  const transcriptCloseTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const templateCancelRef = useRef<(() => void) | null>(null)
   const templateRunRef = useRef(0)
   const templateStatusTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const openTranscript = useCallback((): void => {
+    if (transcriptCloseTimerRef.current) clearTimeout(transcriptCloseTimerRef.current)
+    transcriptCloseTimerRef.current = undefined
+    setTranscriptClosing(false)
+    setTranscriptOpen(true)
+  }, [])
+
+  const closeTranscript = useCallback((): void => {
+    if (!transcriptOpen || transcriptClosing) return
+    setTranscriptClosing(true)
+    if (transcriptCloseTimerRef.current) clearTimeout(transcriptCloseTimerRef.current)
+    transcriptCloseTimerRef.current = setTimeout(() => {
+      setTranscriptOpen(false)
+      setTranscriptClosing(false)
+      transcriptCloseTimerRef.current = undefined
+    }, TRANSCRIPT_MODAL_ANIMATION_MS)
+  }, [transcriptClosing, transcriptOpen])
 
   useEffect(() => {
     void window.api.meeting.getState().then(setMeeting)
     return window.api.meeting.subscribeState(setMeeting)
   }, [])
 
-  // Reloaded when a recording lands on this note, so the Transcript tab and its
-  // player appear the moment the capture commits rather than on next open.
+  // Reloaded when a recording lands on this note, so its player and supporting
+  // material appear the moment the capture commits rather than on next open.
   useEffect(() => {
     let cancelled = false
     const load = (): void => {
@@ -386,10 +420,18 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     templateCancelRef.current?.()
     templateCancelRef.current = null
     if (templateStatusTimerRef.current) clearTimeout(templateStatusTimerRef.current)
+    if (transcriptCloseTimerRef.current) clearTimeout(transcriptCloseTimerRef.current)
     setTemplateCreation(null)
-    setActiveSurface('note')
+    setTranscriptOpen(false)
+    setTranscriptClosing(false)
+    setMeetingNotesActive(false)
+    setMeetingTemplateSelecting(null)
+    setRecording(null)
+    setTranscript(null)
     setChatOpen(false)
     setChatDraft('')
+    setAiPopup(null)
+    setDelegatePopup(null)
     setOutlineVisible(false)
     transcriptDraftRef.current = null
     transcriptDirtyRef.current = false
@@ -407,6 +449,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       templateRunRef.current += 1
       templateCancelRef.current?.()
       if (templateStatusTimerRef.current) clearTimeout(templateStatusTimerRef.current)
+      if (transcriptCloseTimerRef.current) clearTimeout(transcriptCloseTimerRef.current)
     }
   }, [])
 
@@ -418,6 +461,19 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     document.addEventListener('keydown', closeOnEscape)
     return () => document.removeEventListener('keydown', closeOnEscape)
   }, [chatOpen])
+
+  useEffect(() => {
+    if (!transcriptOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') closeTranscript()
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [closeTranscript, transcriptOpen])
+
+  useEffect(() => {
+    if (meetingNotesState.status === 'generating') setMeetingNotesActive(true)
+  }, [meetingNotesState.status])
 
   const closeChat = (): void => {
     setChatOpen(false)
@@ -760,9 +816,91 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     )
   }
 
+  const handleTranscriptDelete = async (sourceIndex: number): Promise<void> => {
+    const draft = transcriptDraftRef.current
+    if (!draft || !draft.segments[sourceIndex]) return
+    if (transcriptSaveTimer.current) {
+      clearTimeout(transcriptSaveTimer.current)
+      transcriptSaveTimer.current = undefined
+    }
+
+    const texts = draft.segments.map((segment) => segment.text)
+    const optimistic = {
+      ...draft,
+      segments: draft.segments.filter((_, index) => index !== sourceIndex)
+    }
+    const deleteVersion = transcriptEditVersionRef.current + 1
+    transcriptEditVersionRef.current = deleteVersion
+    transcriptDirtyRef.current = false
+    transcriptDraftRef.current = optimistic
+    setTranscript(optimistic)
+
+    try {
+      const saved = await window.api.meeting.deleteTranscriptSegment(noteId, sourceIndex, texts)
+      if (!saved) throw new Error('Transcript is no longer available.')
+
+      // Preserve an edit made while the delete request was crossing IPC. The
+      // next autosave now targets the shorter transcript stored by main.
+      if (transcriptEditVersionRef.current === deleteVersion) {
+        transcriptDirtyRef.current = false
+        transcriptDraftRef.current = saved
+        setTranscript(saved)
+      } else {
+        transcriptDirtyRef.current = true
+        transcriptSaveTimer.current = setTimeout(
+          () => void persistTranscript(),
+          SAVE_DEBOUNCE_MS
+        )
+      }
+    } catch {
+      // Put the block back without discarding edits made to its neighbours
+      // while deletion was in flight.
+      const current = transcriptDraftRef.current
+      let survivorIndex = 0
+      const restored = {
+        ...draft,
+        segments: draft.segments.map((segment, index) => {
+          if (index === sourceIndex) return segment
+          return current?.segments[survivorIndex++] ?? segment
+        })
+      }
+      transcriptEditVersionRef.current += 1
+      transcriptDirtyRef.current = true
+      transcriptDraftRef.current = restored
+      setTranscript(restored)
+      transcriptSaveTimer.current = setTimeout(
+        () => void persistTranscript(),
+        SAVE_DEBOUNCE_MS
+      )
+      setAiError('Could not delete the transcript block.')
+    }
+  }
+
   const flushTranscript = (): void => {
     if (!transcriptDirtyRef.current) return
     void persistTranscript()
+  }
+
+  const selectMeetingNotesTemplate = async (
+    template: MeetingNotesTemplateId
+  ): Promise<void> => {
+    if (
+      template === meetingNotesState.template ||
+      meetingTemplateSelecting ||
+      meetingNotesState.status === 'generating'
+    ) {
+      return
+    }
+    setMeetingTemplateSelecting(template)
+    try {
+      await meetingNotesViewRef.current?.flush()
+      const next = await window.api.meeting.setNotesTemplate(noteId, template)
+      setMeetingNotesState(next)
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'Could not change the meeting template.')
+    } finally {
+      setMeetingTemplateSelecting(null)
+    }
   }
 
   useEffect(() => {
@@ -820,7 +958,8 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     const run = templateRunRef.current + 1
     templateRunRef.current = run
     if (templateStatusTimerRef.current) clearTimeout(templateStatusTimerRef.current)
-    setActiveSurface('note')
+    setTranscriptOpen(false)
+    setMeetingNotesActive(false)
     setAiError(null)
     setTemplateCreation('creating')
 
@@ -1309,6 +1448,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       : ''
   const reminderAt = note.reminderAt
   const hasRecording = recording !== null
+  const hasMeetingContext = hasRecording || transcript !== null
   reminderAtRef.current = reminderAt
   fullWidthRef.current = fullWidth
 
@@ -1412,14 +1552,19 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         </div>
       )}
 
-      <div
-        className={
-          activeSurface === 'note' ? 'note-writing-surface active' : 'note-writing-surface'
-        }
-      >
+      <div className="note-writing-surface active">
         {outlineVisible && <NoteOutline editor={editor} />}
 
-        <div className={fullWidth ? 'note-editor full-width' : 'note-editor'}>
+        <div
+          className={[
+            'note-editor',
+            fullWidth ? 'full-width' : '',
+            hasMeetingContext ? 'has-meeting' : '',
+            meetingNotesActive ? 'meeting-notes-active' : ''
+          ]
+            .filter(Boolean)
+            .join(' ')}
+        >
           {findOpen && (
             <FindReplaceBar
               editor={editor}
@@ -1428,71 +1573,74 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             />
           )}
 
-          {/* The document switcher leads into the title and remains outside
-              contentEditable. */}
-          <div className="note-title-tabs">
-            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSurface === 'note'}
-                className={activeSurface === 'note' ? 'active' : ''}
-                onClick={() => setActiveSurface('note')}
-              >
-                <FileText size={12} />
-                <span>Note</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSurface === 'transcription'}
-                className={activeSurface === 'transcription' ? 'active' : ''}
-                disabled={!hasRecording}
-                title="Transcript becomes available when this note has a recording"
-                onClick={() => setActiveSurface('transcription')}
-              >
-                <Microphone size={12} />
-                <span>Transcript</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeSurface === 'meetingNotes'}
-                className={activeSurface === 'meetingNotes' ? 'active' : ''}
-                disabled={!hasRecording}
-                title="Prepared automatically from your note and transcript"
-                onClick={() => setActiveSurface('meetingNotes')}
-              >
-                <MeetingNotesIcon size={12} />
-                <span>Meeting notes</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Tags now sit directly below the title, alongside the date as
-              quiet document attributes. */}
+          {/* Every note exposes the same document modes. Meeting notes become
+              available once the note owns audio or transcript context. */}
           <div ref={metadataRef} className="note-metadata-row">
-            <TagBar
-              tags={note.tags}
-              suggestions={tagSuggestions}
-              readOnly={note.external}
-              onChange={(tags) => void handleSetTags(tags)}
-            />
-            <label
-              className={note.external ? 'note-date-badge read-only' : 'note-date-badge'}
-              title={note.external ? 'Date from linked file' : 'Change note date'}
-            >
-              <Calendar size={12} />
-              <span>{noteDateLabel(note.createdAt)}</span>
-              {!note.external && (
-                <input
-                  type="date"
-                  aria-label="Note date"
-                  value={dateInputValue(note.createdAt)}
-                  onChange={(event) => void handleSetDate(event.target.value)}
-                />
-              )}
-            </label>
+            <div className="note-properties-row">
+              <div className="note-mode-tabs" role="tablist" aria-label="Note view">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-label="Note"
+                  aria-selected={!meetingNotesActive}
+                  className={!meetingNotesActive ? 'active' : ''}
+                  title="Note"
+                  onClick={() => {
+                    setTranscriptOpen(false)
+                    setMeetingNotesActive(false)
+                  }}
+                >
+                  <NoteIcon size={13} />
+                  {!meetingNotesActive && <span>Note</span>}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-label="Meeting notes"
+                  aria-selected={meetingNotesActive}
+                  className={meetingNotesActive ? 'active' : ''}
+                  disabled={!hasMeetingContext}
+                  title={
+                    hasMeetingContext
+                      ? 'Meeting notes'
+                      : 'Available after this note has audio or a transcript'
+                  }
+                  onClick={() => {
+                    setTranscriptOpen(false)
+                    setOutlineVisible(false)
+                    setMeetingNotesActive(true)
+                  }}
+                >
+                  {meetingNotesState.status === 'generating' ? (
+                    <Loader2 size={13} className="spin" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  {meetingNotesActive && <span>Meeting notes</span>}
+                </button>
+              </div>
+              <TagBar
+                tags={note.tags}
+                suggestions={tagSuggestions}
+                readOnly={note.external}
+                onChange={(tags) => void handleSetTags(tags)}
+              />
+              <label
+                className={note.external ? 'note-date-badge read-only' : 'note-date-badge'}
+                title={note.external ? 'Date from linked file' : 'Change note date'}
+              >
+                <Calendar size={12} />
+                <span>{noteDateLabel(note.createdAt)}</span>
+                {!note.external && (
+                  <input
+                    type="date"
+                    aria-label="Note date"
+                    value={dateInputValue(note.createdAt)}
+                    onChange={(event) => void handleSetDate(event.target.value)}
+                  />
+                )}
+              </label>
+            </div>
           </div>
 
           <BlockNoteView
@@ -1514,6 +1662,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
               editor={editor}
               aiActions={aiSelectionActions}
               onOpen={setAiPopup}
+              onDelegate={setDelegatePopup}
             />
             <SuggestionMenuController
               triggerCharacter="/"
@@ -1552,122 +1701,145 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
               onClose={() => setAiPopup(null)}
             />
           )}
-        </div>
-      </div>
-
-      <div
-        className={
-          activeSurface === 'transcription'
-            ? 'note-transcription-surface active'
-            : 'note-transcription-surface'
-        }
-        role="tabpanel"
-      >
-        <div
-          className={
-            fullWidth ? 'note-transcription-content full-width' : 'note-transcription-content'
-          }
-        >
-          <div className="note-transcription-navigation">
-            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={false}
-                onClick={() => setActiveSurface('note')}
-              >
-                <FileText size={12} />
-                <span>Note</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected
-                className="active"
-                onClick={() => setActiveSurface('transcription')}
-              >
-                <Microphone size={12} />
-                <span>Transcript</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={false}
-                onClick={() => setActiveSurface('meetingNotes')}
-              >
-                <MeetingNotesIcon size={12} />
-                <span>Meeting notes</span>
-              </button>
-            </div>
-          </div>
-          {recording && (
-            <RecordingPlayer
-              recording={recording}
-              onPosition={setPlayhead}
-              registerSeek={(seek) => {
-                seekRef.current = seek
-              }}
+          {delegatePopup && (
+            <DelegatePopup
+              editor={editor}
+              blocks={delegatePopup.blocks}
+              selectedText={delegatePopup.selectedText}
+              position={delegatePopup.position}
+              noteId={note.id}
+              noteTitle={note.title}
+              tab="Note"
+              onError={setAiError}
+              onClose={() => setDelegatePopup(null)}
             />
           )}
-          {transcript ? (
-            <TranscriptView
-              transcript={transcript}
-              playheadSeconds={playhead}
-              onSeek={(seconds) => seekRef.current?.(seconds)}
-              onChange={handleTranscriptChange}
-              onCommit={flushTranscript}
-            />
-          ) : (
-            <div className="note-transcription-empty">
-              <Microphone size={18} />
-              <strong>{transcriptLabel.title}</strong>
-              <span>{transcriptLabel.detail}</span>
-            </div>
-          )}
         </div>
-      </div>
-
-      <div
-        className={
-          activeSurface === 'meetingNotes'
-            ? 'note-meeting-notes-surface active'
-            : 'note-meeting-notes-surface'
-        }
-        role="tabpanel"
-      >
-        <div
-          className={
-            fullWidth ? 'note-transcription-content full-width' : 'note-transcription-content'
-          }
-        >
-          <div className="note-transcription-navigation">
-            <div className="note-surface-tabs" role="tablist" aria-label="Note surfaces">
-              <button type="button" role="tab" aria-selected={false} onClick={() => setActiveSurface('note')}>
-                <FileText size={12} />
-                <span>Note</span>
-              </button>
-              <button type="button" role="tab" aria-selected={false} onClick={() => setActiveSurface('transcription')}>
-                <Microphone size={12} />
+        {hasMeetingContext && meetingNotesActive && (
+          <section
+            className={
+              fullWidth ? 'note-meeting-notes-mode full-width' : 'note-meeting-notes-mode'
+            }
+            aria-label="Meeting notes"
+          >
+            <div className="note-meeting-transport">
+              <label className="meeting-template-select">
+                <select
+                  aria-label="Meeting notes template"
+                  value={meetingNotesState.template}
+                  disabled={
+                    meetingNotesState.status === 'generating' ||
+                    meetingTemplateSelecting !== null
+                  }
+                  onChange={(event) =>
+                    void selectMeetingNotesTemplate(
+                      event.target.value as MeetingNotesTemplateId
+                    )
+                  }
+                >
+                  {MEETING_NOTES_TEMPLATES.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+                {meetingTemplateSelecting ? (
+                  <Loader2 size={12} className="spin" aria-hidden="true" />
+                ) : (
+                  <ChevronDown size={12} aria-hidden="true" />
+                )}
+              </label>
+              <button
+                type="button"
+                className="note-transcript-trigger"
+                aria-expanded={transcriptOpen}
+                aria-controls="meeting-transcript-modal"
+                onClick={() => {
+                  setChatOpen(false)
+                  if (transcriptOpen) closeTranscript()
+                  else openTranscript()
+                }}
+              >
+                <Microphone size={13} />
                 <span>Transcript</span>
               </button>
-              <button type="button" role="tab" aria-selected className="active" onClick={() => setActiveSurface('meetingNotes')}>
-                <MeetingNotesIcon size={12} />
-                <span>Meeting notes</span>
-              </button>
+              {recording && (
+                <RecordingPlayer
+                  recording={recording}
+                  onPosition={setPlayhead}
+                  registerSeek={(seek) => {
+                    seekRef.current = seek
+                  }}
+                />
+              )}
             </div>
-          </div>
-          <MeetingNotesView
-            state={meetingNotesState}
-            onRetry={() => void window.api.meeting.retryNotes(noteId)}
-            onOpenSettings={() => void window.api.app.openSettings()}
-            onSave={(markdown) => window.api.meeting.saveNotes(noteId, markdown)}
-            onSelectTemplate={async (template) => {
-              const next = await window.api.meeting.setNotesTemplate(noteId, template)
-              setMeetingNotesState(next)
-            }}
+            <MeetingNotesView
+              ref={meetingNotesViewRef}
+              noteId={note.id}
+              noteTitle={note.title}
+              state={meetingNotesState}
+              onRetry={() => void window.api.meeting.retryNotes(noteId)}
+              onOpenSettings={() => void window.api.app.openSettings()}
+              onSave={(markdown) => window.api.meeting.saveNotes(noteId, markdown)}
+              onError={setAiError}
+            />
+          </section>
+        )}
+      </div>
+
+      {transcriptOpen && (
+        <>
+          <button
+            type="button"
+            className={
+              transcriptClosing
+                ? 'note-transcript-modal-backdrop closing'
+                : 'note-transcript-modal-backdrop'
+            }
+            aria-label="Close transcript"
+            tabIndex={-1}
+            onClick={closeTranscript}
           />
-        </div>
-      </div>
+          <section
+            id="meeting-transcript-modal"
+            className={
+              transcriptClosing ? 'note-transcript-modal closing' : 'note-transcript-modal'
+            }
+            role="dialog"
+            aria-modal="true"
+            aria-label="Transcript"
+          >
+            <button
+              type="button"
+              className="note-transcript-modal-close"
+              onClick={closeTranscript}
+              aria-label="Close transcript"
+              title="Close transcript"
+              autoFocus
+            >
+              <X size={15} />
+            </button>
+            <div className="note-transcript-modal-body">
+              {transcript ? (
+                <TranscriptView
+                  transcript={transcript}
+                  playheadSeconds={playhead}
+                  onSeek={(seconds) => seekRef.current?.(seconds)}
+                  onChange={handleTranscriptChange}
+                  onDelete={(sourceIndex) => void handleTranscriptDelete(sourceIndex)}
+                  onCommit={flushTranscript}
+                />
+              ) : (
+                <div className="note-transcription-empty">
+                  <Microphone size={18} />
+                  <strong>{transcriptLabel.title}</strong>
+                  <span>{transcriptLabel.detail}</span>
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
 
       {chatOpen && (
         <button
@@ -1691,19 +1863,14 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             active={chatOpen}
             draft={chatDraft}
             onDraftChange={setChatDraft}
-            onOpen={() => setChatOpen(true)}
-            onClose={closeChat}
-            activeTab={
-              activeSurface === 'transcription'
-                ? 'Transcript'
-                : activeSurface === 'meetingNotes'
-                  ? 'Meeting notes'
-                  : 'Note'
-            }
-            onError={setAiError}
-            onEditApplied={() => {
-              setActiveSurface('note')
+            onOpen={() => {
+              setTranscriptOpen(false)
+              setChatOpen(true)
             }}
+            onClose={closeChat}
+            activeTab={meetingNotesActive ? 'Meeting notes' : 'Note'}
+            onError={setAiError}
+            onEditApplied={() => setMeetingNotesActive(false)}
           />
         </div>
       </div>

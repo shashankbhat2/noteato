@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3'
 import type { NoteRecording } from '../../shared/types'
 import {
   applyTranscriptEdits,
+  deleteTranscriptSegment,
   type MeetingTranscript
 } from '../../shared/meetingTranscript'
 import {
@@ -135,6 +136,24 @@ export class RecordingStore {
     if (!recording || !current) return null
     const next = applyTranscriptEdits(current, texts)
     writeFileSync(join(recording.captureDir, MEETING_FILE), JSON.stringify(next, null, 2), 'utf-8')
+    return next
+  }
+
+  /** Delete one block and flush the other blocks' pending prose edits atomically. */
+  deleteTranscriptSegment(
+    noteId: string,
+    sourceIndex: number,
+    texts: readonly string[]
+  ): MeetingTranscript | null {
+    const recording = this.get(noteId)
+    const current = this.readTranscript(noteId)
+    if (!recording || !current) return null
+    const next = deleteTranscriptSegment(current, sourceIndex, texts)
+    writeFileSync(
+      join(recording.captureDir, MEETING_FILE),
+      JSON.stringify(next, null, 2),
+      'utf-8'
+    )
     return next
   }
 

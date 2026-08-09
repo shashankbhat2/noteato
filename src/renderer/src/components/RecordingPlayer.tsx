@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   IconPlayerPauseFilled as Pause,
-  IconPlayerPlayFilled as Play,
-  IconRewindBackward15 as Back15,
-  IconRewindForward15 as Forward15
+  IconPlayerPlayFilled as Play
 } from '@tabler/icons-react'
 import type { NoteRecording } from '../../../shared/types'
 import { elapsedLabel } from '../../../shared/elapsed'
 import { recordingMediaUrl } from '../../../shared/recordingMedia'
 
-const SKIP_SECONDS = 15
 const SPEEDS = [1, 1.25, 1.5, 2] as const
 
 interface Props {
@@ -21,7 +18,7 @@ interface Props {
 }
 
 /**
- * Transport for a note's recording, above its transcript.
+ * Compact transport for a note's recording.
  *
  * New meetings expose one mixed recording. The optional follower remains for
  * captures made by older builds, where microphone and system audio were stored
@@ -68,7 +65,7 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
   }, [resync])
 
   const seekTo = useCallback(
-    (seconds: number) => {
+    (seconds: number, play = true) => {
       const mic = micRef.current
       if (!mic) return
       mic.currentTime = Math.min(Math.max(0, seconds), duration || mic.duration || 0)
@@ -77,8 +74,8 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
       onPosition?.(mic.currentTime)
       // Clicking a transcript timestamp means "play from here", not "move the
       // cursor and wait" — so a paused player starts.
-      if (mic.paused) void mic.play().catch(() => setFailed(true))
-      if (systemRef.current?.paused) void systemRef.current.play().catch(() => {})
+      if (play && mic.paused) void mic.play().catch(() => setFailed(true))
+      if (play && systemRef.current?.paused) void systemRef.current.play().catch(() => {})
     },
     [duration, onPosition, resync]
   )
@@ -170,30 +167,12 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
         <>
           <button
             type="button"
-            className="recording-player-btn"
-            onClick={() => seekTo(position - SKIP_SECONDS)}
-            aria-label={`Back ${SKIP_SECONDS} seconds`}
-            title={`Back ${SKIP_SECONDS}s`}
-          >
-            <Back15 size={18} />
-          </button>
-          <button
-            type="button"
             className="recording-player-btn primary"
             onClick={toggle}
             aria-label={playing ? 'Pause' : 'Play'}
             title={playing ? 'Pause' : 'Play'}
           >
             {playing ? <Pause size={16} /> : <Play size={16} />}
-          </button>
-          <button
-            type="button"
-            className="recording-player-btn"
-            onClick={() => seekTo(position + SKIP_SECONDS)}
-            aria-label={`Forward ${SKIP_SECONDS} seconds`}
-            title={`Forward ${SKIP_SECONDS}s`}
-          >
-            <Forward15 size={18} />
           </button>
 
           <input
@@ -204,10 +183,11 @@ export default function RecordingPlayer({ recording, onPosition, registerSeek }:
             step={0.1}
             value={Math.min(position, duration)}
             style={{
-              background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${progressPercent}%, var(--subtleBorder) ${progressPercent}%, var(--subtleBorder) 100%)`
-            }}
-            onChange={(event) => seekTo(Number(event.target.value))}
-            aria-label="Seek"
+              '--recording-progress': `${progressPercent}%`
+            } as CSSProperties}
+            onChange={(event) => seekTo(Number(event.target.value), false)}
+            aria-label="Scrub recording"
+            aria-valuetext={`${elapsedLabel(0, position * 1000)} of ${elapsedLabel(0, duration * 1000)}`}
           />
 
           <span className="recording-player-time">

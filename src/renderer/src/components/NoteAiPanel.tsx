@@ -2,8 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import {
   IconAlertCircle as AlertCircle,
   IconArrowUp as ArrowUp,
+  IconCalendarEvent as CalendarEvent,
   IconCheck as Check,
+  IconChecklist as Checklist,
+  IconCornerUpRight as FollowUp,
+  IconGavel as Decisions,
   IconLoader2 as Loader2,
+  IconMail as Mail,
   IconMicrophone as Microphone,
   IconSquare as Square,
   IconX as X
@@ -38,6 +43,12 @@ import { linkifyBlocks } from '../linkify'
 import { ensureTitleBlock } from '../titleBlock'
 import { useSpeechToText } from '../dictation/useDictation'
 import MarkdownText from './MarkdownText'
+import {
+  NATIVE_ACTIONS,
+  NATIVE_ACTION_CATEGORIES,
+  nativeActionDefinition,
+  type NativeActionId
+} from '../../../shared/nativeActions'
 
 export interface AiPanelSubject {
   id: string
@@ -213,6 +224,123 @@ export default function NoteAiPanel({
       cancelRef.current = null
     }
   }
+
+  const runNativeAction = async (actionId: NativeActionId): Promise<void> => {
+    const action = nativeActionDefinition(actionId)
+    if (!action || pending || sendLockRef.current) return
+    onOpen()
+    if (!chatEnabled) return
+    sendLockRef.current = true
+    setPending(true)
+    const extraDirection = draft.trim()
+    const userContent = extraDirection
+      ? `${action.label} — ${extraDirection}`
+      : action.label
+    const history = [...thread, { role: 'user' as const, content: userContent }]
+    let events: AgentEvent[] = [
+      {
+        id: 'context',
+        kind: 'activity',
+        text: 'Reading the note, transcript, and meeting notes',
+        status: 'active'
+      }
+    ]
+    const showAssistant = (): void => {
+      const message = events.find((event) => event.kind === 'message')?.text ?? ''
+      setThreads((previous) => ({
+        ...previous,
+        [subject.id]: [
+          ...history,
+          {
+            role: 'assistant',
+            content: message,
+            events: events.map((event) => ({ ...event }))
+          }
+        ]
+      }))
+    }
+    const updateEvent = (id: string, update: Partial<AgentEvent>): void => {
+      events = events.map((event) => (event.id === id ? { ...event, ...update } : event))
+    }
+    const updateMessage = (text: string): void => {
+      const next = text.trim()
+      if (!next) return
+      const index = events.findIndex((event) => event.id === 'message')
+      if (index === -1) events = [...events, { id: 'message', kind: 'message', text: next }]
+      else updateEvent('message', { text: next })
+    }
+    showAssistant()
+
+    try {
+      let sourceMarkdown: string
+      try {
+        sourceMarkdown = noteMarkdown()
+      } catch {
+        throw new Error('Could not read the current note for this action.')
+      }
+      const [meetingTranscript, meetingNotesMarkdown] = await Promise.all([
+        window.api.meeting.getTranscript(subject.id).catch(() => null),
+        window.api.meeting.getNotesMarkdown(subject.id).catch(() => null)
+      ])
+      const transcriptMarkdown = meetingTranscript
+        ? meetingMarkdown(meetingTranscript)
+        : '(No transcript for this note.)'
+      const preparedMeetingNotes =
+        meetingNotesMarkdown?.trim() || '(No meeting notes for this note.)'
+
+      if (isRecording) toggleDictation()
+      dictatedChunksRef.current = []
+      onDraftChange('')
+      updateEvent('context', { status: 'done' })
+      events = [
+        ...events,
+        {
+          id: 'action',
+          kind: 'action',
+          text: action.runningLabel,
+          status: 'active'
+        }
+      ]
+      showAssistant()
+      const prompt = noteAssistantPrompt({
+        activeTab,
+        noteMarkdown: sourceMarkdown,
+        transcriptMarkdown,
+        meetingNotesMarkdown: preparedMeetingNotes,
+        conversation: extraDirection
+          ? `USER EXTRA DIRECTION: ${extraDirection}`
+          : 'USER EXTRA DIRECTION: None. Use the supplied note context.'
+      })
+      const final = await stream(action.system, prompt, (text) => {
+        updateMessage(text)
+        showAssistant()
+      })
+      if (!final.trim()) throw new Error(`${action.label} returned no content.`)
+      updateMessage(final)
+      updateEvent('action', { status: 'done' })
+      events = [
+        ...events,
+        { id: 'done', kind: 'result', text: 'Done', status: 'done' }
+      ]
+      showAssistant()
+    } catch (error) {
+      const message = aiErrorMessage(error)
+      events = events.map((event) =>
+        event.status === 'active' ? { ...event, status: 'error' as const } : event
+      )
+      events = [
+        ...events,
+        { id: 'error', kind: 'error', text: message, status: 'error' }
+      ]
+      showAssistant()
+      onError(message)
+    } finally {
+      sendLockRef.current = false
+      setPending(false)
+    }
+  }
+  const nativeActionRunnerRef = useRef(runNativeAction)
+  nativeActionRunnerRef.current = runNativeAction
 
   const send = async (): Promise<void> => {
     const question = draft.trim()
@@ -475,11 +603,29 @@ export default function NoteAiPanel({
     window.dispatchEvent(new Event('noteato:ai-settings-changed'))
   }
 
+  useEffect(() => {
+    const handle = (event: Event): void => {
+      const detail = (event as CustomEvent<{ noteId?: string; actionId?: string }>).detail
+      if (detail?.noteId !== subject.id || !detail.actionId) return
+      const action = nativeActionDefinition(detail.actionId)
+      if (action) void nativeActionRunnerRef.current(action.id)
+    }
+    window.addEventListener('noteato:native-action', handle)
+    return () => window.removeEventListener('noteato:native-action', handle)
+  }, [subject.id])
+
+  const nativeActionIcon = (id: NativeActionId): React.ReactNode => {
+    if (id === 'draft-email') return <Mail size={14} />
+    if (id === 'write-follow-up') return <FollowUp size={14} />
+    if (id === 'create-todos') return <Checklist size={14} />
+    if (id === 'create-agenda') return <CalendarEvent size={14} />
+    return <Decisions size={14} />
+  }
+
   return (
     <section className="note-chat-surface" aria-label={`Chat about ${subject.title}`}>
       <header className="note-chat-header">
         <div>
-          <span className="note-chat-kicker">Chat with note</span>
           <strong>{subject.title || 'Untitled'}</strong>
         </div>
         <button
@@ -506,9 +652,32 @@ export default function NoteAiPanel({
         ) : (
           <>
             {thread.length === 0 && (
-              <div className="note-chat-empty">
-                <strong>Ask across this note’s tabs.</strong>
-                <span>Note, transcript and meeting notes are included as context.</span>
+              <div className="note-chat-action-interstitial">
+                <div className="note-chat-action-intro">
+                  <strong>Start with an action</strong>
+                  <span>Uses this note, its transcript, and meeting notes.</span>
+                </div>
+                {NATIVE_ACTION_CATEGORIES.map((category) => (
+                  <div className="note-chat-action-category" key={category}>
+                    <span>{category}</span>
+                    <div>
+                      {NATIVE_ACTIONS.filter((action) => action.category === category).map(
+                        (action) => (
+                          <button
+                            type="button"
+                            key={action.id}
+                            disabled={pending || !chatEnabled}
+                            title={action.description}
+                            onClick={() => void runNativeAction(action.id)}
+                          >
+                            {nativeActionIcon(action.id)}
+                            <span>{action.label}</span>
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {thread.map((turn, index) => (
@@ -560,8 +729,9 @@ export default function NoteAiPanel({
             aria-expanded={active}
             placeholder="Ask about this note…"
             onChange={(event) => {
-              onDraftChange(event.target.value)
-              if (!active) onOpen()
+              const next = event.target.value
+              onDraftChange(next)
+              if (!active && next.length > 0) onOpen()
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {

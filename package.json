@@ -33,7 +33,11 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "ajv": "^8.20.0",
     "better-sqlite3": "^12.11.1",
+    "json5": "^2.2.3",
+    "smol-toml": "^1.7.1",
     "ws": "^8.21.1"
   },
   "devDependencies": {

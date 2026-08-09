@@ -18,13 +18,14 @@ export function modelStatusLabel(status: ModelStatus): string {
     case 'installed':
       return 'Ready to transcribe on this Mac.'
     case 'downloading':
+      if (status.installing) return 'Installing the speech model on this Mac…'
       // The server does not always send a length; counting up alone still
       // shows movement, which is the point.
       return status.total
         ? `Downloading — ${mb(status.received)} MB of ${mb(status.total)} MB.`
         : `Downloading — ${mb(status.received)} MB so far.`
     case 'failed':
-      return 'The download did not finish. Check your connection and try again.'
+      return `Could not install the speech model: ${status.message}`
     default:
       return `Downloads once, about ${MODEL_DOWNLOAD_MB} MB. Runs entirely on your Mac.`
   }
@@ -57,7 +58,9 @@ export function ModelProgress({
         />
       </div>
       <span className="model-progress-count">
-        {status.total
+        {status.installing
+          ? 'Installing…'
+          : status.total
           ? `${mb(status.received)} MB of ${mb(status.total)} MB`
           : `${mb(status.received)} MB`}
       </span>
