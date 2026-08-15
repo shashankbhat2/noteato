@@ -54,6 +54,12 @@ const CHAT_ACTION_IDS: readonly NativeActionId[] = [
   'extract-decisions'
 ]
 
+function chatActionLabel(id: NativeActionId): string {
+  if (id === 'draft-email') return 'Write an email'
+  if (id === 'create-todos') return 'Make tasks'
+  return 'Find decisions'
+}
+
 export interface AiPanelSubject {
   id: string
   title: string
@@ -698,23 +704,20 @@ export default function NoteAiPanel({
 
       {active && thread.length === 0 && aiSettings && chatEnabled && (
         <div className="note-chat-quick-actions" aria-label="Suggested chat actions">
-          <span>Quick actions</span>
-          <div>
-            {CHAT_ACTION_IDS.map((id) => nativeActionDefinition(id)).map(
-              (action) => action && (
-                <button
-                  type="button"
-                  key={action.id}
-                  disabled={pending}
-                  title={action.description}
-                  onClick={() => void runNativeAction(action.id)}
-                >
-                  {nativeActionIcon(action.id)}
-                  <span>{action.label}</span>
-                </button>
-              )
-            )}
-          </div>
+          {CHAT_ACTION_IDS.map((id) => nativeActionDefinition(id)).map(
+            (action) => action && (
+              <button
+                type="button"
+                key={action.id}
+                disabled={pending}
+                title={action.description}
+                onClick={() => void runNativeAction(action.id)}
+              >
+                {nativeActionIcon(action.id)}
+                <span>{chatActionLabel(action.id)}</span>
+              </button>
+            )
+          )}
         </div>
       )}
 
