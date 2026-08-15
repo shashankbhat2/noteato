@@ -317,7 +317,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [chatDocked, setChatDocked] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
   const [templateCreation, setTemplateCreation] = useState<'creating' | 'created' | null>(null)
-  const [outlineVisible, setOutlineVisible] = useState(false)
+  const [outlineVisible, setOutlineVisible] = useState(true)
   const [isSwitchingNote, setIsSwitchingNote] = useState(false)
   const [meeting, setMeeting] = useState<MeetingState>({
     phase: 'idle',
@@ -434,7 +434,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     setChatDraft('')
     setAiPopup(null)
     setDelegatePopup(null)
-    setOutlineVisible(false)
+    setOutlineVisible(true)
     transcriptDraftRef.current = null
     transcriptDirtyRef.current = false
     transcriptEditVersionRef.current = 0
@@ -1614,7 +1614,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
                   }
                   onClick={() => {
                     setTranscriptOpen(false)
-                    setOutlineVisible(false)
                     setMeetingNotesActive(true)
                   }}
                 >

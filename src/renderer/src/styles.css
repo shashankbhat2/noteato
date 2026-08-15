@@ -9412,7 +9412,10 @@ body.resizing-panes .editor-pane {
 .note-outline {
   position: sticky;
   top: 20px;
-  z-index: 12;
+  /* BlockNote's portalled side menu uses 20. The expanded outline is the
+     surface the user is actively reading, so its card and hit targets must
+     stay above the block handle when their bounds cross in a narrow pane. */
+  z-index: 30;
   width: 100%;
   height: 0;
   pointer-events: none;
