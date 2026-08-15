@@ -1559,6 +1559,14 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         </div>
       )}
 
+      {findOpen && (
+        <FindReplaceBar
+          editor={editor}
+          focusTick={findFocusTick}
+          onClose={() => setFindOpen(false)}
+        />
+      )}
+
       <div className="note-writing-surface active">
         {outlineVisible && <NoteOutline editor={editor} />}
 
@@ -1572,14 +1580,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             .filter(Boolean)
             .join(' ')}
         >
-          {findOpen && (
-            <FindReplaceBar
-              editor={editor}
-              focusTick={findFocusTick}
-              onClose={() => setFindOpen(false)}
-            />
-          )}
-
           {/* Every note exposes the same document modes. Meeting notes become
               available once the note owns audio or transcript context. */}
           <div ref={metadataRef} className="note-metadata-row">

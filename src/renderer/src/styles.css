@@ -4370,17 +4370,17 @@ body.resizing-panes .editor-pane {
 }
 
 /* Find & replace bar — pinned to the editor pane's top-right corner. */
-.find-bar {
+.find-bar.find-bar {
   position: fixed;
   z-index: 80;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
-  padding: 6px;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--subtleBorder);
+  border-radius: 10px;
+  background: var(--elevatedSurface);
+  box-shadow: 0 8px 24px rgba(20, 21, 23, 0.12);
   animation: fade-in 0.1s ease;
 }
 
@@ -4409,6 +4409,10 @@ body.resizing-panes .editor-pane {
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.find-bar-count.empty {
+  display: none;
 }
 
 .find-bar-row button {

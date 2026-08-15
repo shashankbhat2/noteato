@@ -31,9 +31,9 @@ export default function FindReplaceBar({ editor, focusTick, onClose }: Props) {
     if (!shell || !surface) return
     const update = (): void => {
       const rect = surface.getBoundingClientRect()
-      const width = Math.max(196, Math.min(360, rect.width - 16))
+      const width = Math.max(196, Math.min(304, rect.width - 16))
       setPos({
-        top: rect.top + 10,
+        top: rect.top + 18,
         left: Math.max(rect.left + 8, rect.right - width - 10),
         width
       })
@@ -163,7 +163,11 @@ export default function FindReplaceBar({ editor, focusTick, onClose }: Props) {
             }}
             onKeyDown={onKeyDown}
           />
-          <span className="find-bar-count" role="status" aria-live="polite">
+          <span
+            className={query ? 'find-bar-count' : 'find-bar-count empty'}
+            role="status"
+            aria-live="polite"
+          >
             {query ? `${count ? active + 1 : 0}/${count}` : ''}
           </span>
           <button
