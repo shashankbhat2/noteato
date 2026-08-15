@@ -2,10 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   IconAlertCircle as AlertCircle,
   IconArrowUp as ArrowUp,
-  IconCalendarEvent as CalendarEvent,
   IconCheck as Check,
   IconChecklist as Checklist,
-  IconCornerUpRight as FollowUp,
   IconGavel as Decisions,
   IconLoader2 as Loader2,
   IconLayoutSidebarRight as LayoutSidebarRight,
@@ -46,11 +44,15 @@ import { ensureTitleBlock } from '../titleBlock'
 import { useSpeechToText } from '../dictation/useDictation'
 import MarkdownText from './MarkdownText'
 import {
-  NATIVE_ACTIONS,
-  NATIVE_ACTION_CATEGORIES,
   nativeActionDefinition,
   type NativeActionId
 } from '../../../shared/nativeActions'
+
+const CHAT_ACTION_IDS: readonly NativeActionId[] = [
+  'draft-email',
+  'create-todos',
+  'extract-decisions'
+]
 
 export interface AiPanelSubject {
   id: string
@@ -622,9 +624,7 @@ export default function NoteAiPanel({
 
   const nativeActionIcon = (id: NativeActionId): React.ReactNode => {
     if (id === 'draft-email') return <Mail size={14} />
-    if (id === 'write-follow-up') return <FollowUp size={14} />
     if (id === 'create-todos') return <Checklist size={14} />
-    if (id === 'create-agenda') return <CalendarEvent size={14} />
     return <Decisions size={14} />
   }
 
@@ -657,35 +657,6 @@ export default function NoteAiPanel({
           </div>
         ) : (
           <>
-            {thread.length === 0 && (
-              <div className="note-chat-action-interstitial">
-                <div className="note-chat-action-intro">
-                  <strong>Start with an action</strong>
-                  <span>Uses this note, its transcript, and meeting notes.</span>
-                </div>
-                {NATIVE_ACTION_CATEGORIES.map((category) => (
-                  <div className="note-chat-action-category" key={category}>
-                    <span>{category}</span>
-                    <div>
-                      {NATIVE_ACTIONS.filter((action) => action.category === category).map(
-                        (action) => (
-                          <button
-                            type="button"
-                            key={action.id}
-                            disabled={pending || !chatEnabled}
-                            title={action.description}
-                            onClick={() => void runNativeAction(action.id)}
-                          >
-                            {nativeActionIcon(action.id)}
-                            <span>{action.label}</span>
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
             {thread.map((turn, index) => (
               <div key={index} className={`note-chat-turn ${turn.role}`}>
                 {turn.role === 'assistant' ? (
@@ -724,6 +695,28 @@ export default function NoteAiPanel({
           </>
         )}
       </div>
+
+      {active && thread.length === 0 && aiSettings && chatEnabled && (
+        <div className="note-chat-quick-actions" aria-label="Suggested chat actions">
+          <span>Quick actions</span>
+          <div>
+            {CHAT_ACTION_IDS.map((id) => nativeActionDefinition(id)).map(
+              (action) => action && (
+                <button
+                  type="button"
+                  key={action.id}
+                  disabled={pending}
+                  title={action.description}
+                  onClick={() => void runNativeAction(action.id)}
+                >
+                  {nativeActionIcon(action.id)}
+                  <span>{action.label}</span>
+                </button>
+              )
+            )}
+          </div>
+        </div>
+      )}
 
       <footer className="note-chat-composer">
         <div className="note-chat-composer-field">
