@@ -314,6 +314,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [transcriptClosing, setTranscriptClosing] = useState(false)
   const [meetingNotesActive, setMeetingNotesActive] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [chatDocked, setChatDocked] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
   const [templateCreation, setTemplateCreation] = useState<'creating' | 'created' | null>(null)
   const [outlineVisible, setOutlineVisible] = useState(false)
@@ -429,6 +430,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     setRecording(null)
     setTranscript(null)
     setChatOpen(false)
+    setChatDocked(false)
     setChatDraft('')
     setAiPopup(null)
     setDelegatePopup(null)
@@ -477,6 +479,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
 
   const closeChat = (): void => {
     setChatOpen(false)
+    setChatDocked(false)
   }
   const overflowBtnRef = useRef<HTMLButtonElement>(null)
   // The overflow menu is built at click time from these, not from the render
@@ -1476,7 +1479,9 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   return (
     <div
       ref={rootRef}
-      className={isSwitchingNote ? 'note-editor-shell switching-note' : 'note-editor-shell'}
+      className={
+        `note-editor-shell${isSwitchingNote ? ' switching-note' : ''}${chatDocked ? ' chat-docked' : ''}`
+      }
       aria-busy={isSwitchingNote}
       onKeyDownCapture={handleEditorKeyDown}
       onKeyDown={handleEditorKeyDownBubble}
@@ -1841,7 +1846,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         </>
       )}
 
-      {chatOpen && (
+      {chatOpen && !chatDocked && (
         <button
           type="button"
           className="note-chat-drawer-backdrop"
@@ -1852,8 +1857,10 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
       )}
 
       <div
-        className={chatOpen ? 'note-chat-drawer open' : 'note-chat-drawer'}
-        role={chatOpen ? 'dialog' : undefined}
+        className={
+          `note-chat-drawer${chatOpen ? ' open' : ''}${chatDocked ? ' docked' : ''}`
+        }
+        role={chatOpen ? (chatDocked ? 'region' : 'dialog') : undefined}
         aria-label="Chat with this note"
       >
         <div className="note-chat-drawer-body">
@@ -1868,6 +1875,12 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
               setChatOpen(true)
             }}
             onClose={closeChat}
+            docked={chatDocked}
+            onToggleDock={() => {
+              setTranscriptOpen(false)
+              setChatOpen(true)
+              setChatDocked((current) => !current)
+            }}
             activeTab={meetingNotesActive ? 'Meeting notes' : 'Note'}
             onError={setAiError}
             onEditApplied={() => setMeetingNotesActive(false)}

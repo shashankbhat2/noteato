@@ -8,6 +8,8 @@ import {
   IconCornerUpRight as FollowUp,
   IconGavel as Decisions,
   IconLoader2 as Loader2,
+  IconLayoutSidebarRight as LayoutSidebarRight,
+  IconLayoutSidebarRightCollapse as LayoutSidebarRightCollapse,
   IconMail as Mail,
   IconMicrophone as Microphone,
   IconSquare as Square,
@@ -86,6 +88,8 @@ export default function NoteAiPanel({
   onDraftChange,
   onOpen,
   onClose,
+  docked,
+  onToggleDock,
   onError,
   onEditApplied
 }: {
@@ -97,6 +101,8 @@ export default function NoteAiPanel({
   onDraftChange: (value: string) => void
   onOpen: () => void
   onClose: () => void
+  docked: boolean
+  onToggleDock: () => void
   onError: (message: string) => void
   onEditApplied: () => void
 }) {
@@ -772,6 +778,19 @@ export default function NoteAiPanel({
                   </optgroup>
                 ))}
               </select>
+              <button
+                type="button"
+                className={docked ? 'note-chat-tool-btn active' : 'note-chat-tool-btn'}
+                aria-pressed={docked}
+                onClick={onToggleDock}
+                title={docked ? 'Return chat to floating panel' : 'Dock chat on the right'}
+              >
+                {docked ? (
+                  <LayoutSidebarRightCollapse size={15} />
+                ) : (
+                  <LayoutSidebarRight size={15} />
+                )}
+              </button>
               <button
                 className={
                   isRecording ? 'note-chat-tool-btn recording' : 'note-chat-tool-btn'

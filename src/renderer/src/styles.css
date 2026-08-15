@@ -4688,6 +4688,7 @@ body.resizing-panes .editor-pane {
    the body sits at the pane's bottom edge however short the note is. Sticky
    alone can't do that — it only ever lifts an element up into view. */
 .note-editor-shell {
+  --note-chat-dock-w: min(420px, 42%);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -4695,6 +4696,11 @@ body.resizing-panes .editor-pane {
   height: 100%;
   min-height: 100%;
   overflow: hidden;
+  transition: padding-right var(--dur) var(--ease);
+}
+
+.note-editor-shell.chat-docked {
+  padding-right: var(--note-chat-dock-w);
 }
 
 .note-template-status {
@@ -5501,6 +5507,32 @@ body.resizing-panes .editor-pane {
   backdrop-filter: blur(28px) saturate(135%);
 }
 
+/* Docking turns the floating conversation into a stable sibling of the note.
+   The editor gives up exactly the panel's width, so neither surface overlays
+   the other and the relationship reads like the app's regular pane split. */
+.note-chat-drawer.docked,
+.note-chat-drawer.docked.open {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--note-chat-dock-w);
+  height: 100%;
+  border: 0;
+  border-left: 1px solid var(--subtleBorder);
+  border-radius: 0;
+  background: var(--editorBackground);
+  box-shadow: -10px 0 30px color-mix(in srgb, var(--primaryText) 4%, transparent);
+  transform: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root[data-theme='dark'] .note-chat-drawer.docked.open {
+  background: var(--editorBackground);
+  box-shadow: -10px 0 32px rgba(0, 0, 0, 0.16);
+}
+
 :root[data-theme='dark'] .note-chat-drawer.open {
   background: color-mix(in srgb, var(--editorBackground) 72%, transparent);
   box-shadow:
@@ -5930,6 +5962,11 @@ body.resizing-panes .editor-pane {
   color: var(--accent);
 }
 
+.note-chat-tool-btn.active {
+  background: var(--hoverSurface);
+  color: var(--primaryText);
+}
+
 .note-chat-send-btn:disabled {
   opacity: 0.35;
   cursor: default;
@@ -5980,6 +6017,12 @@ body.resizing-panes .editor-pane {
 .note-chat-drawer.open .note-chat-composer {
   bottom: 6px;
   width: calc(100% - 12px);
+}
+
+.note-chat-drawer.docked .note-chat-composer,
+.note-chat-drawer.docked.open .note-chat-composer {
+  bottom: 10px;
+  width: calc(100% - 20px);
 }
 
 .note-chat-drawer .note-chat-composer::before {
