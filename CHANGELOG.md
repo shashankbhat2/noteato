@@ -2,6 +2,31 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-15
+
+### Added
+
+- Actions from note chat, including reviewed Slack messages, Asana and Todoist
+  tasks, GitHub issues, Google Docs, and Gmail drafts through configurable API
+  integrations.
+- Local agent delegation and MCP server connections, with automatic discovery
+  of existing MCP configurations and controls for managing available tools.
+- Richer meeting playback and transcript handling, including recording media
+  responses that agents can use while working with meeting notes.
+
+### Changed
+
+- Note chat now docks beside the editor and uses a clearer composer and action
+  tray for context, integrations, delegation, and tool activity.
+- Meeting transcripts, recordings, AI selection actions, integration settings,
+  and on-device speech-model setup received a visual and interaction refresh.
+
+### Fixed
+
+- Find and replace remains accessible inside note panes and sits below the
+  editor fade instead of being obscured.
+- Note outlines now layer above block controls.
+
 ## [1.4.1] - 2026-08-06
 
 ### Fixed
