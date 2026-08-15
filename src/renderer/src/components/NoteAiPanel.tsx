@@ -116,6 +116,7 @@ export default function NoteAiPanel({
 }) {
   const [threads, setThreads] = useState<Record<string, ChatTurn[]>>({})
   const [pending, setPending] = useState(false)
+  const [composerFocused, setComposerFocused] = useState(false)
   const [aiSettings, setAiSettings] = useState<Settings | null>(null)
   const [selectedModel, setSelectedModel] = useState(AUTO_AI_MODEL_ID)
   const cancelRef = useRef<(() => void) | null>(null)
@@ -174,6 +175,7 @@ export default function NoteAiPanel({
 
   useEffect(() => {
     dictatedChunksRef.current = []
+    setComposerFocused(false)
   }, [subject.id])
 
   useEffect(() => {
@@ -604,6 +606,9 @@ export default function NoteAiPanel({
   )
   const chatEnabled = aiSettings ? isAiConfigured(aiSettings, resolvedModel.provider) : false
   const activeModelLabel = selectedModel === AUTO_AI_MODEL_ID ? 'Auto' : resolvedModel.label
+  const canPeek = thread.length === 0 && draft.trim().length === 0
+  const composerExpanded = active || (composerFocused && canPeek)
+  const showQuickActions = composerExpanded && aiSettings && chatEnabled
 
   const chooseModel = async (choice: string): Promise<void> => {
     if (!aiSettings) return
@@ -635,9 +640,28 @@ export default function NoteAiPanel({
   }
 
   return (
-    <section className="note-chat-surface" aria-label={`Chat about ${subject.title}`}>
+    <section
+      className="note-chat-surface"
+      aria-label={`Chat about ${subject.title}`}
+      onFocusCapture={() => setComposerFocused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setComposerFocused(false)
+      }}
+    >
       <header className="note-chat-header">
-        <div>
+        <div className="note-chat-header-main">
+          {docked && (
+            <button
+              type="button"
+              className="note-chat-tool-btn note-chat-header-dock"
+              aria-label="Return chat to floating panel"
+              aria-pressed="true"
+              onClick={onToggleDock}
+              title="Return chat to floating panel"
+            >
+              <LayoutSidebarRightCollapse size={15} />
+            </button>
+          )}
           <strong>{subject.title || 'Untitled'}</strong>
         </div>
         <button
@@ -702,34 +726,36 @@ export default function NoteAiPanel({
         )}
       </div>
 
-      {active && thread.length === 0 && aiSettings && chatEnabled && (
-        <div className="note-chat-quick-actions" aria-label="Suggested chat actions">
-          {CHAT_ACTION_IDS.map((id) => nativeActionDefinition(id)).map(
-            (action) => action && (
-              <button
-                type="button"
-                key={action.id}
-                disabled={pending}
-                title={action.description}
-                onClick={() => void runNativeAction(action.id)}
-              >
-                {nativeActionIcon(action.id)}
-                <span>{chatActionLabel(action.id)}</span>
-              </button>
-            )
-          )}
-        </div>
-      )}
-
       <footer className="note-chat-composer">
+        {showQuickActions && (
+          <div className="note-chat-quick-actions" aria-label="Suggested chat actions">
+            {CHAT_ACTION_IDS.map((id) => nativeActionDefinition(id)).map(
+              (action) => action && (
+                <button
+                  type="button"
+                  key={action.id}
+                  disabled={pending}
+                  title={action.description}
+                  onClick={() => void runNativeAction(action.id)}
+                >
+                  {nativeActionIcon(action.id)}
+                  <span>{chatActionLabel(action.id)}</span>
+                </button>
+              )
+            )}
+          </div>
+        )}
         <div className="note-chat-composer-field">
           <textarea
             ref={inputRef}
             rows={1}
             value={draft}
             disabled={!chatEnabled}
-            aria-expanded={active}
+            aria-expanded={composerExpanded}
             placeholder="Ask about this note…"
+            onFocus={() => {
+              if (!active && (thread.length > 0 || draft.trim().length > 0)) onOpen()
+            }}
             onChange={(event) => {
               const next = event.target.value
               onDraftChange(next)
@@ -774,19 +800,17 @@ export default function NoteAiPanel({
                   </optgroup>
                 ))}
               </select>
-              <button
-                type="button"
-                className={docked ? 'note-chat-tool-btn active' : 'note-chat-tool-btn'}
-                aria-pressed={docked}
-                onClick={onToggleDock}
-                title={docked ? 'Return chat to floating panel' : 'Dock chat on the right'}
-              >
-                {docked ? (
-                  <LayoutSidebarRightCollapse size={15} />
-                ) : (
+              {!docked && (
+                <button
+                  type="button"
+                  className="note-chat-tool-btn"
+                  aria-pressed="false"
+                  onClick={onToggleDock}
+                  title="Dock chat on the right"
+                >
                   <LayoutSidebarRight size={15} />
-                )}
-              </button>
+                </button>
+              )}
               <button
                 className={
                   isRecording ? 'note-chat-tool-btn recording' : 'note-chat-tool-btn'

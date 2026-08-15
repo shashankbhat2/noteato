@@ -1481,9 +1481,14 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   return (
     <div
       ref={rootRef}
-      className={
-        `note-editor-shell${isSwitchingNote ? ' switching-note' : ''}${chatDocked ? ' chat-docked' : ''}`
-      }
+      className={[
+        'note-editor-shell',
+        fullWidth ? 'full-width' : '',
+        isSwitchingNote ? 'switching-note' : '',
+        chatDocked ? 'chat-docked' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')}
       aria-busy={isSwitchingNote}
       onKeyDownCapture={handleEditorKeyDown}
       onKeyDown={handleEditorKeyDownBubble}
