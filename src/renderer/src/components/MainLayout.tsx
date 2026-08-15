@@ -727,8 +727,15 @@ export default function MainLayout() {
           h.setSearchOpen(true)
           break
         case 'find':
-          // Handled by the visible note editor's find bar.
-          window.dispatchEvent(new CustomEvent('noteato:find'))
+          // Several note editors can be visible in the pane row. Address the
+          // focused one explicitly so ⌘F never opens a bar over every note.
+          if (h.focusedPane?.view.kind === 'note') {
+            window.dispatchEvent(
+              new CustomEvent('noteato:find', {
+                detail: { noteId: h.focusedPane.view.id }
+              })
+            )
+          }
           break
         case 'toggle-sidebar':
           h.toggleSidebar()

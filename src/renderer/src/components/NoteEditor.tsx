@@ -663,16 +663,18 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     })
   }, [editor])
 
-  // ⌘F routes here via the app menu; only the visible tab's editor reacts.
+  // ⌘F routes here via the app menu and names the focused note explicitly.
   useEffect(() => {
-    const onFind = (): void => {
+    const onFind = (event: Event): void => {
+      const target = (event as CustomEvent<{ noteId?: string }>).detail?.noteId
+      if (target && target !== noteId) return
       if (!rootRef.current || rootRef.current.offsetParent === null) return
       setFindOpen(true)
       setFindFocusTick((t) => t + 1)
     }
     window.addEventListener('noteato:find', onFind)
     return () => window.removeEventListener('noteato:find', onFind)
-  }, [])
+  }, [noteId])
 
   const blockMenuItems = (block: NoteatoBlock): MenuItem[] => [
     {

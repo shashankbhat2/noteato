@@ -19,27 +19,35 @@ export default function FindReplaceBar({ editor, focusTick, onClose }: Props) {
   const [replaceText, setReplaceText] = useState('')
   const [count, setCount] = useState(0)
   const [active, setActive] = useState(0)
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Pin to the editor pane's top-right corner, tracking sidebar/agent-panel
-  // toggles and window resizes so the bar always stays inside the pane.
+  // Anchor to this editor's own writing surface. A document query for the
+  // first pane puts Find over the wrong note in split view, while measuring
+  // the pane itself ignores the space surrendered to a docked chat panel.
   useEffect(() => {
-    const pane = document.querySelector('.editor-pane')
-    if (!pane) return
+    const shell = editor.domElement?.closest<HTMLElement>('.note-editor-shell')
+    const surface = shell?.querySelector<HTMLElement>('.note-writing-surface.active')
+    if (!shell || !surface) return
     const update = (): void => {
-      const rect = pane.getBoundingClientRect()
-      setPos({ top: rect.top + 10, right: Math.max(10, window.innerWidth - rect.right + 16) })
+      const rect = surface.getBoundingClientRect()
+      const width = Math.max(196, Math.min(360, rect.width - 16))
+      setPos({
+        top: rect.top + 10,
+        left: Math.max(rect.left + 8, rect.right - width - 10),
+        width
+      })
     }
     update()
     const observer = new ResizeObserver(update)
-    observer.observe(pane)
+    observer.observe(shell)
+    observer.observe(surface)
     window.addEventListener('resize', update)
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', update)
     }
-  }, [])
+  }, [editor])
 
   const readState = (): SearchState | undefined =>
     searchPluginKey.getState(editor.prosemirrorView.state)
@@ -136,12 +144,18 @@ export default function FindReplaceBar({ editor, focusTick, onClose }: Props) {
 
   if (!pos) return null
   return (
-    <div className="find-bar" style={{ top: pos.top, right: pos.right }}>
-        <div className="find-bar-row">
+    <div
+      className="find-bar"
+      role="search"
+      aria-label="Find and replace in note"
+      style={{ top: pos.top, left: pos.left, width: pos.width }}
+    >
+        <div className="find-bar-row find-bar-search-row">
           <input
             ref={inputRef}
             value={query}
             placeholder="Find"
+            aria-label="Find in note"
             spellCheck={false}
             onChange={(e) => {
               setQuery(e.target.value)
@@ -149,14 +163,30 @@ export default function FindReplaceBar({ editor, focusTick, onClose }: Props) {
             }}
             onKeyDown={onKeyDown}
           />
-          <span className="find-bar-count">{query ? `${count ? active + 1 : 0}/${count}` : ''}</span>
-          <button title="Previous match (⇧↩)" onClick={() => step(-1)} disabled={count === 0}>
+          <span className="find-bar-count" role="status" aria-live="polite">
+            {query ? `${count ? active + 1 : 0}/${count}` : ''}
+          </span>
+          <button
+            type="button"
+            aria-label="Previous match"
+            title="Previous match (⇧↩)"
+            onClick={() => step(-1)}
+            disabled={count === 0}
+          >
             <ChevronUp size={13} />
           </button>
-          <button title="Next match (↩)" onClick={() => step(1)} disabled={count === 0}>
+          <button
+            type="button"
+            aria-label="Next match"
+            title="Next match (↩)"
+            onClick={() => step(1)}
+            disabled={count === 0}
+          >
             <ChevronDown size={13} />
           </button>
           <button
+            type="button"
+            aria-label="Close find and replace"
             title="Close (Esc)"
             onClick={() => {
               onClose()
@@ -170,14 +200,32 @@ export default function FindReplaceBar({ editor, focusTick, onClose }: Props) {
           <input
             value={replaceText}
             placeholder="Replace with"
+            aria-label="Replacement text"
             spellCheck={false}
             onChange={(e) => setReplaceText(e.target.value)}
-            onKeyDown={onKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                replaceOne()
+                return
+              }
+              onKeyDown(e)
+            }}
           />
-          <button className="find-bar-text-btn" onClick={replaceOne} disabled={count === 0}>
+          <button
+            type="button"
+            className="find-bar-text-btn"
+            onClick={replaceOne}
+            disabled={count === 0}
+          >
             Replace
           </button>
-          <button className="find-bar-text-btn" onClick={replaceAll} disabled={count === 0}>
+          <button
+            type="button"
+            className="find-bar-text-btn"
+            onClick={replaceAll}
+            disabled={count === 0}
+          >
             All
           </button>
         </div>
