@@ -20,6 +20,11 @@ All notable changes to Noteato are documented here. This project follows [Keep a
   restores the sidebar when clicked.
 - Chat action pills now use solid surfaces instead of translucent glass.
 
+### Fixed
+
+- Assistant markdown, lists, links, and inline code now wrap within the docked
+  chat panel instead of overflowing its narrow layout.
+
 ## [1.5.0] - 2026-08-15
 
 ### Added

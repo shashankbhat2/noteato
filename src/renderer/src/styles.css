@@ -5796,6 +5796,7 @@ body.resizing-panes .editor-pane {
 
 .note-chat-scroll {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
   padding: 26px max(40px, calc((100% - 740px) / 2));
@@ -5836,9 +5837,11 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-turn {
+  min-width: 0;
   width: fit-content;
   max-width: min(82%, 660px);
   margin-bottom: 18px;
+  overflow-wrap: anywhere;
   color: var(--primaryText);
   font-size: 13.5px;
   line-height: 1.65;
@@ -5860,13 +5863,26 @@ body.resizing-panes .editor-pane {
   background: var(--surface);
 }
 
+.note-chat-drawer.docked .note-chat-turn.assistant {
+  width: 100%;
+  max-width: 100%;
+}
+
 .note-chat-loader {
   color: var(--accent);
 }
 
 .note-chat-agent-events {
   display: grid;
+  min-width: 0;
+  max-width: 100%;
   gap: 8px;
+}
+
+.note-chat-agent-message,
+.note-chat-agent-message .md-text {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .note-chat-agent-event {
@@ -7799,6 +7815,9 @@ body.resizing-panes .editor-pane {
 
 /* Rendered markdown, in the AI window and anywhere else it appears. */
 .md-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   white-space: normal;
 }
 
@@ -7837,7 +7856,9 @@ body.resizing-panes .editor-pane {
 }
 
 .md-text li {
+  min-width: 0;
   margin: 2px 0;
+  overflow-wrap: anywhere;
 }
 
 .md-text code {
@@ -7846,9 +7867,11 @@ body.resizing-panes .editor-pane {
   background: var(--bg-secondary);
   border-radius: 4px;
   padding: 1px 4px;
+  overflow-wrap: anywhere;
 }
 
 .md-text pre {
+  max-width: 100%;
   background: var(--bg-secondary);
   border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
   border-radius: 6px;
@@ -7870,6 +7893,7 @@ body.resizing-panes .editor-pane {
 
 .md-text a {
   color: var(--accent);
+  overflow-wrap: anywhere;
 }
 
 /* No rule of its own — the composer card below supplies the edge, so the
