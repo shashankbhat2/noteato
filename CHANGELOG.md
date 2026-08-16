@@ -2,6 +2,24 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-16
+
+### Added
+
+- Note chat now searches the local note library for related context while
+  remaining useful for general-purpose questions.
+- A per-note control clears chat history and its draft.
+- Each note remembers whether its chat was last used as a floating panel or a
+  docked right sidebar.
+
+### Changed
+
+- Floating chat panels now use fully rounded containers, consistent internal
+  padding, and a bottom screen inset.
+- Closing a docked chat collapses it to a bottom-right title control that
+  restores the sidebar when clicked.
+- Chat action pills now use solid surfaces instead of translucent glass.
+
 ## [1.5.0] - 2026-08-15
 
 ### Added
