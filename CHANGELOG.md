@@ -17,7 +17,10 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 - Floating chat panels now use fully rounded containers, consistent internal
   padding, and a bottom screen inset.
 - Closing a docked chat collapses it to a bottom-right title control that
-  restores the sidebar when clicked.
+  restores the sidebar when clicked, while a separate control returns it to
+  the centered floating layout.
+- The chat header is now labeled Assistant, uses the note header's content
+  fade, and collapses to a narrower utility pill.
 - Chat action pills now use solid surfaces instead of translucent glass.
 
 ### Fixed

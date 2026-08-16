@@ -5564,7 +5564,7 @@ body.resizing-panes .editor-pane {
   right: 12px;
   bottom: 12px;
   left: auto;
-  width: min(var(--note-chat-dock-w), calc(100% - 24px));
+  width: min(264px, calc(100% - 24px));
   height: 44px;
   overflow: hidden;
   border-color: color-mix(in srgb, var(--borderColor) 62%, transparent);
@@ -5646,11 +5646,45 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-drawer .note-chat-header {
+  position: relative;
+  z-index: 3;
   width: 100%;
   flex: 0 0 auto;
   align-items: center;
   flex-direction: row;
   padding: 12px 22px 10px;
+  background: var(--editorBackground);
+}
+
+/* Match the note toolbar: its solid header dissolves into the scrolling
+   conversation so messages can pass underneath without a hard divider. */
+.note-chat-drawer .note-chat-header::after {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 42px;
+  content: '';
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--editorBackground) 0%,
+    color-mix(in srgb, var(--editorBackground) 58%, transparent) 22%,
+    color-mix(in srgb, var(--editorBackground) 18%, transparent) 62%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.58) 48%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.58) 48%,
+    transparent 100%
+  );
 }
 
 .note-chat-header-actions {
@@ -5678,25 +5712,26 @@ body.resizing-panes .editor-pane {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
-  padding: 0 14px 0 16px;
-  border: 0;
+  gap: 2px;
+  padding: 4px;
   border-radius: inherit;
+}
+
+.note-chat-collapsed-main {
+  display: flex;
+  min-width: 0;
+  height: 36px;
+  flex: 1;
+  align-items: center;
+  padding: 0 8px 0 12px;
+  border: 0;
+  border-radius: 18px;
   background: transparent;
   color: var(--primaryText);
   cursor: pointer;
 }
 
-.note-chat-collapsed-title span {
-  flex: 0 0 auto;
-  color: var(--mutedText);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.note-chat-collapsed-title strong {
+.note-chat-collapsed-main strong {
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -5707,13 +5742,29 @@ body.resizing-panes .editor-pane {
   white-space: nowrap;
 }
 
-.note-chat-collapsed-title:hover {
+.note-chat-collapsed-main:hover,
+.note-chat-collapsed-undock:hover {
   background: var(--hoverSurface);
 }
 
-.note-chat-collapsed-title:focus-visible {
+.note-chat-collapsed-main:focus-visible,
+.note-chat-collapsed-undock:focus-visible {
   outline: 2px solid var(--focusRing);
   outline-offset: -2px;
+}
+
+.note-chat-collapsed-undock {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mutedText);
+  cursor: pointer;
 }
 
 /* The collapsed composer can reveal suggestions above itself without turning
@@ -5803,7 +5854,7 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-drawer .note-chat-scroll {
-  padding: 12px 22px 116px;
+  padding: 48px 22px 116px;
   scrollbar-width: thin;
 }
 

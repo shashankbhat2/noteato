@@ -716,7 +716,7 @@ export default function NoteAiPanel({
               <LayoutSidebarRightCollapse size={15} />
             </button>
           )}
-          <strong>{subject.title || 'Untitled'}</strong>
+          <strong>Assistant</strong>
         </div>
         <div className="note-chat-header-actions">
           <button
@@ -742,17 +742,27 @@ export default function NoteAiPanel({
       </header>
 
       {docked && !active && (
-        <button
-          type="button"
-          className="note-chat-collapsed-title"
-          aria-label={`Reopen chat about ${subject.title || 'Untitled'}`}
-          onClick={onOpen}
-          title="Reopen chat on the right"
-        >
-          <span>Chat</span>
-          <strong>{subject.title || 'Untitled'}</strong>
-          <LayoutSidebarRight size={15} aria-hidden="true" />
-        </button>
+        <div className="note-chat-collapsed-title">
+          <button
+            type="button"
+            className="note-chat-collapsed-main"
+            aria-label="Reopen Assistant"
+            onClick={onOpen}
+            title="Reopen chat on the right"
+          >
+            <strong>Assistant</strong>
+          </button>
+          <button
+            type="button"
+            className="note-chat-collapsed-undock"
+            aria-label="Move Assistant to floating panel"
+            aria-pressed="true"
+            onClick={onToggleDock}
+            title="Move to floating panel"
+          >
+            <LayoutSidebarRightCollapse size={15} />
+          </button>
+        </div>
       )}
 
       <div className="note-chat-scroll" ref={scrollRef}>
