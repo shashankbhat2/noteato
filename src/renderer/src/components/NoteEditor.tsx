@@ -101,6 +101,26 @@ interface DelegatePopupState extends AiPopupState {
 
 const SAVE_DEBOUNCE_MS = 600
 const TRANSCRIPT_MODAL_ANIMATION_MS = 180
+const NOTE_CHAT_POSITION_KEY = 'noteato:note-chat-position:'
+
+function storedChatDocked(noteId: string): boolean {
+  try {
+    return window.localStorage.getItem(`${NOTE_CHAT_POSITION_KEY}${noteId}`) === 'docked'
+  } catch {
+    return false
+  }
+}
+
+function storeChatDocked(noteId: string, docked: boolean): void {
+  try {
+    window.localStorage.setItem(
+      `${NOTE_CHAT_POSITION_KEY}${noteId}`,
+      docked ? 'docked' : 'floating'
+    )
+  } catch {
+    // A blocked localStorage should not make the chat layout unusable.
+  }
+}
 
 const REVEAL_LABEL =
   window.electron.process.platform === 'darwin' ? 'Reveal in Finder' : 'Show in folder'
@@ -314,7 +334,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
   const [transcriptClosing, setTranscriptClosing] = useState(false)
   const [meetingNotesActive, setMeetingNotesActive] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
-  const [chatDocked, setChatDocked] = useState(false)
+  const [chatDocked, setChatDocked] = useState(() => storedChatDocked(noteId))
   const [chatDraft, setChatDraft] = useState('')
   const [templateCreation, setTemplateCreation] = useState<'creating' | 'created' | null>(null)
   const [outlineVisible, setOutlineVisible] = useState(true)
@@ -430,7 +450,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
     setRecording(null)
     setTranscript(null)
     setChatOpen(false)
-    setChatDocked(false)
+    setChatDocked(storedChatDocked(noteId))
     setChatDraft('')
     setAiPopup(null)
     setDelegatePopup(null)
@@ -479,7 +499,6 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
 
   const closeChat = (): void => {
     setChatOpen(false)
-    setChatDocked(false)
   }
   const overflowBtnRef = useRef<HTMLButtonElement>(null)
   // The overflow menu is built at click time from these, not from the render
@@ -1485,7 +1504,7 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
         'note-editor-shell',
         fullWidth ? 'full-width' : '',
         isSwitchingNote ? 'switching-note' : '',
-        chatDocked ? 'chat-docked' : ''
+        chatDocked && chatOpen ? 'chat-docked' : ''
       ]
         .filter(Boolean)
         .join(' ')}
@@ -1885,7 +1904,11 @@ export default function NoteEditor({ noteId, onSaved, onEditorReady, paneControl
             onToggleDock={() => {
               setTranscriptOpen(false)
               setChatOpen(true)
-              setChatDocked((current) => !current)
+              setChatDocked((current) => {
+                const next = !current
+                storeChatDocked(note.id, next)
+                return next
+              })
             }}
             activeTab={meetingNotesActive ? 'Meeting notes' : 'Note'}
             onError={setAiError}

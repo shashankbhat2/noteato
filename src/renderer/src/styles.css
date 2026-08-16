@@ -499,9 +499,9 @@ body {
   gap: 4px;
   justify-content: center;
   padding: 0 9px;
-  border: 1px solid color-mix(in srgb, var(--subtleBorder) 78%, transparent);
+  border: 1px solid var(--subtleBorder);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  background: var(--surface);
   color: var(--secondaryText);
   font: inherit;
   font-size: 10px;
@@ -5487,15 +5487,16 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-drawer {
+  --note-chat-floating-inset: 6px;
   position: absolute;
   z-index: 27;
-  bottom: 0;
+  bottom: 14px;
   left: 50%;
   width: var(--note-chat-note-w);
   height: 48px;
   overflow: hidden;
   border: 1px solid transparent;
-  border-radius: 24px 24px 0 0;
+  border-radius: 24px;
   background: transparent;
   box-shadow: none;
   transform: translateX(-50%);
@@ -5510,11 +5511,11 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-drawer.open {
-  bottom: 0;
+  bottom: 14px;
   width: var(--note-chat-panel-w);
-  height: min(520px, calc(100% - 76px));
+  height: min(520px, calc(100% - 90px));
   border-color: color-mix(in srgb, var(--borderColor) 62%, transparent);
-  border-radius: 20px 20px 0 0;
+  border-radius: 20px;
   background: color-mix(in srgb, var(--editorBackground) 76%, transparent);
   box-shadow: none;
   -webkit-backdrop-filter: blur(28px) saturate(135%);
@@ -5524,17 +5525,21 @@ body.resizing-panes .editor-pane {
 /* On first focus, the composer becomes a compact chat panel sized only for
    its actions and input. Typing promotes this same surface to .open. */
 .note-chat-drawer:not(.open):has(.note-chat-quick-actions) {
-  height: 92px;
+  height: 104px;
   border-color: color-mix(in srgb, var(--borderColor) 62%, transparent);
-  border-radius: 18px 18px 0 0;
+  border-radius: 18px;
   background: var(--editorBackground);
   box-shadow: none;
+}
+
+.note-chat-drawer:not(.open):has(.note-chat-quick-actions) .note-chat-composer {
+  bottom: var(--note-chat-floating-inset);
+  width: calc(100% - (2 * var(--note-chat-floating-inset)));
 }
 
 /* Docking turns the floating conversation into a stable sibling of the note.
    The editor gives up exactly the panel's width, so neither surface overlays
    the other and the relationship reads like the app's regular pane split. */
-.note-chat-drawer.docked,
 .note-chat-drawer.docked.open {
   top: 0;
   right: 0;
@@ -5550,6 +5555,25 @@ body.resizing-panes .editor-pane {
   transform: none;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
+}
+
+/* Closing a docked chat keeps its place at the right edge as a compact title.
+   The note regains the panel width; this control is the direct route back to
+   the same docked conversation. */
+.note-chat-drawer.docked:not(.open) {
+  right: 12px;
+  bottom: 12px;
+  left: auto;
+  width: min(var(--note-chat-dock-w), calc(100% - 24px));
+  height: 44px;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--borderColor) 62%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--elevatedSurface) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  transform: none;
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
 }
 
 :root[data-theme='dark'] .note-chat-drawer.docked.open {
@@ -5629,7 +5653,11 @@ body.resizing-panes .editor-pane {
   padding: 12px 22px 10px;
 }
 
-.note-chat-drawer .note-chat-close {
+.note-chat-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
 }
 
@@ -5637,6 +5665,55 @@ body.resizing-panes .editor-pane {
 .note-chat-drawer:not(.open) .note-chat-scroll {
   visibility: hidden;
   pointer-events: none;
+}
+
+.note-chat-collapsed-title {
+  display: none;
+}
+
+.note-chat-drawer.docked:not(.open) .note-chat-collapsed-title {
+  position: absolute;
+  z-index: 12;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 16px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--primaryText);
+  cursor: pointer;
+}
+
+.note-chat-collapsed-title span {
+  flex: 0 0 auto;
+  color: var(--mutedText);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.note-chat-collapsed-title strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 580;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-chat-collapsed-title:hover {
+  background: var(--hoverSurface);
+}
+
+.note-chat-collapsed-title:focus-visible {
+  outline: 2px solid var(--focusRing);
+  outline-offset: -2px;
 }
 
 /* The collapsed composer can reveal suggestions above itself without turning
@@ -5662,6 +5739,16 @@ body.resizing-panes .editor-pane {
 .note-chat-close:hover {
   color: var(--primaryText);
   background: var(--hoverSurface);
+}
+
+.note-chat-close:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.note-chat-close:disabled:hover {
+  color: var(--mutedText);
+  background: transparent;
 }
 
 .note-chat-close:focus-visible {
@@ -6057,8 +6144,8 @@ body.resizing-panes .editor-pane {
 }
 
 .note-chat-drawer.open .note-chat-composer {
-  bottom: 0;
-  width: calc(100% - 12px);
+  bottom: var(--note-chat-floating-inset);
+  width: calc(100% - (2 * var(--note-chat-floating-inset)));
 }
 
 .note-chat-drawer.docked .note-chat-composer,
@@ -6079,7 +6166,7 @@ body.resizing-panes .editor-pane {
   gap: 6px;
   padding: 7px 8px 7px 16px;
   border-color: color-mix(in srgb, var(--borderColor) 66%, transparent);
-  border-radius: 24px 24px 0 0;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--elevatedSurface) 82%, transparent);
   box-shadow: none;
   -webkit-backdrop-filter: blur(14px);
@@ -6088,6 +6175,10 @@ body.resizing-panes .editor-pane {
 
 .note-chat-drawer.docked .note-chat-composer-field {
   border-radius: 999px;
+}
+
+.note-chat-drawer.docked:not(.open) .note-chat-composer {
+  display: none;
 }
 
 .note-chat-drawer .note-chat-composer textarea {
@@ -6147,7 +6238,7 @@ body.resizing-panes .editor-pane {
 
   .note-chat-drawer.open:not(.docked) {
     width: calc(100% - 36px);
-    height: min(520px, calc(100% - 58px));
+    height: min(520px, calc(100% - 72px));
   }
 
   .note-chat-drawer .note-chat-header {

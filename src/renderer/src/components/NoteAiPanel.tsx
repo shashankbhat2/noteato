@@ -11,12 +11,14 @@ import {
   IconMail as Mail,
   IconMicrophone as Microphone,
   IconSquare as Square,
+  IconTrash as Trash,
   IconX as X
 } from '@tabler/icons-react'
 import type { Settings } from '../../../shared/types'
 import { meetingMarkdown } from '../../../shared/meetingTranscript'
 import {
   noteAssistantPrompt,
+  noteSearchQueries,
   type NoteAssistantTab
 } from '../../../shared/noteAssistantContext'
 import { imagesForMarkdown, restoreImageWidths } from '../../../shared/imagePersistence'
@@ -209,6 +211,35 @@ export default function NoteAiPanel({
   const noteMarkdown = (): string =>
     editor.blocksToMarkdownLossy(imagesForMarkdown(editor.document))
 
+  const searchRelatedNotes = async (question: string): Promise<string> => {
+    const queries = noteSearchQueries(question)
+    if (queries.length === 0) return ''
+
+    const resultSets = await Promise.all(
+      queries.map((query) => window.api.notes.search(query).catch(() => []))
+    )
+    const ranked = new Map<string, { score: number }>()
+    resultSets.forEach((results, queryIndex) => {
+      results.slice(0, 6).forEach((result, resultIndex) => {
+        if (result.id === subject.id) return
+        const score = (queries.length - queryIndex) * 10 + (6 - resultIndex)
+        ranked.set(result.id, { score: (ranked.get(result.id)?.score ?? 0) + score })
+      })
+    })
+
+    const ids = [...ranked.entries()]
+      .sort((left, right) => right[1].score - left[1].score)
+      .slice(0, 4)
+      .map(([id]) => id)
+    const notes = await Promise.all(
+      ids.map((id) => window.api.notes.read(id).catch(() => null))
+    )
+    return notes
+      .filter((note) => note !== null)
+      .map((note) => `### ${note.title || 'Untitled'}\n\n${note.body.slice(0, 5000)}`)
+      .join('\n\n')
+  }
+
   const stream = async (
     system: string,
     prompt: string,
@@ -370,6 +401,12 @@ export default function NoteAiPanel({
         kind: 'activity',
         text: 'Reading the note and conversation context',
         status: 'active'
+      },
+      {
+        id: 'search',
+        kind: 'activity',
+        text: 'Searching related notes',
+        status: 'active'
       }
     ]
     const showAssistant = (): void => {
@@ -414,9 +451,10 @@ export default function NoteAiPanel({
         throw new Error('Could not read the current note for the assistant.')
       }
 
-      const [meetingTranscript, meetingNotesMarkdown] = await Promise.all([
+      const [meetingTranscript, meetingNotesMarkdown, relatedNotesMarkdown] = await Promise.all([
         window.api.meeting.getTranscript(subject.id).catch(() => null),
-        window.api.meeting.getNotesMarkdown(subject.id).catch(() => null)
+        window.api.meeting.getNotesMarkdown(subject.id).catch(() => null),
+        searchRelatedNotes(question)
       ])
       const transcriptMarkdown = meetingTranscript
         ? meetingMarkdown(meetingTranscript)
@@ -429,6 +467,10 @@ export default function NoteAiPanel({
       onDraftChange('')
 
       updateEvent('context', { status: 'done' })
+      updateEvent('search', {
+        status: 'done',
+        text: relatedNotesMarkdown ? 'Found related notes' : 'No related notes found'
+      })
       appendEvent({
         id: 'thinking',
         kind: 'activity',
@@ -444,6 +486,7 @@ export default function NoteAiPanel({
         noteMarkdown: sourceMarkdown,
         transcriptMarkdown,
         meetingNotesMarkdown: preparedMeetingNotes,
+        relatedNotesMarkdown,
         conversation: transcript
       })
 
@@ -622,6 +665,17 @@ export default function NoteAiPanel({
     window.dispatchEvent(new Event('noteato:ai-settings-changed'))
   }
 
+  const clearChat = (): void => {
+    if (pending) return
+    setThreads((previous) => {
+      const next = { ...previous }
+      delete next[subject.id]
+      return next
+    })
+    dictatedChunksRef.current = []
+    onDraftChange('')
+  }
+
   useEffect(() => {
     const handle = (event: Event): void => {
       const detail = (event as CustomEvent<{ noteId?: string; actionId?: string }>).detail
@@ -664,16 +718,42 @@ export default function NoteAiPanel({
           )}
           <strong>{subject.title || 'Untitled'}</strong>
         </div>
+        <div className="note-chat-header-actions">
+          <button
+            type="button"
+            className="note-chat-close"
+            aria-label="Clear note chat"
+            title="Clear chat"
+            disabled={pending || (thread.length === 0 && draft.trim().length === 0)}
+            onClick={clearChat}
+          >
+            <Trash size={14} />
+          </button>
+          <button
+            type="button"
+            className="note-chat-close"
+            aria-label="Close chat"
+            title="Close chat"
+            onClick={onClose}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      </header>
+
+      {docked && !active && (
         <button
           type="button"
-          className="note-chat-close"
-          aria-label="Close chat"
-          title="Close chat"
-          onClick={onClose}
+          className="note-chat-collapsed-title"
+          aria-label={`Reopen chat about ${subject.title || 'Untitled'}`}
+          onClick={onOpen}
+          title="Reopen chat on the right"
         >
-          <X size={15} />
+          <span>Chat</span>
+          <strong>{subject.title || 'Untitled'}</strong>
+          <LayoutSidebarRight size={15} aria-hidden="true" />
         </button>
-      </header>
+      )}
 
       <div className="note-chat-scroll" ref={scrollRef}>
         {!aiSettings ? (
