@@ -2,6 +2,13 @@ All notable changes to Noteato are documented here. This project follows [Keep a
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-08-17
+
+### Fixed
+
+- Jumping to a heading from the note outline no longer leaves the floating
+  chat panel stranded in the middle of the note.
+
 ## [1.5.1] - 2026-08-16
 
 ### Added
