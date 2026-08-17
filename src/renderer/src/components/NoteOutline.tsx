@@ -87,10 +87,23 @@ export default function NoteOutline({ editor }: { editor: NoteatoEditor }) {
   }, [headings])
 
   const jumpTo = (id: string): void => {
-    ref.current
-      ?.closest('.note-editor-shell')
-      ?.querySelector<HTMLElement>(`[data-node-type="blockOuter"][data-id="${CSS.escape(id)}"]`)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const surface = ref.current?.closest<HTMLElement>('.note-writing-surface')
+    const heading = surface?.querySelector<HTMLElement>(
+      `[data-node-type="blockOuter"][data-id="${CSS.escape(id)}"]`
+    )
+
+    if (surface && heading) {
+      // scrollIntoView also scrolls overflow:hidden ancestors. That can move
+      // the editor shell's contents while its absolutely positioned chat
+      // stays anchored to the shell, leaving the chat stranded mid-pane.
+      // Move only the surface that actually owns the note's scroll instead.
+      const surfaceRect = surface.getBoundingClientRect()
+      const headingRect = heading.getBoundingClientRect()
+      surface.scrollTo({
+        top: surface.scrollTop + headingRect.top - surfaceRect.top - 24,
+        behavior: 'smooth'
+      })
+    }
     setActiveId(id)
   }
 
@@ -105,6 +118,7 @@ export default function NoteOutline({ editor }: { editor: NoteatoEditor }) {
         ) : (
           headings.map((heading) => (
             <button
+              type="button"
               key={heading.id}
               className={
                 heading.id === activeId ? 'note-outline-item active' : 'note-outline-item'
